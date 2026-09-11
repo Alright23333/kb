@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KB</title>
+<!-- CodeMirror 6 -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/dracula.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/markdown/markdown.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/selection/active-line.min.js"></script>
+<!-- markdown-it -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.2/markdown-it.min.js"></script>
+<style>
+:root {
+  --bg: #1a1a1a;
+  --fg: #e8e8e8;
+  --muted: #888;
+  --accent: #4a9eff;
+  --accent-dim: #2d5a8e;
+  --border: #333;
+  --card: #222;
+  --hover: #2a2a2a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+/* Sidebar */
+#sidebar {
+  width: 260px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+}
+#sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 16px;
+}
+#sidebar-header a { color: var(--fg); text-decoration: none; }
+#nav { padding: 8px; }
+.nav-item {
+  display: block;
+  padding: 8px 12px;
+  color: var(--fg);
+  text-decoration: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.nav-item:hover { background: var(--hover); }
+.nav-item.active { background: var(--accent-dim); color: var(--accent); }
+#tags-section {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+#tags-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 12px 4px;
+}
+.tag-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tag-item:hover { background: var(--hover); }
+.tag-item .count {
+  color: var(--muted);
+  font-size: 12px;
+}
+/* Main */
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#header input {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+#header input:focus { outline: none; border-color: var(--accent); }
+#search-btn, #new-btn {
+  background: var(--accent-dim);
+  border: none;
+  color: var(--accent);
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#search-btn:hover, #new-btn:hover { background: var(--accent); color: var(--bg); }
+/* Content */
+#content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+/* Editor - Split View */
+#editor {
+  display: none;
+  height: 100%;
+}
+#editor-layout {
+  display: flex;
+  height: 100%;
+  gap: 1px;
+  background: var(--border);
+}
+#editor-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+#editor-header {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+#editor input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+#page-slug { width: 180px; }
+#page-title { flex: 1; font-size: 16px; font-weight: 600; }
+.CodeMirror {
+  flex: 1;
+  height: auto;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  background: var(--bg);
+}
+#preview-pane {
+  flex: 1;
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+#editor-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+#editor-footer input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 300px;
+}
+#save-btn {
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-left: auto;
+}
+#save-btn:hover { background: #3a8eef; }
+/* Slash menu */
+#slash-menu {
+  position: absolute;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 1000;
+  display: none;
+  min-width: 200px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.slash-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.slash-item:hover, .slash-item.active { background: var(--accent-dim); }
+.slash-item .key {
+  color: var(--muted);
+  font-size: 11px;
+}
+/* Page view */
+#page-view { max-width: 720px; margin: 0 auto; }
+#page-view h1 { margin-bottom: 16px; font-size: 28px; }
+#page-view .meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 20px;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+#page-view .meta a { color: var(--accent); text-decoration: none; }
+#page-view .meta a:hover { text-decoration: underline; }
+#page-content {
+  line-height: 1.8;
+  font-size: 15px;
+}
+#page-content h1, #page-content h2, #page-content h3 { margin: 24px 0 12px; }
+#page-content h1 { font-size: 24px; }
+#page-content h2 { font-size: 20px; }
+#page-content h3 { font-size: 17px; }
+#page-content p { margin: 12px 0; }
+#page-content ul, #page-content ol { margin: 12px 0; padding-left: 24px; }
+#page-content li { margin: 4px 0; }
+#page-content code {
+  background: var(--card);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+#page-content pre {
+  background: var(--card);
+  padding: 12px 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+#page-content pre code { background: none; padding: 0; }
+#page-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 16px;
+  margin: 16px 0;
+  color: var(--muted);
+}
+#page-content a { color: var(--accent); }
+#page-content a.unresolved { color: var(--muted); text-decoration-style: dashed; }
+#page-content hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+#page-content table {
+  border-collapse: collapse;
+  margin: 16px 0;
+  width: 100%;
+}
+#page-content th, #page-content td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+#page-content th { background: var(--card); }
+#page-content img { max-width: 100%; border-radius: 4px; }
+/* Tags display */
+.tags-display {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.tag-chip {
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tag-chip:hover { background: var(--accent); color: var(--bg); }
+/* Backlinks */
+#backlinks {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+#backlinks h3 { font-size: 14px; color: var(--muted); margin-bottom: 12px; }
+.backlink-item {
+  padding: 8px 12px;
+  background: var(--card);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.backlink-item:hover { background: var(--hover); }
+.backlink-item .title { font-weight: 500; font-size: 14px; }
+.backlink-item .slug { color: var(--muted); font-size: 12px; }
+/* Page list */
+.page-list-item {
+  padding: 12px 16px;
+  background: var(--card);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.page-list-item:hover { background: var(--hover); }
+.page-list-item .title { font-weight: 500; font-size: 15px; }
+.page-list-item .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+/* Journal */
+.journal-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.journal-nav input[type="date"] {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+/* Edit button */
+#edit-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* Toast */
+#toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--card);
+  border: 1px solid var(--accent);
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  display: none;
+  z-index: 1000;
+}
+#toast.error { border-color: #e74c3c; }
+/* Graph */
+.graph-container {
+  width: 100%;
+  height: 500px;
+  background: var(--card);
+  border-radius: 8px;
+  overflow: hidden;
+}
+/* Reference autocomplete */
+#ref-autocomplete {
+  position: absolute;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 1000;
+  display: none;
+  min-width: 250px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.ref-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.ref-item:hover, .ref-item.active { background: var(--accent-dim); }
+.ref-item .ref-title { font-weight: 500; }
+.ref-item .ref-slug { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<!-- Sidebar -->
+<div id="sidebar">
+  <div id="sidebar-header"><a href="/">📚 Knowledge Base</a></div>
+  <div id="nav">
+    <a class="nav-item" onclick="navigate('home')">🏠 首页</a>
+    <a class="nav-item" onclick="navigate('journal')">📓 日记</a>
+    <a class="nav-item" onclick="navigate('graph')">🕸️ 图谱</a>
+  </div>
+  <div id="tags-section">
+    <h3>Tags</h3>
+    <div id="tags-list"></div>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <div id="header">
+    <input type="text" id="search-input" placeholder="搜索... (或输入 [[slug]] 创建新页面)" onkeydown="if(event.key==='Enter')doSearch()">
+    <button id="search-btn" onclick="doSearch()">搜索</button>
+    <button id="new-btn" onclick="newPage()">+ 新页面</button>
+  </div>
+
+  <div id="content">
+    <div id="home-view"></div>
+
+    <div id="page-view" style="display:none">
+      <div id="page-header">
+        <h1 id="page-title-display"></h1>
+        <div class="meta">
+          <span id="page-date"></span>
+          <a href="#" id="edit-btn-link">编辑</a>
+        </div>
+        <div class="tags-display" id="page-tags"></div>
+      </div>
+      <div id="page-content"></div>
+      <div id="backlinks"></div>
+    </div>
+
+    <div id="editor">
+      <div id="editor-layout">
+        <div id="editor-pane">
+          <div id="editor-header">
+            <input type="text" id="page-slug" placeholder="slug">
+            <input type="text" id="page-title" placeholder="标题">
+          </div>
+          <textarea id="cm-editor"></textarea>
+          <div id="editor-footer">
+            <span>标签:</span>
+            <input type="text" id="page-tags-input" placeholder="tag1, tag2, tag3">
+            <button id="save-btn" onclick="savePage()">保存 (Ctrl+S)</button>
+          </div>
+        </div>
+        <div id="preview-pane"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slash menu -->
+<div id="slash-menu"></div>
+<!-- Reference autocomplete -->
+<div id="ref-autocomplete"></div>
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+const API = '/api';
+let currentSlug = null;
+let cm = null;
+let md = window.markdownit({
+  html: false,
+  linkify: true,
+  typographer: true,
+  breaks: true,
+});
+let allPages = [];  // cache for reference autocomplete
+
+// ── markdown-it: add wiki-link and tag rendering ────────────────
+
+const defaultRender = md.renderer.rules.link_open || function(tokens, idx, options, env, self) {
+  return self.renderToken(tokens, idx, options);
+};
+
+md.renderer.rules.link_open = function(tokens, idx, options, env, self) {
+  const href = tokens[idx].attrGet('href') || '';
+  if (href.startsWith('wiki:')) {
+    const slug = href.slice(5);
+    tokens[idx].attrSet('href', '#');
+    tokens[idx].attrSet('onclick', `navigate('page','${slug}');return false;`);
+    tokens[idx].attrSet('class', 'wikilink');
+  }
+  return defaultRender(tokens, idx, options, self);
+};
+
+// Custom wiki-link inline rule
+md.inline.ruler.before('link', 'wikilink', function(state, silent) {
+  const start = state.pos;
+  if (state.src.slice(start, start + 2) !== '[[') return false;
+
+  const end = state.src.indexOf(']]', start + 2);
+  if (end === -1) return false;
+
+  if (!silent) {
+    const token = state.push('link_open', 'a', 1);
+    token.attrSet('href', 'wiki:' + state.src.slice(start + 2, end));
+    token.attrSet('onclick', `navigate('page','${state.src.slice(start + 2, end)}');return false;`);
+    token.attrSet('class', 'wikilink');
+
+    const textToken = state.push('text', '', 0);
+    textToken.content = state.src.slice(start + 2, end);
+
+    state.push('link_close', 'a', -1);
+  }
+  state.pos = end + 2;
+  return true;
+});
+
+// ── Navigation ─────────────────────────────────────────────────
+
+function navigate(target, ...args) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (target === 'home') {
+    showHome();
+    document.querySelectorAll('.nav-item')[0].classList.add('active');
+  } else if (target === 'journal') {
+    showJournal(args[0]);
+    document.querySelectorAll('.nav-item')[1].classList.add('active');
+  } else if (target === 'graph') {
+    showGraph();
+    document.querySelectorAll('.nav-item')[2].classList.add('active');
+  } else if (target === 'page') {
+    loadPage(args[0]);
+  } else if (target === 'tag') {
+    showTagPages(args[0]);
+  }
+}
+
+// ── Home ───────────────────────────────────────────────────────
+
+async function showHome() {
+  hideAll();
+  document.getElementById('home-view').style.display = 'block';
+  const resp = await fetch(`${API}/pages?limit=50`);
+  const pages = await resp.json();
+  const tagsResp = await fetch(`${API}/tags`);
+  const tags = await tagsResp.json();
+
+  let html = '<h2 style="margin-bottom:16px">最近页面</h2>';
+  if (pages.length === 0) {
+    html += '<p style="color:var(--muted)">还没有页面。点击"+ 新页面"创建第一个。</p>';
+  } else {
+    for (const p of pages) {
+      html += `<div class="page-list-item" onclick="navigate('page','${p.slug}')">
+        <div class="title">${escapeHtml(p.title)}</div>
+        <div class="meta">${p.slug} · ${formatDate(p.updated_at)}</div>
+      </div>`;
+    }
+  }
+  document.getElementById('home-view').innerHTML = html;
+  loadTags(tags);
+}
+
+async function loadTags(tags) {
+  if (!tags) {
+    const resp = await fetch(`${API}/tags`);
+    tags = await resp.json();
+  }
+  let html = '';
+  for (const t of tags) {
+    html += `<div class="tag-item" onclick="navigate('tag','${t.name}')">
+      <span>#${t.name}</span><span class="count">${t.count}</span>
+    </div>`;
+  }
+  document.getElementById('tags-list').innerHTML = html;
+}
+
+// ── Page loading ──────────────────────────────────────────────
+
+async function loadPage(slug) {
+  hideAll();
+  currentSlug = slug;
+  const resp = await fetch(`${API}/pages/${slug}`);
+  if (!resp.ok) {
+    showToast('页面不存在: ' + slug, 'error');
+    navigate('home');
+    return;
+  }
+  const page = await resp.json();
+
+  document.getElementById('page-view').style.display = 'block';
+  document.getElementById('page-title-display').textContent = page.title;
+  document.getElementById('page-date').textContent = `更新: ${formatDate(page.updated_at)}`;
+  document.getElementById('edit-btn-link').onclick = () => editPage(page);
+
+  const tagsHtml = page.tags.map(t => `<span class="tag-chip" onclick="navigate('tag','${t}')">#${t}</span>`).join('');
+  document.getElementById('page-tags').innerHTML = tagsHtml;
+
+  document.getElementById('page-content').innerHTML = renderContent(page.content);
+
+  let backlinksHtml = '';
+  if (page.backlinks.length > 0) {
+    backlinksHtml = '<h3>🔗 反向链接</h3>';
+    for (const b of page.backlinks) {
+      backlinksHtml += `<div class="backlink-item" onclick="navigate('page','${b.slug}')">
+        <div class="title">${escapeHtml(b.title)}</div>
+        <div class="slug">${b.slug}</div>
+      </div>`;
+    }
+  }
+  document.getElementById('backlinks').innerHTML = backlinksHtml;
+}
+
+// ── Editor ────────────────────────────────────────────────────
+
+function initCodeMirror() {
+  cm = CodeMirror.fromTextArea(document.getElementById('cm-editor'), {
+    mode: 'markdown',
+    theme: 'dracula',
+    lineNumbers: true,
+    lineWrapping: true,
+    matchBrackets: true,
+    autoCloseBrackets: true,
+    styleActiveLine: true,
+    extraKeys: {
+      'Ctrl-S': () => savePage(),
+      'Cmd-S': () => savePage(),
+      'Enter': (cm) => {
+        // Check for slash command
+        const cursor = cm.getCursor();
+        const line = cm.getLine(cursor.line);
+        const beforeCursor = line.slice(0, cursor.ch);
+        const slashMatch = beforeCursor.match(/\/(\w*)$/);
+        if (slashMatch && cursor.ch - slashMatch[0].length === line.indexOf(slashMatch[0])) {
+          showSlashMenu(slashMatch[1], cursor);
+          return;
+        }
+        // Check for [[ autocomplete
+        const refMatch = beforeCursor.match(/\[\[([^\]]*)$/);
+        if (refMatch) {
+          showRefAutocomplete(refMatch[1], cursor);
+          return;
+        }
+        cm.replaceRange('\n', cursor);
+      },
+      'Esc': () => {
+        hideSlashMenu();
+        hideRefAutocomplete();
+      },
+    },
+  });
+
+  cm.on('change', () => {
+    updatePreview();
+    // Check for [[ trigger
+    const cursor = cm.getCursor();
+    const line = cm.getLine(cursor.line);
+    const beforeCursor = line.slice(0, cursor.ch);
+    const refMatch = beforeCursor.match(/\[\[([^\]]*)$/);
+    if (refMatch) {
+      showRefAutocomplete(refMatch[1], cursor);
+    } else {
+      hideRefAutocomplete();
+    }
+  });
+
+  cm.on('cursorActivity', () => {
+    hideSlashMenu();
+  });
+}
+
+function updatePreview() {
+  if (!cm) return;
+  const content = cm.getValue();
+  document.getElementById('preview-pane').innerHTML = renderContent(content);
+}
+
+function newPage() {
+  hideAll();
+  currentSlug = null;
+  document.getElementById('editor').style.display = 'block';
+  document.getElementById('page-slug').value = '';
+  document.getElementById('page-title').value = '';
+  document.getElementById('page-tags-input').value = '';
+
+  if (!cm) {
+    initCodeMirror();
+  }
+  cm.setValue('');
+  cm.focus();
+  updatePreview();
+}
+
+function editPage(page) {
+  hideAll();
+  currentSlug = page.slug;
+  document.getElementById('editor').style.display = 'block';
+  document.getElementById('page-slug').value = page.slug;
+  document.getElementById('page-title').value = page.title;
+  document.getElementById('page-tags-input').value = page.tags.join(', ');
+
+  if (!cm) {
+    initCodeMirror();
+  }
+  cm.setValue(page.content);
+  cm.focus();
+  updatePreview();
+}
+
+async function savePage() {
+  const slug = document.getElementById('page-slug').value.trim();
+  const title = document.getElementById('page-title').value.trim();
+  const content = cm.getValue();
+  const tagsStr = document.getElementById('page-tags-input').value.trim();
+
+  if (!slug || !title) {
+    showToast('Slug 和标题不能为空', 'error');
+    return;
+  }
+
+  const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+  const data = { slug, title, content, tags };
+
+  let resp;
+  if (currentSlug && currentSlug === slug) {
+    resp = await fetch(`${API}/pages/${slug}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } else if (currentSlug) {
+    resp = await fetch(`${API}/pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (resp.ok) {
+      await fetch(`${API}/pages/${currentSlug}`, { method: 'DELETE' });
+    }
+  } else {
+    resp = await fetch(`${API}/pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  if (resp.ok) {
+    showToast('保存成功');
+    navigate('page', slug);
+  } else {
+    const err = await resp.json();
+    showToast(err.detail || '保存失败', 'error');
+  }
+}
+
+// ── Slash menu ────────────────────────────────────────────────
+
+const slashCommands = [
+  { name: '一级标题', key: 'h1', action: (cm) => insertPrefix(cm, '# ') },
+  { name: '二级标题', key: 'h2', action: (cm) => insertPrefix(cm, '## ') },
+  { name: '三级标题', key: 'h3', action: (cm) => insertPrefix(cm, '### ') },
+  { name: '无序列表', key: 'ul', action: (cm) => insertPrefix(cm, '- ') },
+  { name: '有序列表', key: 'ol', action: (cm) => insertPrefix(cm, '1. ') },
+  { name: '待办 (TODO)', key: 'todo', action: (cm) => insertPrefix(cm, '- [ ] ') },
+  { name: '待办 (Done)', key: 'done', action: (cm) => insertPrefix(cm, '- [x] ') },
+  { name: '引用', key: 'quote', action: (cm) => insertPrefix(cm, '> ') },
+  { name: '代码块', key: 'code', action: (cm) => insertBlock(cm, '```\n', '\n```') },
+  { name: '行内代码', key: 'inline', action: (cm) => insertBlock(cm, '`', '`') },
+  { name: '粗体', key: 'bold', action: (cm) => insertBlock(cm, '**', '**') },
+  { name: '斜体', key: 'italic', action: (cm) => insertBlock(cm, '*', '*') },
+  { name: '链接', key: 'link', action: (cm) => insertBlock(cm, '[', '](url)') },
+  { name: '分隔线', key: 'hr', action: (cm) => insertPrefix(cm, '\n---\n') },
+];
+
+function insertPrefix(cm, prefix) {
+  const cursor = cm.getCursor();
+  const line = cm.getLine(cursor.line);
+  // Remove the slash command text
+  const slashStart = line.lastIndexOf('/');
+  cm.replaceRange('', { line: cursor.line, ch: slashStart }, cursor);
+  // Insert prefix at beginning of line if not already there
+  if (!line.startsWith(prefix.trim())) {
+    cm.replaceRange(prefix, { line: cursor.line, ch: 0 });
+  }
+  cm.focus();
+}
+
+function insertBlock(cm, before, after) {
+  const cursor = cm.getCursor();
+  const line = cm.getLine(cursor.line);
+  const slashStart = line.lastIndexOf('/');
+  cm.replaceRange('', { line: cursor.line, ch: slashStart }, cursor);
+  cm.replaceRange(before + after, cursor);
+  cm.setCursor({ line: cursor.line, ch: cursor.ch + before.length });
+  cm.focus();
+}
+
+function showSlashMenu(query, cursor) {
+  const menu = document.getElementById('slash-menu');
+  const filtered = slashCommands.filter(c => c.name.includes(query) || c.key.includes(query));
+
+  if (filtered.length === 0) {
+    hideSlashMenu();
+    return;
+  }
+
+  let html = '';
+  filtered.forEach((c, i) => {
+    html += `<div class="slash-item${i === 0 ? ' active' : ''}" onclick="applySlashCommand('${c.key}')">
+      <span>${c.name}</span><span class="key">${c.key}</span>
+    </div>`;
+  });
+  menu.innerHTML = html;
+  menu.style.display = 'block';
+
+  // Position menu below cursor
+  const coords = cm.cursorCoords(cursor, 'local');
+  menu.style.left = (coords.left + 20) + 'px';
+  menu.style.top = (coords.bottom + 20) + 'px';
+}
+
+function hideSlashMenu() {
+  document.getElementById('slash-menu').style.display = 'none';
+}
+
+function applySlashCommand(key) {
+  const cmd = slashCommands.find(c => c.key === key);
+  if (cmd) cmd.action(cm);
+  hideSlashMenu();
+  updatePreview();
+}
+
+// ── Reference autocomplete ─────────────────────────────────────
+
+async function showRefAutocomplete(query, cursor) {
+  if (allPages.length === 0) {
+    const resp = await fetch(`${API}/pages?limit=200`);
+    allPages = await resp.json();
+  }
+
+  const filtered = allPages.filter(p =>
+    p.slug.includes(query) || p.title.toLowerCase().includes(query.toLowerCase())
+  ).slice(0, 8);
+
+  const menu = document.getElementById('ref-autocomplete');
+  if (filtered.length === 0) {
+    hideRefAutocomplete();
+    return;
+  }
+
+  let html = '';
+  filtered.forEach((p, i) => {
+    html += `<div class="ref-item${i === 0 ? ' active' : ''}" onclick="insertRef('${p.slug}')">
+      <div class="ref-title">${escapeHtml(p.title)}</div>
+      <div class="ref-slug">${p.slug}</div>
+    </div>`;
+  });
+  menu.innerHTML = html;
+  menu.style.display = 'block';
+
+  const coords = cm.cursorCoords(cursor, 'local');
+  menu.style.left = (coords.left + 20) + 'px';
+  menu.style.top = (coords.bottom + 20) + 'px';
+}
+
+function hideRefAutocomplete() {
+  document.getElementById('ref-autocomplete').style.display = 'none';
+}
+
+function insertRef(slug) {
+  const cursor = cm.getCursor();
+  const line = cm.getLine(cursor.line);
+  const start = line.lastIndexOf('[[');
+  cm.replaceRange(slug + ']]', { line: cursor.line, ch: start }, cursor);
+  cm.setCursor({ line: cursor.line, ch: start + slug.length + 2 });
+  cm.focus();
+  hideRefAutocomplete();
+  updatePreview();
+}
+
+// ── Journal ────────────────────────────────────────────────────
+
+async function showJournal(date) {
+  hideAll();
+  document.getElementById('home-view').style.display = 'block';
+
+  if (!date) {
+    const today = new Date().toISOString().split('T')[0];
+    date = today;
+  }
+
+  const resp = await fetch(`${API}/journal/${date}`);
+  let content = '';
+  if (resp.ok) {
+    const data = await resp.json();
+    content = data.content;
+  }
+
+  let html = `<h2 style="margin-bottom:16px">📓 日记</h2>
+    <div class="journal-nav" style="margin-bottom:16px">
+      <input type="date" id="journal-date" value="${date}" onchange="showJournal(this.value)">
+    </div>
+    <textarea id="journal-content" style="width:100%;height:60vh;background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:16px;font-family:monospace;font-size:14px;border-radius:6px;resize:none" placeholder="今天的日记...">${escapeHtml(content)}</textarea>
+    <div style="margin-top:12px"><button id="save-btn" onclick="saveJournal()">保存日记</button></div>`;
+
+  document.getElementById('home-view').innerHTML = html;
+}
+
+async function saveJournal() {
+  const date = document.getElementById('journal-date').value;
+  const content = document.getElementById('journal-content').value;
+
+  const resp = await fetch(`${API}/journal/${date}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+
+  if (resp.ok) {
+    showToast('日记已保存');
+  } else {
+    showToast('保存失败', 'error');
+  }
+}
+
+// ── Tag pages ──────────────────────────────────────────────────
+
+async function showTagPages(tag) {
+  hideAll();
+  document.getElementById('home-view').style.display = 'block';
+  const resp = await fetch(`${API}/tags/${encodeURIComponent(tag)}/pages`);
+  const pages = await resp.json();
+
+  let html = `<h2 style="margin-bottom:16px">#${tag}</h2>`;
+  if (pages.length === 0) {
+    html += '<p style="color:var(--muted)">没有带这个标签的页面</p>';
+  } else {
+    for (const p of pages) {
+      html += `<div class="page-list-item" onclick="navigate('page','${p.slug}')">
+        <div class="title">${escapeHtml(p.title)}</div>
+        <div class="meta">${p.slug} · ${formatDate(p.updated_at)}</div>
+      </div>`;
+    }
+  }
+  document.getElementById('home-view').innerHTML = html;
+}
+
+// ── Search ─────────────────────────────────────────────────────
+
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) {
+    navigate('home');
+    return;
+  }
+
+  const match = q.match(/^\[\[(.+)\]\]$/);
+  if (match) {
+    navigate('page', match[1]);
+    return;
+  }
+
+  hideAll();
+  document.getElementById('home-view').style.display = 'block';
+  const resp = await fetch(`${API}/pages?search=${encodeURIComponent(q)}`);
+  const pages = await resp.json();
+
+  let html = `<h2 style="margin-bottom:16px">搜索: "${escapeHtml(q)}"</h2>`;
+  if (pages.length === 0) {
+    html += '<p style="color:var(--muted)">没有匹配的结果</p>';
+  } else {
+    for (const p of pages) {
+      html += `<div class="page-list-item" onclick="navigate('page','${p.slug}')">
+        <div class="title">${escapeHtml(p.title)}</div>
+        <div class="meta">${p.slug} · ${formatDate(p.updated_at)}</div>
+      </div>`;
+    }
+  }
+  document.getElementById('home-view').innerHTML = html;
+}
+
+// ── Graph ──────────────────────────────────────────────────────
+
+async function showGraph() {
+  hideAll();
+  document.getElementById('home-view').style.display = 'block';
+  const resp = await fetch(`${API}/graph`);
+  const data = await resp.json();
+
+  let html = `<h2 style="margin-bottom:16px">🕸️ 知识图谱</h2>
+    <p style="color:var(--muted);margin-bottom:16px">${data.nodes.length} 个节点, ${data.edges.length} 条边</p>`;
+
+  const nodes = data.nodes.map(n => ({ ...n, x: Math.random() * 600 + 50, y: Math.random() * 400 + 50, vx: 0, vy: 0 }));
+  const nodeMap = {};
+  nodes.forEach(n => nodeMap[n.slug] = n);
+
+  for (let iter = 0; iter < 100; iter++) {
+    for (const n of nodes) {
+      n.vx += (Math.random() - 0.5) * 0.1;
+      n.vy += (Math.random() - 0.5) * 0.1;
+    }
+    for (const e of data.edges) {
+      const source = nodeMap[e.source];
+      const target = nodeMap[e.target];
+      if (!source || !target) continue;
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = (dist - 120) * 0.01;
+      source.vx += dx / dist * force;
+      source.vy += dy / dist * force;
+      target.vx -= dx / dist * force;
+      target.vy -= dy / dist * force;
+    }
+    for (const n of nodes) {
+      n.x += n.vx;
+      n.y += n.vy;
+      n.vx *= 0.9;
+      n.vy *= 0.9;
+      n.x = Math.max(30, Math.min(670, n.x));
+      n.y = Math.max(30, Math.min(470, n.y));
+    }
+  }
+
+  html += '<svg width="700" height="500" style="background:var(--card);border-radius:8px">';
+  for (const e of data.edges) {
+    const source = nodeMap[e.source];
+    const target = nodeMap[e.target];
+    if (!source || !target) continue;
+    html += `<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="var(--border)" stroke-width="1"/>`;
+  }
+  for (const n of nodes) {
+    html += `<circle cx="${n.x}" cy="${n.y}" r="6" fill="var(--accent)" onclick="navigate('page','${n.slug}')" style="cursor:pointer"/>
+    <text x="${n.x + 10}" y="${n.y + 4}" fill="var(--fg)" font-size="11" onclick="navigate('page','${n.slug}')" style="cursor:pointer">${escapeHtml(n.title || n.slug)}</text>`;
+  }
+  html += '</svg>';
+
+  document.getElementById('home-view').innerHTML = html;
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+
+function hideAll() {
+  document.getElementById('home-view').style.display = 'none';
+  document.getElementById('page-view').style.display = 'none';
+  document.getElementById('editor').style.display = 'none';
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function formatDate(d) {
+  if (!d) return '';
+  return d.replace('T', ' ').replace('Z', '').substring(0, 16);
+}
+
+function renderContent(md_text) {
+  if (!md_text) return '';
+  return md.render(md_text);
+}
+
+function showToast(msg, type = 'success') {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = type;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 2000);
+}
+
+// ── Init ───────────────────────────────────────────────────────
+
+showHome();
+</script>
+</body>
+</html>
