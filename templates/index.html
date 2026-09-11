@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KB</title>
-<!-- CodeMirror 6 -->
+<!-- CodeMirror 5 (CDN 6.65.7 is actually 5.65.7) -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/dracula.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
@@ -158,8 +158,7 @@ body {
   border-radius: 4px;
   font-size: 14px;
 }
-#page-slug { width: 180px; }
-#page-title { flex: 1; font-size: 16px; font-weight: 600; }
+#page-name { flex: 1; font-size: 16px; font-weight: 600; }
 .CodeMirror {
   flex: 1;
   height: auto;
@@ -182,15 +181,6 @@ body {
   align-items: center;
   font-size: 13px;
   color: var(--muted);
-}
-#editor-footer input {
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 13px;
-  width: 300px;
 }
 #save-btn {
   background: var(--accent);
@@ -274,7 +264,8 @@ body {
   color: var(--muted);
 }
 #page-content a { color: var(--accent); }
-#page-content a.unresolved { color: var(--muted); text-decoration-style: dashed; }
+#page-content a.wikilink { color: var(--accent); }
+#page-content a.wikilink.unresolved { color: var(--muted); text-decoration-style: dashed; }
 #page-content hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 #page-content table {
   border-collapse: collapse;
@@ -320,7 +311,7 @@ body {
 }
 .backlink-item:hover { background: var(--hover); }
 .backlink-item .title { font-weight: 500; font-size: 14px; }
-.backlink-item .slug { color: var(--muted); font-size: 12px; }
+.backlink-item .meta { color: var(--muted); font-size: 12px; }
 /* Page list */
 .page-list-item {
   padding: 12px 16px;
@@ -399,7 +390,7 @@ body {
 }
 .ref-item:hover, .ref-item.active { background: var(--accent-dim); }
 .ref-item .ref-title { font-weight: 500; }
-.ref-item .ref-slug { color: var(--muted); font-size: 11px; }
+.ref-item .ref-meta { color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -407,9 +398,9 @@ body {
 <div id="sidebar">
   <div id="sidebar-header"><a href="/">📚 Knowledge Base</a></div>
   <div id="nav">
-    <a class="nav-item" onclick="navigate('home')">🏠 首页</a>
-    <a class="nav-item" onclick="navigate('journal')">📓 日记</a>
-    <a class="nav-item" onclick="navigate('graph')">🕸️ 图谱</a>
+    <a class="nav-item" data-nav="home">🏠 首页</a>
+    <a class="nav-item" data-nav="journal">📓 日记</a>
+    <a class="nav-item" data-nav="graph">🕸️ 图谱</a>
   </div>
   <div id="tags-section">
     <h3>Tags</h3>
@@ -420,7 +411,7 @@ body {
 <!-- Main -->
 <div id="main">
   <div id="header">
-    <input type="text" id="search-input" placeholder="搜索... (或输入 [[slug]] 创建新页面)" onkeydown="if(event.key==='Enter')doSearch()">
+    <input type="text" id="search-input" placeholder="搜索... (或输入 [[页面名]] 直达)" onkeydown="if(event.key==='Enter')doSearch()">
     <button id="search-btn" onclick="doSearch()">搜索</button>
     <button id="new-btn" onclick="newPage()">+ 新页面</button>
   </div>
@@ -430,7 +421,7 @@ body {
 
     <div id="page-view" style="display:none">
       <div id="page-header">
-        <h1 id="page-title-display"></h1>
+        <h1 id="page-name-display"></h1>
         <div class="meta">
           <span id="page-date"></span>
           <a href="#" id="edit-btn-link">编辑</a>
@@ -445,13 +436,11 @@ body {
       <div id="editor-layout">
         <div id="editor-pane">
           <div id="editor-header">
-            <input type="text" id="page-slug" placeholder="slug">
-            <input type="text" id="page-title" placeholder="标题">
+            <input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">
           </div>
           <textarea id="cm-editor"></textarea>
           <div id="editor-footer">
-            <span>标签:</span>
-            <input type="text" id="page-tags-input" placeholder="tag1, tag2, tag3">
+            <span>正文中用 [[链接]] 和 #标签</span>
             <button id="save-btn" onclick="savePage()">保存 (Ctrl+S)</button>
           </div>
         </div>
@@ -470,7 +459,7 @@ body {
 
 <script>
 const API = '/api';
-let currentSlug = null;
+let currentName = null;   // page currently being edited
 let cm = null;
 let md = window.markdownit({
   html: false,
@@ -478,46 +467,59 @@ let md = window.markdownit({
   typographer: true,
   breaks: true,
 });
-let allPages = [];  // cache for reference autocomplete
+let allPages = [];   // cache for reference autocomplete (up to 200)
+let allNames = null; // full name set for unresolved-link detection
 
-// ── markdown-it: add wiki-link and tag rendering ────────────────
+// ── markdown-it: wiki-link rendering ────────────────────────────
 
-const defaultRender = md.renderer.rules.link_open || function(tokens, idx, options, env, self) {
+const defaultLinkRender = md.renderer.rules.link_open || function(tokens, idx, options, env, self) {
   return self.renderToken(tokens, idx, options);
 };
 
-md.renderer.rules.link_open = function(tokens, idx, options, env, self) {
-  const href = tokens[idx].attrGet('href') || '';
-  if (href.startsWith('wiki:')) {
-    const slug = href.slice(5);
-    tokens[idx].attrSet('href', '#');
-    tokens[idx].attrSet('onclick', `navigate('page','${slug}');return false;`);
-    tokens[idx].attrSet('class', 'wikilink');
-  }
-  return defaultRender(tokens, idx, options, self);
-};
-
-// Custom wiki-link inline rule
+// Custom wiki-link inline rule: [[target]] or [[target|alias]]
 md.inline.ruler.before('link', 'wikilink', function(state, silent) {
   const start = state.pos;
   if (state.src.slice(start, start + 2) !== '[[') return false;
-
   const end = state.src.indexOf(']]', start + 2);
   if (end === -1) return false;
 
   if (!silent) {
+    const inner = state.src.slice(start + 2, end);
+    const parts = inner.split('|');
+    const name = parts[0].trim();
+    const display = parts.length > 1 ? parts.slice(1).join('|').trim() : name;
+
     const token = state.push('link_open', 'a', 1);
-    token.attrSet('href', 'wiki:' + state.src.slice(start + 2, end));
-    token.attrSet('onclick', `navigate('page','${state.src.slice(start + 2, end)}');return false;`);
+    token.attrSet('href', 'wiki:' + name);
     token.attrSet('class', 'wikilink');
-
     const textToken = state.push('text', '', 0);
-    textToken.content = state.src.slice(start + 2, end);
-
+    textToken.content = display;
     state.push('link_close', 'a', -1);
   }
   state.pos = end + 2;
   return true;
+});
+
+md.renderer.rules.link_open = function(tokens, idx, options, env, self) {
+  const href = tokens[idx].attrGet('href') || '';
+  if (href.startsWith('wiki:')) {
+    const name = href.slice(5);
+    tokens[idx].attrSet('href', '#');
+    tokens[idx].attrSet('data-page', name);
+    tokens[idx].attrSet('class', 'wikilink');
+  }
+  return defaultLinkRender(tokens, idx, options, env, self);
+};
+
+// ── Global click delegation (data-page / data-tag) ──────────────
+
+document.addEventListener('click', (e) => {
+  const pageEl = e.target.closest('[data-page]');
+  if (pageEl) { e.preventDefault(); navigate('page', pageEl.dataset.page); return; }
+  const tagEl = e.target.closest('[data-tag]');
+  if (tagEl) { navigate('tag', tagEl.dataset.tag); return; }
+  const navEl = e.target.closest('[data-nav]');
+  if (navEl) { navigate(navEl.dataset.nav); }
 });
 
 // ── Navigation ─────────────────────────────────────────────────
@@ -545,9 +547,11 @@ function navigate(target, ...args) {
 async function showHome() {
   hideAll();
   document.getElementById('home-view').style.display = 'block';
-  const resp = await fetch(`${API}/pages?limit=50`);
-  const pages = await resp.json();
-  const tagsResp = await fetch(`${API}/tags`);
+  const [pagesResp, tagsResp] = await Promise.all([
+    fetch(`${API}/pages?limit=50`),
+    fetch(`${API}/tags`),
+  ]);
+  const pages = await pagesResp.json();
   const tags = await tagsResp.json();
 
   let html = '<h2 style="margin-bottom:16px">最近页面</h2>';
@@ -555,9 +559,9 @@ async function showHome() {
     html += '<p style="color:var(--muted)">还没有页面。点击"+ 新页面"创建第一个。</p>';
   } else {
     for (const p of pages) {
-      html += `<div class="page-list-item" onclick="navigate('page','${p.slug}')">
-        <div class="title">${escapeHtml(p.title)}</div>
-        <div class="meta">${p.slug} · ${formatDate(p.updated_at)}</div>
+      html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}">
+        <div class="title">${escapeHtml(p.name)}</div>
+        <div class="meta">${formatDate(p.updated_at)}</div>
       </div>`;
     }
   }
@@ -565,15 +569,11 @@ async function showHome() {
   loadTags(tags);
 }
 
-async function loadTags(tags) {
-  if (!tags) {
-    const resp = await fetch(`${API}/tags`);
-    tags = await resp.json();
-  }
+function loadTags(tags) {
   let html = '';
   for (const t of tags) {
-    html += `<div class="tag-item" onclick="navigate('tag','${t.name}')">
-      <span>#${t.name}</span><span class="count">${t.count}</span>
+    html += `<div class="tag-item" data-tag="${escapeHtml(t.name)}">
+      <span>#${escapeHtml(t.name)}</span><span class="count">${t.count}</span>
     </div>`;
   }
   document.getElementById('tags-list').innerHTML = html;
@@ -581,38 +581,55 @@ async function loadTags(tags) {
 
 // ── Page loading ──────────────────────────────────────────────
 
-async function loadPage(slug) {
+async function ensureAllNames() {
+  if (allNames === null) {
+    const resp = await fetch(`${API}/pages/names`);
+    allNames = new Set((await resp.json()).map(n => n.toLowerCase()));
+  }
+}
+
+async function loadPage(name) {
   hideAll();
-  currentSlug = slug;
-  const resp = await fetch(`${API}/pages/${slug}`);
+  currentName = null;
+  const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
   if (!resp.ok) {
-    showToast('页面不存在: ' + slug, 'error');
+    showToast('页面不存在: ' + name, 'error');
     navigate('home');
     return;
   }
   const page = await resp.json();
 
   document.getElementById('page-view').style.display = 'block';
-  document.getElementById('page-title-display').textContent = page.title;
+  document.getElementById('page-name-display').textContent = page.name;
   document.getElementById('page-date').textContent = `更新: ${formatDate(page.updated_at)}`;
-  document.getElementById('edit-btn-link').onclick = () => editPage(page);
+  document.getElementById('edit-btn-link').onclick = (e) => { e.preventDefault(); editPage(page); };
 
-  const tagsHtml = page.tags.map(t => `<span class="tag-chip" onclick="navigate('tag','${t}')">#${t}</span>`).join('');
+  const tagsHtml = page.tags.map(t => `<span class="tag-chip" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</span>`).join('');
   document.getElementById('page-tags').innerHTML = tagsHtml;
 
   document.getElementById('page-content').innerHTML = renderContent(page.content);
+  await markUnresolved();
 
   let backlinksHtml = '';
   if (page.backlinks.length > 0) {
     backlinksHtml = '<h3>🔗 反向链接</h3>';
     for (const b of page.backlinks) {
-      backlinksHtml += `<div class="backlink-item" onclick="navigate('page','${b.slug}')">
-        <div class="title">${escapeHtml(b.title)}</div>
-        <div class="slug">${b.slug}</div>
+      backlinksHtml += `<div class="backlink-item" data-page="${escapeHtml(b.name)}">
+        <div class="title">${escapeHtml(b.name)}</div>
+        <div class="meta">${formatDate(b.updated_at)}</div>
       </div>`;
     }
   }
   document.getElementById('backlinks').innerHTML = backlinksHtml;
+}
+
+async function markUnresolved() {
+  await ensureAllNames();
+  document.querySelectorAll('#page-content a.wikilink[data-page]').forEach(a => {
+    if (!allNames.has(a.dataset.page.toLowerCase())) {
+      a.classList.add('unresolved');
+    }
+  });
 }
 
 // ── Editor ────────────────────────────────────────────────────
@@ -630,7 +647,6 @@ function initCodeMirror() {
       'Ctrl-S': () => savePage(),
       'Cmd-S': () => savePage(),
       'Enter': (cm) => {
-        // Check for slash command
         const cursor = cm.getCursor();
         const line = cm.getLine(cursor.line);
         const beforeCursor = line.slice(0, cursor.ch);
@@ -639,7 +655,6 @@ function initCodeMirror() {
           showSlashMenu(slashMatch[1], cursor);
           return;
         }
-        // Check for [[ autocomplete
         const refMatch = beforeCursor.match(/\[\[([^\]]*)$/);
         if (refMatch) {
           showRefAutocomplete(refMatch[1], cursor);
@@ -656,7 +671,6 @@ function initCodeMirror() {
 
   cm.on('change', () => {
     updatePreview();
-    // Check for [[ trigger
     const cursor = cm.getCursor();
     const line = cm.getLine(cursor.line);
     const beforeCursor = line.slice(0, cursor.ch);
@@ -668,28 +682,25 @@ function initCodeMirror() {
     }
   });
 
-  cm.on('cursorActivity', () => {
-    hideSlashMenu();
-  });
+  cm.on('cursorActivity', () => hideSlashMenu());
 }
 
 function updatePreview() {
   if (!cm) return;
-  const content = cm.getValue();
-  document.getElementById('preview-pane').innerHTML = renderContent(content);
+  document.getElementById('preview-pane').innerHTML = renderContent(cm.getValue());
+}
+
+function renderContent(content) {
+  return md.render(content || '');
 }
 
 function newPage() {
   hideAll();
-  currentSlug = null;
+  currentName = null;
   document.getElementById('editor').style.display = 'block';
-  document.getElementById('page-slug').value = '';
-  document.getElementById('page-title').value = '';
-  document.getElementById('page-tags-input').value = '';
+  document.getElementById('page-name').value = '';
 
-  if (!cm) {
-    initCodeMirror();
-  }
+  if (!cm) initCodeMirror();
   cm.setValue('');
   cm.focus();
   updatePreview();
@@ -697,50 +708,40 @@ function newPage() {
 
 function editPage(page) {
   hideAll();
-  currentSlug = page.slug;
+  currentName = page.name;
   document.getElementById('editor').style.display = 'block';
-  document.getElementById('page-slug').value = page.slug;
-  document.getElementById('page-title').value = page.title;
-  document.getElementById('page-tags-input').value = page.tags.join(', ');
+  document.getElementById('page-name').value = page.name;
 
-  if (!cm) {
-    initCodeMirror();
-  }
+  if (!cm) initCodeMirror();
   cm.setValue(page.content);
   cm.focus();
   updatePreview();
 }
 
 async function savePage() {
-  const slug = document.getElementById('page-slug').value.trim();
-  const title = document.getElementById('page-title').value.trim();
+  const name = document.getElementById('page-name').value.trim();
   const content = cm.getValue();
-  const tagsStr = document.getElementById('page-tags-input').value.trim();
 
-  if (!slug || !title) {
-    showToast('Slug 和标题不能为空', 'error');
+  if (!name) {
+    showToast('页面名不能为空', 'error');
     return;
   }
 
-  const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
-  const data = { slug, title, content, tags };
-
+  const data = { name, content };
   let resp;
-  if (currentSlug && currentSlug === slug) {
-    resp = await fetch(`${API}/pages/${slug}`, {
+  if (currentName && currentName.toLowerCase() === name.toLowerCase()) {
+    resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+  } else if (currentName) {
+    // rename: update the existing page with the new name
+    resp = await fetch(`${API}/pages/${encodeURIComponent(currentName)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-  } else if (currentSlug) {
-    resp = await fetch(`${API}/pages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (resp.ok) {
-      await fetch(`${API}/pages/${currentSlug}`, { method: 'DELETE' });
-    }
   } else {
     resp = await fetch(`${API}/pages`, {
       method: 'POST',
@@ -750,8 +751,9 @@ async function savePage() {
   }
 
   if (resp.ok) {
+    allNames = null;  // invalidate name cache
     showToast('保存成功');
-    navigate('page', slug);
+    navigate('page', name);
   } else {
     const err = await resp.json();
     showToast(err.detail || '保存失败', 'error');
@@ -780,10 +782,8 @@ const slashCommands = [
 function insertPrefix(cm, prefix) {
   const cursor = cm.getCursor();
   const line = cm.getLine(cursor.line);
-  // Remove the slash command text
   const slashStart = line.lastIndexOf('/');
   cm.replaceRange('', { line: cursor.line, ch: slashStart }, cursor);
-  // Insert prefix at beginning of line if not already there
   if (!line.startsWith(prefix.trim())) {
     cm.replaceRange(prefix, { line: cursor.line, ch: 0 });
   }
@@ -803,22 +803,17 @@ function insertBlock(cm, before, after) {
 function showSlashMenu(query, cursor) {
   const menu = document.getElementById('slash-menu');
   const filtered = slashCommands.filter(c => c.name.includes(query) || c.key.includes(query));
-
-  if (filtered.length === 0) {
-    hideSlashMenu();
-    return;
-  }
+  if (filtered.length === 0) { hideSlashMenu(); return; }
 
   let html = '';
   filtered.forEach((c, i) => {
-    html += `<div class="slash-item${i === 0 ? ' active' : ''}" onclick="applySlashCommand('${c.key}')">
+    html += `<div class="slash-item${i === 0 ? ' active' : ''}" data-slash="${c.key}">
       <span>${c.name}</span><span class="key">${c.key}</span>
     </div>`;
   });
   menu.innerHTML = html;
   menu.style.display = 'block';
 
-  // Position menu below cursor
   const coords = cm.cursorCoords(cursor, 'local');
   menu.style.left = (coords.left + 20) + 'px';
   menu.style.top = (coords.bottom + 20) + 'px';
@@ -828,12 +823,15 @@ function hideSlashMenu() {
   document.getElementById('slash-menu').style.display = 'none';
 }
 
-function applySlashCommand(key) {
-  const cmd = slashCommands.find(c => c.key === key);
+// Slash command clicks are handled via delegation
+document.getElementById('slash-menu').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-slash]');
+  if (!item) return;
+  const cmd = slashCommands.find(c => c.key === item.dataset.slash);
   if (cmd) cmd.action(cm);
   hideSlashMenu();
   updatePreview();
-}
+});
 
 // ── Reference autocomplete ─────────────────────────────────────
 
@@ -843,21 +841,17 @@ async function showRefAutocomplete(query, cursor) {
     allPages = await resp.json();
   }
 
-  const filtered = allPages.filter(p =>
-    p.slug.includes(query) || p.title.toLowerCase().includes(query.toLowerCase())
-  ).slice(0, 8);
+  const q = query.toLowerCase();
+  const filtered = allPages.filter(p => p.name.toLowerCase().includes(q)).slice(0, 8);
 
   const menu = document.getElementById('ref-autocomplete');
-  if (filtered.length === 0) {
-    hideRefAutocomplete();
-    return;
-  }
+  if (filtered.length === 0) { hideRefAutocomplete(); return; }
 
   let html = '';
   filtered.forEach((p, i) => {
-    html += `<div class="ref-item${i === 0 ? ' active' : ''}" onclick="insertRef('${p.slug}')">
-      <div class="ref-title">${escapeHtml(p.title)}</div>
-      <div class="ref-slug">${p.slug}</div>
+    html += `<div class="ref-item${i === 0 ? ' active' : ''}" data-ref="${escapeHtml(p.name)}">
+      <div class="ref-title">${escapeHtml(p.name)}</div>
+      <div class="ref-meta">${formatDate(p.updated_at)}</div>
     </div>`;
   });
   menu.innerHTML = html;
@@ -872,59 +866,71 @@ function hideRefAutocomplete() {
   document.getElementById('ref-autocomplete').style.display = 'none';
 }
 
-function insertRef(slug) {
+document.getElementById('ref-autocomplete').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-ref]');
+  if (!item) return;
+  insertRef(item.dataset.ref);
+});
+
+function insertRef(name) {
   const cursor = cm.getCursor();
   const line = cm.getLine(cursor.line);
   const start = line.lastIndexOf('[[');
-  cm.replaceRange(slug + ']]', { line: cursor.line, ch: start }, cursor);
-  cm.setCursor({ line: cursor.line, ch: start + slug.length + 2 });
+  cm.replaceRange(name + ']]', { line: cursor.line, ch: start }, cursor);
+  cm.setCursor({ line: cursor.line, ch: start + name.length + 2 });
   cm.focus();
   hideRefAutocomplete();
   updatePreview();
 }
 
 // ── Journal ────────────────────────────────────────────────────
+// A journal entry is just a page whose name is a date (YYYY-MM-DD).
 
 async function showJournal(date) {
   hideAll();
   document.getElementById('home-view').style.display = 'block';
 
   if (!date) {
-    const today = new Date().toISOString().split('T')[0];
-    date = today;
+    const today = new Date();
+    const off = today.getTimezoneOffset();
+    date = new Date(today - off * 60000).toISOString().split('T')[0];
   }
 
-  const resp = await fetch(`${API}/journal/${date}`);
   let content = '';
+  let exists = false;
+  const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`);
   if (resp.ok) {
     const data = await resp.json();
     content = data.content;
+    exists = true;
   }
 
-  let html = `<h2 style="margin-bottom:16px">📓 日记</h2>
+  const html = `<h2 style="margin-bottom:16px">📓 日记</h2>
     <div class="journal-nav" style="margin-bottom:16px">
       <input type="date" id="journal-date" value="${date}" onchange="showJournal(this.value)">
     </div>
     <textarea id="journal-content" style="width:100%;height:60vh;background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:16px;font-family:monospace;font-size:14px;border-radius:6px;resize:none" placeholder="今天的日记...">${escapeHtml(content)}</textarea>
-    <div style="margin-top:12px"><button id="save-btn" onclick="saveJournal()">保存日记</button></div>`;
+    <div style="margin-top:12px"><button id="save-btn" onclick="saveJournal(${exists})">保存日记</button></div>`;
 
   document.getElementById('home-view').innerHTML = html;
 }
 
-async function saveJournal() {
+async function saveJournal(exists) {
   const date = document.getElementById('journal-date').value;
   const content = document.getElementById('journal-content').value;
 
-  const resp = await fetch(`${API}/journal/${date}`, {
-    method: 'PUT',
+  const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`, {
+    method: exists ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(exists ? { content } : { name: date, content }),
   });
 
   if (resp.ok) {
+    allNames = null;
     showToast('日记已保存');
   } else {
-    showToast('保存失败', 'error');
+    const err = await resp.json();
+    showToast(err.detail || '保存失败', 'error');
   }
 }
 
@@ -936,14 +942,14 @@ async function showTagPages(tag) {
   const resp = await fetch(`${API}/tags/${encodeURIComponent(tag)}/pages`);
   const pages = await resp.json();
 
-  let html = `<h2 style="margin-bottom:16px">#${tag}</h2>`;
+  let html = `<h2 style="margin-bottom:16px">#${escapeHtml(tag)}</h2>`;
   if (pages.length === 0) {
     html += '<p style="color:var(--muted)">没有带这个标签的页面</p>';
   } else {
     for (const p of pages) {
-      html += `<div class="page-list-item" onclick="navigate('page','${p.slug}')">
-        <div class="title">${escapeHtml(p.title)}</div>
-        <div class="meta">${p.slug} · ${formatDate(p.updated_at)}</div>
+      html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}">
+        <div class="title">${escapeHtml(p.name)}</div>
+        <div class="meta">${formatDate(p.updated_at)}</div>
       </div>`;
     }
   }
@@ -954,16 +960,10 @@ async function showTagPages(tag) {
 
 async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
-  if (!q) {
-    navigate('home');
-    return;
-  }
+  if (!q) { navigate('home'); return; }
 
   const match = q.match(/^\[\[(.+)\]\]$/);
-  if (match) {
-    navigate('page', match[1]);
-    return;
-  }
+  if (match) { navigate('page', match[1]); return; }
 
   hideAll();
   document.getElementById('home-view').style.display = 'block';
@@ -975,9 +975,9 @@ async function doSearch() {
     html += '<p style="color:var(--muted)">没有匹配的结果</p>';
   } else {
     for (const p of pages) {
-      html += `<div class="page-list-item" onclick="navigate('page','${p.slug}')">
-        <div class="title">${escapeHtml(p.title)}</div>
-        <div class="meta">${p.slug} · ${formatDate(p.updated_at)}</div>
+      html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}">
+        <div class="title">${escapeHtml(p.name)}</div>
+        <div class="meta">${formatDate(p.updated_at)}</div>
       </div>`;
     }
   }
@@ -997,7 +997,7 @@ async function showGraph() {
 
   const nodes = data.nodes.map(n => ({ ...n, x: Math.random() * 600 + 50, y: Math.random() * 400 + 50, vx: 0, vy: 0 }));
   const nodeMap = {};
-  nodes.forEach(n => nodeMap[n.slug] = n);
+  nodes.forEach(n => nodeMap[n.name] = n);
 
   for (let iter = 0; iter < 100; iter++) {
     for (const n of nodes) {
@@ -1035,8 +1035,8 @@ async function showGraph() {
     html += `<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="var(--border)" stroke-width="1"/>`;
   }
   for (const n of nodes) {
-    html += `<circle cx="${n.x}" cy="${n.y}" r="6" fill="var(--accent)" onclick="navigate('page','${n.slug}')" style="cursor:pointer"/>
-    <text x="${n.x + 10}" y="${n.y + 4}" fill="var(--fg)" font-size="11" onclick="navigate('page','${n.slug}')" style="cursor:pointer">${escapeHtml(n.title || n.slug)}</text>`;
+    html += `<circle cx="${n.x}" cy="${n.y}" r="6" fill="var(--accent)" data-page="${escapeHtml(n.name)}" style="cursor:pointer"/>
+    <text x="${n.x + 10}" y="${n.y + 4}" fill="var(--fg)" font-size="11" data-page="${escapeHtml(n.name)}" style="cursor:pointer">${escapeHtml(n.name)}</text>`;
   }
   html += '</svg>';
 
@@ -1052,30 +1052,29 @@ function hideAll() {
 }
 
 function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
-function formatDate(d) {
-  if (!d) return '';
-  return d.replace('T', ' ').replace('Z', '').substring(0, 16);
+function formatDate(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T') + (s.includes('+') || s.includes('Z') ? '' : ''));
+  if (isNaN(d.getTime())) return s;
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function renderContent(md_text) {
-  if (!md_text) return '';
-  return md.render(md_text);
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = type === 'error' ? 'error' : '';
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.display = 'none'; }, 2500);
 }
 
-function showToast(msg, type = 'success') {
-  const toast = document.getElementById('toast');
-  toast.textContent = msg;
-  toast.className = type;
-  toast.style.display = 'block';
-  setTimeout(() => { toast.style.display = 'none'; }, 2000);
-}
-
-// ── Init ───────────────────────────────────────────────────────
+// ── Boot ────────────────────────────────────────────────────────
 
 showHome();
 </script>
