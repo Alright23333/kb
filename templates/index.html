@@ -41,12 +41,60 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--card);
+  transition: width 0.2s ease, opacity 0.2s ease;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+#sidebar.collapsed {
+  width: 0;
+  opacity: 0;
+  border-right-width: 0;
+}
+#sidebar-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+#sidebar-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#sidebar-tab {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 12px 4px;
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  font-size: 13px;
+  writing-mode: vertical-rl;
+  z-index: 100;
+  display: none;
+  letter-spacing: 2px;
+}
+#sidebar-tab:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+body.sidebar-collapsed #sidebar-tab {
+  display: block;
 }
 #sidebar-header {
   padding: 16px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
   font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 #sidebar-header a { color: var(--fg); text-decoration: none; }
 #nav { padding: 8px; }
@@ -396,7 +444,10 @@ body {
 <body>
 <!-- Sidebar -->
 <div id="sidebar">
-  <div id="sidebar-header"><a href="/">📚 Knowledge Base</a></div>
+  <div id="sidebar-header">
+    <button id="sidebar-toggle" title="收起侧边栏">◀</button>
+    <a href="/">📚 Knowledge Base</a>
+  </div>
   <div id="nav">
     <a class="nav-item" data-nav="home">🏠 首页</a>
     <a class="nav-item" data-nav="journal">📓 日记</a>
@@ -409,6 +460,7 @@ body {
 </div>
 
 <!-- Main -->
+<div id="sidebar-tab" title="展开侧边栏">▶ 侧边栏</div>
 <div id="main">
   <div id="header">
     <input type="text" id="search-input" placeholder="搜索... (或输入 [[页面名]] 直达)" onkeydown="if(event.key==='Enter')doSearch()">
@@ -1073,6 +1125,17 @@ function showToast(msg, type) {
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.style.display = 'none'; }, 2500);
 }
+
+// ── Sidebar toggle ───────────────────────────────────────────
+
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  document.body.classList.add('sidebar-collapsed');
+  document.getElementById('sidebar').classList.add('collapsed');
+});
+document.getElementById('sidebar-tab').addEventListener('click', () => {
+  document.body.classList.remove('sidebar-collapsed');
+  document.getElementById('sidebar').classList.remove('collapsed');
+});
 
 // ── Boot ────────────────────────────────────────────────────────
 
