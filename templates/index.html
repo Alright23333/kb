@@ -1035,9 +1035,9 @@ document.getElementById('slash-menu').addEventListener('click', (e) => {
 // ── Reference autocomplete ─────────────────────────────────────
 
 let savedRefCursor = null; // cursor captured at autocomplete open time
+let isInsertingRef = false; // guard: don't clear savedRefCursor during insert
 
 async function showRefAutocomplete(query, cursor) {
-  // Save cursor position NOW, before focus is lost to the popup
   savedRefCursor = { line: cursor.line, ch: cursor.ch };
   if (allPages.length === 0) {
     const resp = await fetch(`${API}/pages?limit=200`);
@@ -1067,7 +1067,8 @@ async function showRefAutocomplete(query, cursor) {
 
 function hideRefAutocomplete() {
   document.getElementById('ref-autocomplete').style.display = 'none';
-  savedRefCursor = null;
+  // Don't clear savedRefCursor if we're in the middle of an insert
+  if (!isInsertingRef) savedRefCursor = null;
 }
 
 function navigateRefItems(dir) {
@@ -1081,6 +1082,11 @@ function navigateRefItems(dir) {
   items[idx].scrollIntoView({ block: 'nearest' });
 }
 
+document.getElementById('ref-autocomplete').addEventListener('mousedown', (e) => {
+  // Prevent focus loss from the editor when clicking menu items
+  e.preventDefault();
+});
+
 document.getElementById('ref-autocomplete').addEventListener('click', (e) => {
   const item = e.target.closest('[data-ref]');
   if (!item) return;
@@ -1088,21 +1094,23 @@ document.getElementById('ref-autocomplete').addEventListener('click', (e) => {
 });
 
 function insertRef(name) {
-  // Use the saved cursor captured when the autocomplete was shown,
-  // because clicking the popup steals focus from CM and getCursor()
-  // may return stale/zeroed coordinates.
-  const cursor = savedRefCursor || cm.getCursor();
+  // Replace-entire-line approach: avoid cursor-range issues entirely.
+  const cursor = cm.getCursor();
   const line = cm.getLine(cursor.line);
-  const start = line.lastIndexOf('[[');
-  if (start === -1) {
-    cm.replaceRange(name + ']]', cursor);
+  const idx = line.lastIndexOf('[[');
+  if (idx !== -1) {
+    const closeIdx = line.indexOf(']]', idx + 2);
+    const endPos = closeIdx === -1 ? line.length : closeIdx + 2;
+    const newText = line.slice(0, idx) + '[[' + name + ']]' + line.slice(endPos);
+    cm.replaceRange(newText, { line: cursor.line, ch: 0 }, { line: cursor.line, ch: line.length });
   } else {
-    cm.replaceRange(name + ']]', { line: cursor.line, ch: start }, cursor);
+    cm.replaceRange('[[' + name + ']]', cursor);
   }
-  savedRefCursor = null;
   cm.focus();
   hideRefAutocomplete();
   updatePreview();
+  savedRefCursor = null;
+  isInsertingRef = false;
 }
 
 // ── Journal ────────────────────────────────────────────────────
