@@ -470,6 +470,7 @@ body.sidebar-collapsed #sidebar-tab {
   </div>
   <div id="nav">
     <a class="nav-item" data-nav="home">🏠 首页</a>
+    <a class="nav-item" data-nav="all">📄 所有页面</a>
     <a class="nav-item" data-nav="journal">📓 日记</a>
     <a class="nav-item" data-nav="graph">🕸️ 图谱</a>
   </div>
@@ -603,12 +604,15 @@ function navigate(target, ...args) {
   if (target === 'home') {
     showHome();
     document.querySelectorAll('.nav-item')[0].classList.add('active');
+  } else if (target === 'all') {
+    showAllPages();
+    document.querySelectorAll('.nav-item')[1].classList.add('active');
   } else if (target === 'journal') {
     showJournal(args[0]);
-    document.querySelectorAll('.nav-item')[1].classList.add('active');
+    document.querySelectorAll('.nav-item')[2].classList.add('active');
   } else if (target === 'graph') {
     showGraph();
-    document.querySelectorAll('.nav-item')[2].classList.add('active');
+    document.querySelectorAll('.nav-item')[3].classList.add('active');
   } else if (target === 'page') {
     loadPage(args[0]);
   } else if (target === 'tag') {
@@ -641,6 +645,39 @@ async function showHome() {
   }
   document.getElementById('home-view').innerHTML = html;
   loadTags(tags);
+}
+
+// ── All Pages ─────────────────────────────────────────────────
+
+async function showAllPages() {
+  hideAll();
+  document.getElementById('home-view').style.display = 'block';
+
+  const resp = await fetch(`${API}/pages?limit=200`);
+  const pages = await resp.json();
+
+  // Sort alphabetically (case-insensitive)
+  pages.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+  let html = `<h2 style="margin-bottom:16px">📄 所有页面 <span style="color:var(--muted);font-size:14px;font-weight:400">(${pages.length})</span></h2>`;
+  html += '<input type="text" id="all-pages-filter" placeholder="筛选页面名..." style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px;margin-bottom:16px" oninput="filterAllPages()">';
+  html += '<div id="all-pages-list">';
+  for (const p of pages) {
+    html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}" data-name-lower="${escapeHtml(p.name.toLowerCase())}">
+      <div class="title">${escapeHtml(p.name)}</div>
+      <div class="meta">${formatDate(p.updated_at)}</div>
+    </div>`;
+  }
+  html += '</div>';
+
+  document.getElementById('home-view').innerHTML = html;
+}
+
+function filterAllPages() {
+  const q = document.getElementById('all-pages-filter').value.toLowerCase();
+  document.querySelectorAll('#all-pages-list .page-list-item').forEach(el => {
+    el.style.display = (!q || el.dataset.nameLower.includes(q)) ? '' : 'none';
+  });
 }
 
 function loadTags(tags) {

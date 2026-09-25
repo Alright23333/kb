@@ -115,7 +115,7 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
 async def list_pages(
     tag: Optional[str] = None,
     search: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     db = await get_db()
