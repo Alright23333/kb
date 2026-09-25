@@ -693,12 +693,18 @@ function initCodeMirror() {
     lineNumbers: true,
     lineWrapping: true,
     matchBrackets: true,
-    autoCloseBrackets: true,
+    autoCloseBrackets: false,
     styleActiveLine: true,
     extraKeys: {
       'Ctrl-S': () => savePage(),
       'Cmd-S': () => savePage(),
       'Enter': (cm) => {
+        // If ref autocomplete is open, select the active item
+        const refMenu = document.getElementById('ref-autocomplete');
+        if (refMenu.style.display !== 'none') {
+          const active = refMenu.querySelector('.ref-item.active');
+          if (active) { insertRef(active.dataset.ref); return; }
+        }
         const cursor = cm.getCursor();
         const line = cm.getLine(cursor.line);
         const beforeCursor = line.slice(0, cursor.ch);
@@ -718,6 +724,30 @@ function initCodeMirror() {
         hideSlashMenu();
         hideRefAutocomplete();
       },
+      'Tab': (cm) => {
+        const refMenu = document.getElementById('ref-autocomplete');
+        if (refMenu.style.display !== 'none') {
+          const active = refMenu.querySelector('.ref-item.active');
+          if (active) { insertRef(active.dataset.ref); return; }
+        }
+        cm.replaceRange('  ', cm.getCursor());
+      },
+      'Up': (cm) => {
+        const refMenu = document.getElementById('ref-autocomplete');
+        if (refMenu.style.display !== 'none') {
+          navigateRefItems(-1);
+          return;
+        }
+        CodeMirror.Pass;
+      },
+      'Down': (cm) => {
+        const refMenu = document.getElementById('ref-autocomplete');
+        if (refMenu.style.display !== 'none') {
+          navigateRefItems(1);
+          return;
+        }
+        CodeMirror.Pass;
+      },
     },
   });
 
@@ -734,7 +764,10 @@ function initCodeMirror() {
     }
   });
 
-  cm.on('cursorActivity', () => hideSlashMenu());
+  cm.on('cursorActivity', () => {
+    hideSlashMenu();
+    // Don't hide ref autocomplete here - it's managed by change event
+  });
 }
 
 function updatePreview() {
@@ -918,6 +951,17 @@ function hideRefAutocomplete() {
   document.getElementById('ref-autocomplete').style.display = 'none';
 }
 
+function navigateRefItems(dir) {
+  const items = document.querySelectorAll('#ref-autocomplete .ref-item');
+  if (items.length === 0) return;
+  let idx = -1;
+  items.forEach((el, i) => { if (el.classList.contains('active')) idx = i; });
+  items.forEach(el => el.classList.remove('active'));
+  idx = (idx + dir + items.length) % items.length;
+  items[idx].classList.add('active');
+  items[idx].scrollIntoView({ block: 'nearest' });
+}
+
 document.getElementById('ref-autocomplete').addEventListener('click', (e) => {
   const item = e.target.closest('[data-ref]');
   if (!item) return;
@@ -928,8 +972,14 @@ function insertRef(name) {
   const cursor = cm.getCursor();
   const line = cm.getLine(cursor.line);
   const start = line.lastIndexOf('[[');
-  cm.replaceRange(name + ']]', { line: cursor.line, ch: start }, cursor);
-  cm.setCursor({ line: cursor.line, ch: start + name.length + 2 });
+  if (start === -1) {
+    // Fallback: no [[ found, just insert at cursor
+    cm.replaceRange(name + ']]', cursor);
+    cm.setCursor({ line: cursor.line, ch: cursor.ch + name.length + 2 });
+  } else {
+    cm.replaceRange(name + ']]', { line: cursor.line, ch: start }, cursor);
+    cm.setCursor({ line: cursor.line, ch: start + name.length + 2 });
+  }
   cm.focus();
   hideRefAutocomplete();
   updatePreview();
