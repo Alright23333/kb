@@ -182,14 +182,23 @@ body.sidebar-collapsed #sidebar-tab {
 #editor-layout {
   display: flex;
   height: 100%;
-  gap: 1px;
-  background: var(--border);
 }
 #editor-pane {
-  flex: 1;
+  width: 50%;
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  overflow: hidden;
+}
+#divider {
+  width: 6px;
+  background: var(--border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+#divider:hover, #divider.dragging {
+  background: var(--accent);
 }
 #editor-header {
   display: flex;
@@ -220,6 +229,17 @@ body.sidebar-collapsed #sidebar-tab {
   background: var(--bg);
   overflow-y: auto;
   padding: 20px 24px;
+  min-width: 100px;
+}
+#editor-footer label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+#editor-footer label input {
+  accent-color: var(--accent);
 }
 #editor-footer {
   padding: 8px 16px;
@@ -493,9 +513,11 @@ body.sidebar-collapsed #sidebar-tab {
           <textarea id="cm-editor"></textarea>
           <div id="editor-footer">
             <span>正文中用 [[链接]] 和 #标签</span>
+            <label style="margin-left:auto;cursor:pointer;display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted)"><input type="checkbox" id="scroll-sync" checked style="accent-color:var(--accent)"> 同步滚动</label>
             <button id="save-btn" onclick="savePage()">保存 (Ctrl+S)</button>
           </div>
         </div>
+        <div id="divider"></div>
         <div id="preview-pane"></div>
       </div>
     </div>
@@ -768,6 +790,55 @@ function initCodeMirror() {
     hideSlashMenu();
     // Don't hide ref autocomplete here - it's managed by change event
   });
+
+  // Scroll sync: editor -> preview
+  let isSyncing = false;
+  const previewEl = document.getElementById('preview-pane');
+  const scrollSyncToggle = document.getElementById('scroll-sync');
+
+  cm.on('scroll', () => {
+    if (isSyncing) return;
+    if (!scrollSyncToggle || !scrollSyncToggle.checked) return;
+    isSyncing = true;
+    const scrollInfo = cm.getScrollInfo();
+    const pct = scrollInfo.height > scrollInfo.clientHeight
+      ? scrollInfo.top / (scrollInfo.height - scrollInfo.clientHeight)
+      : 0;
+    const previewMax = previewEl.scrollHeight - previewEl.clientHeight;
+    previewEl.scrollTop = pct * previewMax;
+    requestAnimationFrame(() => { isSyncing = false; });
+  });
+
+  // Draggable divider
+  const divider = document.getElementById('divider');
+  const editorPane = document.getElementById('editor-pane');
+  const layout = document.getElementById('editor-layout');
+  let startX = 0, startWidth = 0;
+
+  divider.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    divider.classList.add('dragging');
+    startX = e.clientX;
+    startWidth = editorPane.offsetWidth;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+
+  function onMouseMove(e) {
+    const dx = e.clientX - startX;
+    const layoutWidth = layout.offsetWidth;
+    let newWidth = ((startWidth + dx) / layoutWidth) * 100;
+    newWidth = Math.max(20, Math.min(80, newWidth));
+    editorPane.style.width = newWidth + '%';
+    cm.refresh();
+  }
+
+  function onMouseUp() {
+    divider.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    cm.refresh();
+  }
 }
 
 function updatePreview() {
@@ -788,6 +859,9 @@ function newPage() {
   if (!cm) initCodeMirror();
   cm.setValue('');
   cm.focus();
+  // Reset divider to 50%
+  document.getElementById('editor-pane').style.width = '50%';
+  setTimeout(() => cm.refresh(), 0);
   updatePreview();
 }
 
@@ -800,6 +874,9 @@ function editPage(page) {
   if (!cm) initCodeMirror();
   cm.setValue(page.content);
   cm.focus();
+  // Reset divider to 50%
+  document.getElementById('editor-pane').style.width = '50%';
+  setTimeout(() => cm.refresh(), 0);
   updatePreview();
 }
 
