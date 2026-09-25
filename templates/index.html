@@ -1183,16 +1183,37 @@ async function doSearch() {
 
   hideAll();
   document.getElementById('home-view').style.display = 'block';
-  const resp = await fetch(`${API}/pages?search=${encodeURIComponent(q)}`);
+  const resp = await fetch(`${API}/pages?search=${encodeURIComponent(q)}&limit=100`);
   const pages = await resp.json();
 
-  let html = `<h2 style="margin-bottom:16px">搜索: "${escapeHtml(q)}"</h2>`;
+  // Sort: exact name > starts with > contains name > content match
+  const ql = q.toLowerCase();
+  function score(p) {
+    const nl = p.name.toLowerCase();
+    if (nl === ql) return 0;
+    if (nl.startsWith(ql)) return 1;
+    if (nl.includes(ql)) return 2;
+    return 3; // content match only
+  }
+  pages.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
+
+  let html = `<h2 style="margin-bottom:16px">搜索: "${escapeHtml(q)}" <span style="color:var(--muted);font-size:14px;font-weight:400">(${pages.length})</span></h2>`;
   if (pages.length === 0) {
     html += '<p style="color:var(--muted)">没有匹配的结果</p>';
   } else {
     for (const p of pages) {
+      const nl = p.name.toLowerCase();
+      let displayName = escapeHtml(p.name);
+      // Highlight name match
+      if (nl.includes(ql)) {
+        const idx = nl.indexOf(ql);
+        displayName = escapeHtml(p.name.slice(0, idx)) +
+          '<mark style="background:var(--accent-dim);color:var(--accent);border-radius:2px">' +
+          escapeHtml(p.name.slice(idx, idx + q.length)) + '</mark>' +
+          escapeHtml(p.name.slice(idx + q.length));
+      }
       html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}">
-        <div class="title">${escapeHtml(p.name)}</div>
+        <div class="title">${displayName}</div>
         <div class="meta">${formatDate(p.updated_at)}</div>
       </div>`;
     }
