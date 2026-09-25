@@ -1,4 +1,25 @@
 {
-	"items": [],
-	"counter": 6
+	"items": [
+		{
+			"id": "T-007",
+			"text": "前端主题系统：深色/浅色切换",
+			"status": "done",
+			"priority": "high",
+			"assignee": null,
+			"createdAt": "2026-09-25T08:29:30.163Z",
+			"updatedAt": "2026-09-25T08:33:18.731Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-008",
+			"text": "侧边栏收窄模式：收起后留窄图标栏",
+			"status": "in-progress",
+			"priority": "high",
+			"assignee": null,
+			"createdAt": "2026-09-25T08:29:30.163Z",
+			"updatedAt": "2026-09-25T08:33:24.910Z",
+			"blockedBy": null
+		}
+	],
+	"counter": 8
 }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,14 +16,36 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.2/markdown-it.min.js"></script>
 <style>
 :root {
+  --accent: #4a9eff;
+}
+[data-theme="dark"] {
   --bg: #1a1a1a;
   --fg: #e8e8e8;
   --muted: #888;
-  --accent: #4a9eff;
   --accent-dim: #2d5a8e;
   --border: #333;
   --card: #222;
   --hover: #2a2a2a;
+}
+[data-theme="light"] {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #888;
+  --accent-dim: #e8f0fb;
+  --border: #e0e0e0;
+  --card: #f5f5f5;
+  --hover: #eeeeee;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #888;
+    --accent-dim: #e8f0fb;
+    --border: #e0e0e0;
+    --card: #f5f5f5;
+    --hover: #eeeeee;
+  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -41,14 +63,29 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--card);
-  transition: width 0.2s ease, opacity 0.2s ease;
+  transition: width 0.2s ease;
   overflow: hidden;
   flex-shrink: 0;
 }
-#sidebar.collapsed {
-  width: 0;
-  opacity: 0;
-  border-right-width: 0;
+#sidebar.narrow {
+  width: 56px;
+}
+#sidebar.narrow #sidebar-header {
+  padding: 16px 8px;
+  justify-content: center;
+}
+#sidebar.narrow #sidebar-header a,
+#sidebar.narrow #tags-section,
+#sidebar.narrow .nav-text {
+  display: none;
+}
+#sidebar.narrow #nav {
+  padding: 4px;
+}
+#sidebar.narrow .nav-item {
+  text-align: center;
+  padding: 10px 0;
+  font-size: 18px;
 }
 #sidebar-toggle {
   background: transparent;
@@ -64,28 +101,19 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
-#sidebar-tab {
-  position: fixed;
-  top: 50%;
-  left: 0;
-  transform: translateY(-50%);
-  background: var(--accent-dim);
-  color: var(--accent);
-  padding: 12px 4px;
-  border-radius: 0 6px 6px 0;
+#theme-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 13px;
-  writing-mode: vertical-rl;
-  z-index: 100;
-  display: none;
-  letter-spacing: 2px;
+  font-size: 15px;
+  flex-shrink: 0;
 }
-#sidebar-tab:hover {
-  background: var(--accent);
-  color: var(--bg);
-}
-body.sidebar-collapsed #sidebar-tab {
-  display: block;
+#theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 #sidebar-header {
   padding: 16px;
@@ -99,7 +127,9 @@ body.sidebar-collapsed #sidebar-tab {
 #sidebar-header a { color: var(--fg); text-decoration: none; }
 #nav { padding: 8px; }
 .nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 12px;
   color: var(--fg);
   text-decoration: none;
@@ -109,6 +139,7 @@ body.sidebar-collapsed #sidebar-tab {
 }
 .nav-item:hover { background: var(--hover); }
 .nav-item.active { background: var(--accent-dim); color: var(--accent); }
+.nav-icon { flex-shrink: 0; }
 #tags-section {
   flex: 1;
   overflow-y: auto;
@@ -222,7 +253,11 @@ body.sidebar-collapsed #sidebar-tab {
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 14px;
   line-height: 1.6;
-  background: var(--bg);
+  background: var(--bg) !important;
+}
+.CodeMirror-gutters {
+  background: var(--card) !important;
+  border-right: 1px solid var(--border) !important;
 }
 #preview-pane {
   flex: 1;
@@ -267,7 +302,7 @@ body.sidebar-collapsed #sidebar-tab {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   z-index: 1000;
   display: none;
   min-width: 200px;
@@ -444,7 +479,7 @@ body.sidebar-collapsed #sidebar-tab {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   z-index: 1000;
   display: none;
   min-width: 250px;
@@ -466,27 +501,27 @@ body.sidebar-collapsed #sidebar-tab {
 <div id="sidebar">
   <div id="sidebar-header">
     <button id="sidebar-toggle" title="收起侧边栏">◀</button>
-    <a href="/">📚 Knowledge Base</a>
+    <a href="/" class="nav-text">📚 KB</a>
   </div>
   <div id="nav">
-    <a class="nav-item" data-nav="home">🏠 首页</a>
-    <a class="nav-item" data-nav="all">📄 所有页面</a>
-    <a class="nav-item" data-nav="journal">📓 日记</a>
-    <a class="nav-item" data-nav="graph">🕸️ 图谱</a>
+    <a class="nav-item" data-nav="home" title="首页"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
+    <a class="nav-item" data-nav="all" title="所有页面"><span class="nav-icon">📄</span><span class="nav-text">所有页面</span></a>
+    <a class="nav-item" data-nav="journal" title="日记"><span class="nav-icon">📓</span><span class="nav-text">日记</span></a>
+    <a class="nav-item" data-nav="graph" title="图谱"><span class="nav-icon">🕸️</span><span class="nav-text">图谱</span></a>
   </div>
   <div id="tags-section">
-    <h3>Tags</h3>
+    <h3 class="nav-text">Tags</h3>
     <div id="tags-list"></div>
   </div>
 </div>
 
 <!-- Main -->
-<div id="sidebar-tab" title="展开侧边栏">▶ 侧边栏</div>
 <div id="main">
   <div id="header">
     <input type="text" id="search-input" placeholder="搜索... (或输入 [[页面名]] 直达)" onkeydown="if(event.key==='Enter')doSearch()">
     <button id="search-btn" onclick="doSearch()">搜索</button>
     <button id="new-btn" onclick="newPage()">+ 新页面</button>
+    <button id="theme-toggle" title="切换主题">🌙</button>
   </div>
 
   <div id="content">
@@ -746,9 +781,11 @@ async function markUnresolved() {
 // ── Editor ────────────────────────────────────────────────────
 
 function initCodeMirror() {
+  const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+  const cmTheme = currentTheme === 'dark' ? 'dracula' : 'default';
   cm = CodeMirror.fromTextArea(document.getElementById('cm-editor'), {
     mode: 'markdown',
-    theme: 'dracula',
+    theme: cmTheme,
     lineNumbers: true,
     lineWrapping: true,
     matchBrackets: true,
@@ -1325,16 +1362,49 @@ function showToast(msg, type) {
   t._timer = setTimeout(() => { t.style.display = 'none'; }, 2500);
 }
 
-// ── Sidebar toggle ───────────────────────────────────────────
+// ── Sidebar toggle (narrow mode) ────────────────────────────
 
-document.getElementById('sidebar-toggle').addEventListener('click', () => {
-  document.body.classList.add('sidebar-collapsed');
-  document.getElementById('sidebar').classList.add('collapsed');
+const sidebar = document.getElementById('sidebar');
+const sidebarToggle = document.getElementById('sidebar-toggle');
+
+sidebarToggle.addEventListener('click', () => {
+  sidebar.classList.toggle('narrow');
+  const isNarrow = sidebar.classList.contains('narrow');
+  sidebarToggle.innerHTML = isNarrow ? '▶' : '◀';
+  sidebarToggle.title = isNarrow ? '展开侧边栏' : '收起侧边栏';
+  // Refresh CM after transition so it re-measures its container
+  setTimeout(() => { if (cm) cm.refresh(); }, 250);
 });
-document.getElementById('sidebar-tab').addEventListener('click', () => {
-  document.body.classList.remove('sidebar-collapsed');
-  document.getElementById('sidebar').classList.remove('collapsed');
+
+// ── Theme toggle ─────────────────────────────────────────────
+
+const themeToggle = document.getElementById('theme-toggle');
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('kb-theme', theme);
+  themeToggle.innerHTML = theme === 'dark' ? '🌙' : '☀️';
+  // Sync CodeMirror theme
+  if (cm) {
+    cm.setOption('theme', theme === 'dark' ? 'dracula' : 'default');
+  }
+}
+
+themeToggle.addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  setTheme(current === 'dark' ? 'light' : 'dark');
 });
+
+// Init theme from localStorage or system preference
+(function initTheme() {
+  const saved = localStorage.getItem('kb-theme');
+  if (saved) {
+    setTheme(saved);
+  } else {
+    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    setTheme(prefersLight ? 'light' : 'dark');
+  }
+})();
 
 // ── Boot ────────────────────────────────────────────────────────
 
