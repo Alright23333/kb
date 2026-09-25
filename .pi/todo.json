@@ -13,11 +13,11 @@
 		{
 			"id": "T-008",
 			"text": "侧边栏收窄模式：收起后留窄图标栏",
-			"status": "in-progress",
+			"status": "done",
 			"priority": "high",
 			"assignee": null,
 			"createdAt": "2026-09-25T08:29:30.163Z",
-			"updatedAt": "2026-09-25T08:33:24.910Z",
+			"updatedAt": "2026-09-25T08:33:34.183Z",
 			"blockedBy": null
 		}
 	],
