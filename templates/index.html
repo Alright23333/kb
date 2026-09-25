@@ -762,7 +762,7 @@ function initCodeMirror() {
         const refMenu = document.getElementById('ref-autocomplete');
         if (refMenu.style.display !== 'none') {
           const active = refMenu.querySelector('.ref-item.active');
-          if (active) { insertRef(active.dataset.ref); return; }
+          if (active) { savedRefCursor = cm.getCursor(); insertRef(active.dataset.ref); return; }
         }
         const cursor = cm.getCursor();
         const line = cm.getLine(cursor.line);
@@ -787,7 +787,7 @@ function initCodeMirror() {
         const refMenu = document.getElementById('ref-autocomplete');
         if (refMenu.style.display !== 'none') {
           const active = refMenu.querySelector('.ref-item.active');
-          if (active) { insertRef(active.dataset.ref); return; }
+          if (active) { savedRefCursor = cm.getCursor(); insertRef(active.dataset.ref); return; }
         }
         cm.replaceRange('  ', cm.getCursor());
       },
@@ -1034,7 +1034,11 @@ document.getElementById('slash-menu').addEventListener('click', (e) => {
 
 // ── Reference autocomplete ─────────────────────────────────────
 
+let savedRefCursor = null; // cursor captured at autocomplete open time
+
 async function showRefAutocomplete(query, cursor) {
+  // Save cursor position NOW, before focus is lost to the popup
+  savedRefCursor = { line: cursor.line, ch: cursor.ch };
   if (allPages.length === 0) {
     const resp = await fetch(`${API}/pages?limit=200`);
     allPages = await resp.json();
@@ -1063,6 +1067,7 @@ async function showRefAutocomplete(query, cursor) {
 
 function hideRefAutocomplete() {
   document.getElementById('ref-autocomplete').style.display = 'none';
+  savedRefCursor = null;
 }
 
 function navigateRefItems(dir) {
@@ -1083,17 +1088,18 @@ document.getElementById('ref-autocomplete').addEventListener('click', (e) => {
 });
 
 function insertRef(name) {
-  const cursor = cm.getCursor();
+  // Use the saved cursor captured when the autocomplete was shown,
+  // because clicking the popup steals focus from CM and getCursor()
+  // may return stale/zeroed coordinates.
+  const cursor = savedRefCursor || cm.getCursor();
   const line = cm.getLine(cursor.line);
   const start = line.lastIndexOf('[[');
   if (start === -1) {
-    // Fallback: no [[ found, just insert at cursor
     cm.replaceRange(name + ']]', cursor);
-    cm.setCursor({ line: cursor.line, ch: cursor.ch + name.length + 2 });
   } else {
     cm.replaceRange(name + ']]', { line: cursor.line, ch: start }, cursor);
-    cm.setCursor({ line: cursor.line, ch: start + name.length + 2 });
   }
+  savedRefCursor = null;
   cm.focus();
   hideRefAutocomplete();
   updatePreview();
