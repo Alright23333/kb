@@ -1470,7 +1470,8 @@ function parseTasks(content) {
 }
 
 function recalcRecurring(task, completionDate) {
-  if (!task.rec) return null;\  const due = new Date(task.dueDate || task.startDate);
+  if (!task.rec) return null;
+  const due = new Date(task.dueDate || task.startDate);
   const comp = new Date(completionDate);
   switch (task.rec) {
     case 'rec:1w':

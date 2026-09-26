@@ -43,11 +43,11 @@
 		{
 			"id": "T-011",
 			"text": "TODO 任务管理页面（甘特图 + 列表 + 设置）",
-			"status": "in-progress",
+			"status": "done",
 			"priority": "high",
 			"assignee": null,
 			"createdAt": "2026-09-26T01:33:53.401Z",
-			"updatedAt": "2026-09-26T01:34:32.945Z",
+			"updatedAt": "2026-09-26T01:37:40.137Z",
 			"blockedBy": null
 		}
 	],
