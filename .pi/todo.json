@@ -1,26 +1,6 @@
 {
 	"items": [
 		{
-			"id": "T-007",
-			"text": "前端主题系统：深色/浅色切换",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-25T08:29:30.163Z",
-			"updatedAt": "2026-09-25T08:33:18.731Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-008",
-			"text": "侧边栏收窄模式：收起后留窄图标栏",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-25T08:29:30.163Z",
-			"updatedAt": "2026-09-25T08:33:34.183Z",
-			"blockedBy": null
-		},
-		{
 			"id": "T-009",
 			"text": "性能优化：列表渲染 1 秒延迟",
 			"status": "pending",
@@ -31,35 +11,15 @@
 			"blockedBy": null
 		},
 		{
-			"id": "T-010",
-			"text": "修复 CodeMaker 上下键被吞的 bug",
-			"status": "done",
-			"priority": "critical",
-			"assignee": null,
-			"createdAt": "2026-09-26T01:33:53.400Z",
-			"updatedAt": "2026-09-26T01:34:32.944Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-011",
-			"text": "TODO 任务管理页面（甘特图 + 列表 + 设置）",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-26T01:33:53.401Z",
-			"updatedAt": "2026-09-26T01:37:40.137Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-012",
-			"text": "日记编辑器升级：复用 CodeMirror + 斜杠命令 + 引用补全",
+			"id": "T-013",
+			"text": "图谱全屏 + 缩放/平移/节点拖动",
 			"status": "in-progress",
 			"priority": "high",
 			"assignee": null,
-			"createdAt": "2026-09-26T11:23:48.267Z",
-			"updatedAt": "2026-09-26T11:23:52.526Z",
+			"createdAt": "2026-09-26T10:59:59.326Z",
+			"updatedAt": "2026-09-26T11:00:07.828Z",
 			"blockedBy": null
 		}
 	],
-	"counter": 12
+	"counter": 13
 }

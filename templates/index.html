@@ -208,6 +208,11 @@ body {
   overflow-y: auto;
   padding: 20px;
 }
+#content.graph-active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 /* Editor - Split View */
 #editor {
   display: none;
@@ -673,6 +678,24 @@ body {
         </div>
       </div>
       <div id="todo-content"></div>
+    </div>
+
+    <div id="graph-view" style="display:none;flex-direction:column;height:100%">
+      <div style="display:flex;align-items:center;gap:12px;padding:0 0 12px 0">
+        <h2 style="margin:0">🕸️ 知识图谱</h2>
+        <span id="graph-stats" style="color:var(--muted);font-size:13px"></span>
+        <div style="margin-left:auto;display:flex;gap:4px">
+          <button id="graph-zoom-in" title="放大" style="background:var(--card);border:1px solid var(--border);color:var(--fg);padding:4px 10px;border-radius:4px;cursor:pointer">＋</button>
+          <button id="graph-zoom-out" title="缩小" style="background:var(--card);border:1px solid var(--border);color:var(--fg);padding:4px 10px;border-radius:4px;cursor:pointer">－</button>
+          <button id="graph-reset" title="重置视图" style="background:var(--card);border:1px solid var(--border);color:var(--fg);padding:4px 10px;border-radius:4px;cursor:pointer">⟲</button>
+        </div>
+      </div>
+      <div id="graph-container" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--card);position:relative">
+        <svg id="graph-svg" width="100%" height="100%" style="cursor:grab">
+          <g id="graph-transform"></g>
+        </svg>
+        <div id="graph-tooltip" style="position:absolute;display:none;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;pointer-events:none;z-index:10"></div>
+      </div>
     </div>
 
     <div id="page-view" style="display:none">
@@ -1730,68 +1753,204 @@ function setGanttMode(mode) {
 }
 
 
+// ── Graph ──────────────────────────────────────────────────────
+
+let graphTransform = { x: 0, y: 0, k: 1 };
+let graphNodes = [];
+let graphNodeMap = {};
+let graphEdges = [];
+let graphDrag = null;
+
+function applyGraphTransform() {
+  const g = document.getElementById('graph-transform');
+  if (g) g.setAttribute('transform', `translate(${graphTransform.x},${graphTransform.y}) scale(${graphTransform.k})`);
+}
+
+function graphZoomAt(cx, cy, factor) {
+  const k2 = Math.max(0.1, Math.min(5, graphTransform.k * factor));
+  const ratio = k2 / graphTransform.k;
+  graphTransform.x = cx - (cx - graphTransform.x) * ratio;
+  graphTransform.y = cy - (cy - graphTransform.y) * ratio;
+  graphTransform.k = k2;
+  applyGraphTransform();
+}
+
+function resetGraphView() {
+  const svg = document.getElementById('graph-svg');
+  if (!svg || graphNodes.length === 0) return;
+  const w = svg.clientWidth, h = svg.clientHeight;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of graphNodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  }
+  const bw = Math.max(maxX - minX, 100);
+  const bh = Math.max(maxY - minY, 100);
+  const k = Math.min(w / (bw + 100), h / (bh + 100), 2);
+  graphTransform.k = k;
+  graphTransform.x = w / 2 - (minX + maxX) / 2 * k;
+  graphTransform.y = h / 2 - (minY + maxY) / 2 * k;
+  applyGraphTransform();
+}
+
+function updateGraphNode(node) {
+  const sel = `#graph-transform [data-name="${CSS.escape(node.name)}"]`;
+  document.querySelectorAll(sel).forEach(el => {
+    if (el.tagName === 'circle') {
+      el.setAttribute('cx', node.x);
+      el.setAttribute('cy', node.y);
+    } else if (el.tagName === 'text') {
+      el.setAttribute('x', node.x + 10);
+      el.setAttribute('y', node.y + 4);
+    }
+  });
+  for (const e of graphEdges) {
+    if (e.source === node.name || e.target === node.name) {
+      const line = document.querySelector(`#graph-transform line[data-edge="${CSS.escape(e.source)}→${CSS.escape(e.target)}"]`);
+      if (line) {
+        const s = graphNodeMap[e.source];
+        const t = graphNodeMap[e.target];
+        if (s && t) {
+          line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+          line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
+        }
+      }
+    }
+  }
+}
+
 async function showGraph() {
   hideAll();
-  document.getElementById('home-view').style.display = 'block';
+  document.getElementById('content').classList.add('graph-active');
+  document.getElementById('graph-view').style.display = 'flex';
   const resp = await fetch(`${API}/graph`);
   const data = await resp.json();
+  document.getElementById('graph-stats').textContent = `${data.nodes.length} 节点 · ${data.edges.length} 边`;
 
-  let html = `<h2 style="margin-bottom:16px">🕸️ 知识图谱</h2>
-    <p style="color:var(--muted);margin-bottom:16px">${data.nodes.length} 个节点, ${data.edges.length} 条边</p>`;
+  // Circular layout (deterministic)
+  const R = Math.max(data.nodes.length * 4, 200);
+  graphNodes = data.nodes.map((n, i) => {
+    const angle = (i / data.nodes.length) * Math.PI * 2;
+    return { name: n.name, x: Math.cos(angle) * R + R + 50, y: Math.sin(angle) * R + R + 50 };
+  });
+  graphNodeMap = {};
+  graphNodes.forEach(n => graphNodeMap[n.name] = n);
+  graphEdges = data.edges;
 
-  const nodes = data.nodes.map(n => ({ ...n, x: Math.random() * 600 + 50, y: Math.random() * 400 + 50, vx: 0, vy: 0 }));
-  const nodeMap = {};
-  nodes.forEach(n => nodeMap[n.name] = n);
-
-  for (let iter = 0; iter < 100; iter++) {
-    for (const n of nodes) {
-      n.vx += (Math.random() - 0.5) * 0.1;
-      n.vy += (Math.random() - 0.5) * 0.1;
-    }
-    for (const e of data.edges) {
-      const source = nodeMap[e.source];
-      const target = nodeMap[e.target];
-      if (!source || !target) continue;
-      const dx = target.x - source.x;
-      const dy = target.y - source.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const force = (dist - 120) * 0.01;
-      source.vx += dx / dist * force;
-      source.vy += dy / dist * force;
-      target.vx -= dx / dist * force;
-      target.vy -= dy / dist * force;
-    }
-    for (const n of nodes) {
-      n.x += n.vx;
-      n.y += n.vy;
-      n.vx *= 0.9;
-      n.vy *= 0.9;
-      n.x = Math.max(30, Math.min(670, n.x));
-      n.y = Math.max(30, Math.min(470, n.y));
-    }
-  }
-
-  html += '<svg width="700" height="500" style="background:var(--card);border-radius:8px">';
+  // Build SVG
+  const g = document.getElementById('graph-transform');
+  let svg = '';
   for (const e of data.edges) {
-    const source = nodeMap[e.source];
-    const target = nodeMap[e.target];
-    if (!source || !target) continue;
-    html += `<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="var(--border)" stroke-width="1"/>`;
+    const s = graphNodeMap[e.source];
+    const t = graphNodeMap[e.target];
+    if (!s || !t) continue;
+    svg += `<line data-edge="${escapeHtml(e.source)}→${escapeHtml(e.target)}" x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="var(--border)" stroke-width="1"/>`;
   }
-  for (const n of nodes) {
-    html += `<circle cx="${n.x}" cy="${n.y}" r="6" fill="var(--accent)" data-page="${escapeHtml(n.name)}" style="cursor:pointer"/>
-    <text x="${n.x + 10}" y="${n.y + 4}" fill="var(--fg)" font-size="11" data-page="${escapeHtml(n.name)}" style="cursor:pointer">${escapeHtml(n.name)}</text>`;
+  for (const n of graphNodes) {
+    const deg = data.edges.filter(e => e.source === n.name || e.target === n.name).length;
+    const r = 4 + Math.min(deg, 10);
+    svg += `<circle data-name="${escapeHtml(n.name)}" cx="${n.x}" cy="${n.y}" r="${r}" fill="var(--accent)" style="cursor:pointer"/>`;
+    svg += `<text data-name="${escapeHtml(n.name)}" x="${n.x + 10}" y="${n.y + 4}" fill="var(--fg)" font-size="11" style="cursor:pointer;pointer-events:none">${escapeHtml(n.name)}</text>`;
   }
-  html += '</svg>';
+  g.innerHTML = svg;
 
-  document.getElementById('home-view').innerHTML = html;
+  setTimeout(resetGraphView, 0);
+
+  // Bind events once
+  if (!showGraph._bound) {
+    showGraph._bound = true;
+    const svgEl = document.getElementById('graph-svg');
+    const container = document.getElementById('graph-container');
+    const tooltip = document.getElementById('graph-tooltip');
+
+    container.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      graphZoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.1 : 0.9);
+    }, { passive: false });
+
+    svgEl.addEventListener('mousedown', (e) => {
+      const circle = e.target.closest('circle[data-name]');
+      if (circle) {
+        graphDrag = { node: graphNodeMap[circle.dataset.name], _startX: e.clientX, _startY: e.clientY, _moved: false };
+      } else {
+        graphDrag = { pan: true, _startX: e.clientX, _startY: e.clientY, _tx: graphTransform.x, _ty: graphTransform.y };
+        svgEl.style.cursor = 'grabbing';
+      }
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!graphDrag) return;
+      const dx = e.clientX - graphDrag._startX;
+      const dy = e.clientY - graphDrag._startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) graphDrag._moved = true;
+      if (graphDrag.pan) {
+        graphTransform.x = graphDrag._tx + dx;
+        graphTransform.y = graphDrag._ty + dy;
+        applyGraphTransform();
+      } else if (graphDrag.node) {
+        const rect = container.getBoundingClientRect();
+        const gx = (e.clientX - rect.left - graphTransform.x) / graphTransform.k;
+        const gy = (e.clientY - rect.top - graphTransform.y) / graphTransform.k;
+        graphDrag.node.x = gx;
+        graphDrag.node.y = gy;
+        updateGraphNode(graphDrag.node);
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      graphDrag = null;
+      svgEl.style.cursor = 'grab';
+    });
+
+    svgEl.addEventListener('click', (e) => {
+      const circle = e.target.closest('circle[data-name]');
+      if (circle && (!graphDrag || !graphDrag._moved)) {
+        navigate('page', circle.dataset.name);
+      }
+    });
+
+    svgEl.addEventListener('mousemove', (e) => {
+      const circle = e.target.closest('circle[data-name]');
+      if (circle && !graphDrag) {
+        const name = circle.dataset.name;
+        const deg = graphEdges.filter(edge => edge.source === name || edge.target === name).length;
+        tooltip.textContent = `${name} (${deg} 连接)`;
+        tooltip.style.display = 'block';
+        const rect = container.getBoundingClientRect();
+        tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+        tooltip.style.top = (e.clientY - rect.top - 30) + 'px';
+      } else {
+        tooltip.style.display = 'none';
+      }
+    });
+
+    svgEl.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
+
+    document.getElementById('graph-zoom-in').addEventListener('click', () => {
+      const s = document.getElementById('graph-svg');
+      graphZoomAt(s.clientWidth / 2, s.clientHeight / 2, 1.3);
+    });
+    document.getElementById('graph-zoom-out').addEventListener('click', () => {
+      const s = document.getElementById('graph-svg');
+      graphZoomAt(s.clientWidth / 2, s.clientHeight / 2, 0.7);
+    });
+    document.getElementById('graph-reset').addEventListener('click', resetGraphView);
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────
 
 function hideAll() {
+  document.getElementById('content').classList.remove('graph-active');
   document.getElementById('home-view').style.display = 'none';
   document.getElementById('todo-view').style.display = 'none';
+  document.getElementById('graph-view').style.display = 'none';
   document.getElementById('page-view').style.display = 'none';
   document.getElementById('editor').style.display = 'none';
 }
