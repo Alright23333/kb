@@ -965,10 +965,14 @@ async function markUnresolved() {
 
 // ── Editor ────────────────────────────────────────────────────
 
-function initCodeMirror() {
+let currentSaveMode = 'page'; // 'page' | 'journal'
+let journalDate = '';
+
+function initCM(textareaEl, opts) {
+  opts = opts || {};
   const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
   const cmTheme = currentTheme === 'dark' ? 'dracula' : 'default';
-  cm = CodeMirror.fromTextArea(document.getElementById('cm-editor'), {
+  cm = CodeMirror.fromTextArea(textareaEl, {
     mode: 'markdown',
     theme: cmTheme,
     lineNumbers: true,
@@ -977,8 +981,8 @@ function initCodeMirror() {
     autoCloseBrackets: false,
     styleActiveLine: true,
     extraKeys: {
-      'Ctrl-S': () => savePage(),
-      'Cmd-S': () => savePage(),
+      'Ctrl-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
+      'Cmd-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
       'Enter': (cm) => {
         // If ref autocomplete is open, select the active item
         const refMenu = document.getElementById('ref-autocomplete');
@@ -1109,16 +1113,19 @@ function renderContent(content) {
   return md.render(content || '');
 }
 
+let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">';
+
 function newPage() {
   hideAll();
   currentName = null;
+  currentSaveMode = 'page';
   document.getElementById('editor').style.display = 'block';
+  document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = '';
 
-  if (!cm) initCodeMirror();
+  if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue('');
   cm.focus();
-  // Reset divider to 50%
   document.getElementById('editor-pane').style.width = '50%';
   setTimeout(() => cm.refresh(), 0);
   updatePreview();
@@ -1127,13 +1134,14 @@ function newPage() {
 function editPage(page) {
   hideAll();
   currentName = page.name;
+  currentSaveMode = 'page';
   document.getElementById('editor').style.display = 'block';
+  document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = page.name;
 
-  if (!cm) initCodeMirror();
+  if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue(page.content);
   cm.focus();
-  // Reset divider to 50%
   document.getElementById('editor-pane').style.width = '50%';
   setTimeout(() => cm.refresh(), 0);
   updatePreview();
@@ -1340,41 +1348,43 @@ function insertRef(name) {
 
 async function showJournal(date) {
   hideAll();
-  document.getElementById('home-view').style.display = 'block';
+  currentSaveMode = 'journal';
 
   if (!date) {
     const today = new Date();
     const off = today.getTimezoneOffset();
     date = new Date(today - off * 60000).toISOString().split('T')[0];
   }
+  journalDate = date;
 
   let content = '';
-  let exists = false;
   const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`);
   if (resp.ok) {
     const data = await resp.json();
     content = data.content;
-    exists = true;
   }
 
-  const html = `<h2 style="margin-bottom:16px">📓 日记</h2>
-    <div class="journal-nav" style="margin-bottom:16px">
-      <input type="date" id="journal-date" value="${date}" onchange="showJournal(this.value)">
-    </div>
-    <textarea id="journal-content" style="width:100%;height:60vh;background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:16px;font-family:monospace;font-size:14px;border-radius:6px;resize:none" placeholder="今天的日记...">${escapeHtml(content)}</textarea>
-    <div style="margin-top:12px"><button id="save-btn" onclick="saveJournal(${exists})">保存日记</button></div>`;
+  // Use the editor view with a date picker in the header
+  document.getElementById('editor').style.display = 'block';
+  document.getElementById('editor-header').innerHTML =
+    '<input type="date" id="journal-date-input" value="' + date + '" onchange="journalDate=this.value" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px">';
 
-  document.getElementById('home-view').innerHTML = html;
+  if (!cm) initCM(document.getElementById('cm-editor'));
+  cm.setValue(content);
+  cm.focus();
+  document.getElementById('editor-pane').style.width = '50%';
+  setTimeout(() => cm.refresh(), 0);
+  updatePreview();
 }
 
-async function saveJournal(exists) {
-  const date = document.getElementById('journal-date').value;
-  const content = document.getElementById('journal-content').value;
+async function saveJournal() {
+  const date = journalDate || document.getElementById('journal-date-input').value;
+  const content = cm.getValue();
 
   const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`, {
-    method: exists ? 'PUT' : 'POST',
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(exists ? { content } : { name: date, content }),
+    body: JSON.stringify({ name: date, content }),
   });
 
   if (resp.ok) {
