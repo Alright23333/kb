@@ -19,7 +19,17 @@
 			"createdAt": "2026-09-25T08:29:30.163Z",
 			"updatedAt": "2026-09-25T08:33:34.183Z",
 			"blockedBy": null
+		},
+		{
+			"id": "T-009",
+			"text": "性能优化：列表渲染 1 秒延迟",
+			"status": "pending",
+			"priority": "medium",
+			"assignee": null,
+			"createdAt": "2026-09-26T01:15:18.365Z",
+			"updatedAt": "2026-09-26T01:15:18.365Z",
+			"blockedBy": null
 		}
 	],
-	"counter": 8
+	"counter": 9
 }

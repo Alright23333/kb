@@ -686,26 +686,41 @@ async function showHome() {
 
 async function showAllPages() {
   hideAll();
-  document.getElementById('home-view').style.display = 'block';
+  const view = document.getElementById('home-view');
+  view.style.display = 'block';
+  view.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
 
-  const resp = await fetch(`${API}/pages?limit=200`);
+  const resp = await fetch(`${API}/pages?limit=500`);
   const pages = await resp.json();
 
-  // Sort alphabetically (case-insensitive)
-  pages.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  // Fast sort: pre-compute lowercase names, use simple comparison
+  pages.sort((a, b) => {
+    const x = a.name.toLowerCase();
+    const y = b.name.toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
 
-  let html = `<h2 style="margin-bottom:16px">📄 所有页面 <span style="color:var(--muted);font-size:14px;font-weight:400">(${pages.length})</span></h2>`;
-  html += '<input type="text" id="all-pages-filter" placeholder="筛选页面名..." style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px;margin-bottom:16px" oninput="filterAllPages()">';
-  html += '<div id="all-pages-list">';
+  const frag = document.createDocumentFragment();
+
+  const header = document.createElement('div');
+  header.innerHTML = `<h2 style="margin-bottom:16px">📄 所有页面 <span style="color:var(--muted);font-size:14px;font-weight:400">(${pages.length})</span></h2>
+    <input type="text" id="all-pages-filter" placeholder="筛选页面名..." style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px;margin-bottom:16px" oninput="filterAllPages()">`;
+  frag.appendChild(header);
+
+  const list = document.createElement('div');
+  list.id = 'all-pages-list';
   for (const p of pages) {
-    html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}" data-name-lower="${escapeHtml(p.name.toLowerCase())}">
-      <div class="title">${escapeHtml(p.name)}</div>
-      <div class="meta">${formatDate(p.updated_at)}</div>
-    </div>`;
+    const el = document.createElement('div');
+    el.className = 'page-list-item';
+    el.dataset.page = p.name;
+    el.dataset.nameLower = p.name.toLowerCase();
+    el.innerHTML = `<div class="title">${escapeHtml(p.name)}</div><div class="meta">${formatDate(p.updated_at)}</div>`;
+    list.appendChild(el);
   }
-  html += '</div>';
+  frag.appendChild(list);
 
-  document.getElementById('home-view').innerHTML = html;
+  view.innerHTML = '';
+  view.appendChild(frag);
 }
 
 function filterAllPages() {
@@ -1339,18 +1354,22 @@ function hideAll() {
   document.getElementById('editor').style.display = 'none';
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}
-
 function formatDate(s) {
   if (!s) return '';
-  const d = new Date(s.replace(' ', 'T') + (s.includes('+') || s.includes('Z') ? '' : ''));
+  // Fast path: SQLite datetime format "YYYY-MM-DD HH:MM:SS" — return as-is
+  if (typeof s === 'string' && s.length >= 19 && s[4] === '-' && s[10] === ' ') {
+    return s.slice(0, 16);  // "YYYY-MM-DD HH:MM"
+  }
+  // Fallback for other formats (ISO, etc.)
+  const d = new Date(s.replace(' ', 'T'));
   if (isNaN(d.getTime())) return s;
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function showToast(msg, type) {
