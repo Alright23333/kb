@@ -40,8 +40,12 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 - CodeMirror 5（不是 6，CDN 6.65.7 实际是 5.65.7）
 - markdown-it 自定义 `wikilink` 内联规则：`[[target]]` → `<a data-page="target">`
-- 全局事件委托处理所有点击（`[data-page]`、`[[data-tag]`、`[data-nav]`）
+- Frappe Gantt 0.6.1（甘特图渲染，CDN）
+- 全局事件委托处理所有点击（`[data-page]`、`[data-tag]`、`[data-nav]`）
 - `navigate(target, ...args)` 是唯一路由入口
+- 主题：CSS 变量 `[data-theme="dark"/"light"]`，localStorage 持久化
+- 日记编辑器复用页面编辑器，`currentSaveMode` 区分保存目标
+- 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图
 
 ### `import_logseq.py` — Logseq 导入
 
@@ -89,10 +93,39 @@ CDN 上 `6.65.7` 实际是 `5.65.7`。v6 是完全不同的 ESM 架构，不要�
 ### 5. 日记是页面
 
 日记不是独立表，是 `name = YYYY-MM-DD` 的页面。不要为日记建单独的表或 API。
+日记编辑器复用页面编辑器的 CodeMirror 实例，通过 `currentSaveMode = 'journal' | 'page'` 区分保存目标。`showJournal()` 会替换 `#editor-header` 为日期选择器，`newPage()`/`editPage()` 必须用 `originalHeaderHTML` 恢复。
 
 ### 6. refs 写入不完整
 
 只插不删会导致「删掉的引用」残留。每次 save 必须 `DELETE FROM refs WHERE source_id=?` 再重插。
+
+### 7. insertRef 用整行替换
+
+`insertRef` 通过 `lastIndexOf('[[')` 找到行内最后一个 `[[`，替换整行文本。**不要改回 cursor 范围方式**（`replaceRange(from, cursor)`）——点击补全菜单时 CodeMirror 失焦，`getCursor()` 可能返回错误坐标，导致吞字符。
+
+### 8. CodeMirror.Pass 必须 return
+
+```javascript
+// ❌ 错误：表达式语句，不返回，CodeMirror 认为 key 已处理
+'Up': (cm) => {
+  if (...) { ...; return; }
+  CodeMirror.Pass;  // 吞掉上下键！
+},
+
+// ✅ 正确：必须 return
+'Up': (cm) => {
+  if (...) { ...; return; }
+  return CodeMirror.Pass;
+},
+```
+
+### 9. Frappe Gantt 日期范围
+
+Frappe Gantt 的 `refresh()` 不重算视图日期范围。切换日期筛选必须 `ganttChart = null` 后重建实例，否则甘特图仍显示全年时长。
+
+### 10. 主题切换联动 CodeMirror
+
+`setTheme()` 调用 `cm.setOption('theme', ...)` 时，如果 `cm` 尚未初始化（用户还没打开编辑器），会报错。必须判空：`if (cm) { ... }`。
 
 ## 修改流程
 
@@ -140,10 +173,11 @@ assert len(seen) == 1  # 归并后只有 1 个
 
 ## 部署注意事项
 
-- 服务绑定 `0.0.0.0:8080`，通过 Tailscale 访问
-- 重启后需手动拉起（无 systemd、无 Docker）
-- 数据库备份：直接复制 `data/kb.db`（WAL 模式下需先 `PRAGMA wal_checkpoint`）
-- nftables 需放行 tailscale0 入站流量
+- **推荐 Docker Compose**：`docker compose up -d --build` 更新，数据库挂载到宿主机 `./data`
+- 或直接 `uvicorn main:app --host 0.0.0.0 --port 8080`
+- 通过 Tailscale 内网访问，CORS `*` 仅供内网使用（不要暴露公网）
+- 数据库备份：`sqlite3 data/kb.db "PRAGMA wal_checkpoint" && cp data/kb.db backup/`
+- 环境变量 `KB_DB_PATH` 指定数据库路径（默认 `/home/user/services/kb/data/kb.db`）
 
 ## 不要做的事
 
@@ -154,3 +188,6 @@ assert len(seen) == 1  # 归并后只有 1 个
 - ❌ 不要为日记建独立表
 - ❌ 不要提交数据库文件到 git
 - ❌ 不要在 API 层做大小写敏感比较
+- ❌ 不要把 insertRef 改回 cursor 范围方式（会吞字符）
+- ❌ 不要在 extraKeys 里写 `CodeMirror.Pass;` 而不 return（会吞上下键）
+- ❌ 不要用 `ganttChart.refresh()` 换日期范围（不重算视图，需销毁重建）
