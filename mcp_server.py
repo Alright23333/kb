@@ -1,12 +1,27 @@
 """MCP server exposing KB tools for AI agents.
 
-Run: python mcp.py  (stdio transport, for Claude Desktop / Cursor / etc.)
+Run: python mcp_server.py  (stdio transport)
+
+NOTE: MCP SDK only inherits whitelist env vars (PATH, HOME, etc).
+You MUST set KB_DB_PATH in your MCP client config, or place the DB
+at <script_dir>/data/kb.db (the default fallback).
+
+Claude Desktop config (claude_desktop_config.json):
+{
+  "mcpServers": {
+    "kb": {
+      "command": "python3",
+      "args": ["/path/to/kb/mcp_server.py"],
+      "env": { "KB_DB_PATH": "/path/to/kb/data/kb.db" }
+    }
+  }
+}
 
 Tools:
-  search(query)           → FTS search, returns page names
-  get_page(name)          → full page content + tags + links + backlinks
+  search(query)           → FTS search
+  get_page(name)          → full page + tags + links + backlinks
   create_page(name, content) → create new page
-  update_page(name, content) → update existing page content
+  update_page(name, content) → update existing page
   list_pages()            → all page names
   get_tags()              → all tags with counts
   get_backlinks(name)     → pages linking to this page
@@ -19,6 +34,7 @@ import sqlite3
 from fastmcp import FastMCP
 
 DB_PATH = os.environ.get("KB_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "kb.db"))
+DB_PATH = os.path.expanduser(DB_PATH)
 
 mcp = FastMCP("KB")
 
