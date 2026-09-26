@@ -296,6 +296,94 @@ body {
   margin-left: auto;
 }
 #save-btn:hover { background: #3a8eef; }
+#sidebar-settings {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
+}
+#sidebar-settings-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+#sidebar-settings-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#settings-panel {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#settings-panel.open { display: flex; }
+#settings-panel .panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 90vw;
+}
+#settings-panel h3 { margin-bottom: 16px; font-size: 16px; }
+#settings-panel label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+#settings-panel input[type="text"], #settings-panel select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+#settings-panel .btns { display: flex; gap: 8px; justify-content: flex-end; }
+/* TODO Page */
+#todo-view { display: none; }
+#todo-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+#todo-tabs { display: flex; gap: 4px; }
+#todo-tabs button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#todo-tabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+#todo-content { flex: 1; overflow: auto; }
+.gantt-container { overflow-x: auto; padding-bottom: 20px; }
+.gantt-table { border-collapse: collapse; min-width: 100%; }
+.gantt-table th { text-align: left; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); }
+.gantt-row td { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+.gantt-bar-cell { position: relative; min-width: 400px; }
+.gantt-bar { position: absolute; height: 20px; border-radius: 3px; top: 50%; transform: translateY(-50%); min-width: 4px; }
+.gantt-bar.p1 { background: #e74c3c; }
+.gantt-bar.p2 { background: #e67e22; }
+.gantt-bar.p3 { background: #f1c40f; }
+.gantt-bar.p4 { background: #2ecc71; }
+.gantt-today { position: absolute; width: 2px; background: var(--accent); top: 0; bottom: 0; z-index: 2; }
+.todo-list-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--card); border-radius: 6px; margin-bottom: 6px; }
+.todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
+.todo-list-item .priority.p1 { background: #e74c3c; }
+.todo-list-item .priority.p2 { background: #e67e22; }
+.todo-list-item .priority.p3 { background: #f1c40f; color: #333; }
+.todo-list-item .priority.p4 { background: #2ecc71; }
+.todo-list-item .task-info { flex: 1; min-width: 0; }
+.todo-list-item .task-title { font-weight: 500; font-size: 14px; }
+.todo-list-item .task-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.todo-list-item .task-due { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+.todo-list-item .task-due.overdue { color: #e74c3c; }
 /* Slash menu */
 #slash-menu {
   position: absolute;
@@ -508,10 +596,14 @@ body {
     <a class="nav-item" data-nav="all" title="所有页面"><span class="nav-icon">📄</span><span class="nav-text">所有页面</span></a>
     <a class="nav-item" data-nav="journal" title="日记"><span class="nav-icon">📓</span><span class="nav-text">日记</span></a>
     <a class="nav-item" data-nav="graph" title="图谱"><span class="nav-icon">🕸️</span><span class="nav-text">图谱</span></a>
+    <a class="nav-item" data-nav="todo" title="任务"><span class="nav-icon">📋</span><span class="nav-text">任务</span></a>
   </div>
   <div id="tags-section">
     <h3 class="nav-text">Tags</h3>
     <div id="tags-list"></div>
+  </div>
+  <div id="sidebar-settings">
+    <button id="sidebar-settings-btn" title="设置">⚙️</button>
   </div>
 </div>
 
@@ -526,6 +618,17 @@ body {
 
   <div id="content">
     <div id="home-view"></div>
+
+    <div id="todo-view">
+      <div id="todo-header">
+        <h2 style="margin:0">📋 任务</h2>
+        <div id="todo-tabs">
+          <button id="tab-list" class="active" onclick="switchTodoTab('list')">列表</button>
+          <button id="tab-gantt" onclick="switchTodoTab('gantt')">甘特图</button>
+        </div>
+      </div>
+      <div id="todo-content"></div>
+    </div>
 
     <div id="page-view" style="display:none">
       <div id="page-header">
@@ -560,6 +663,25 @@ body {
   </div>
 </div>
 
+<!-- Settings Panel -->
+<div id="settings-panel">
+  <div class="panel">
+    <h3>⚙️ 设置</h3>
+    <label>任务来源页面</label>
+    <input type="text" id="setting-task-page" placeholder="例如: Tasks" value="Tasks">
+    <label>任务重复语法说明</label>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+      <code>rec:1w</code> 普通每周（完成日+7天）<br>
+      <code>rec:+1m</code> 严格每月（固定日期）<br>
+      <code>rec:3b</code> 每3个工作日<br>
+      <code>rec:+1y</code> 严格每年
+    </div>
+    <div class="btns">
+      <button onclick="closeSettings()" style="background:transparent;border:1px solid var(--border);color:var(--fg);padding:6px 16px;border-radius:4px;cursor:pointer">取消</button>
+      <button onclick="saveSettings()" style="background:var(--accent);border:none;color:#fff;padding:6px 16px;border-radius:4px;cursor:pointer">保存</button>
+    </div>
+  </div>
+</div>
 <!-- Slash menu -->
 <div id="slash-menu"></div>
 <!-- Reference autocomplete -->
@@ -648,6 +770,9 @@ function navigate(target, ...args) {
   } else if (target === 'graph') {
     showGraph();
     document.querySelectorAll('.nav-item')[3].classList.add('active');
+  } else if (target === 'todo') {
+    showTodo();
+    document.querySelectorAll('.nav-item')[4].classList.add('active');
   } else if (target === 'page') {
     loadPage(args[0]);
   } else if (target === 'tag') {
@@ -1287,7 +1412,210 @@ async function doSearch() {
   document.getElementById('home-view').innerHTML = html;
 }
 
-// ── Graph ──────────────────────────────────────────────────────
+// ── Settings ─────────────────────────────────────────────────
+
+function openSettings() {
+  document.getElementById('settings-panel').classList.add('open');
+  const saved = localStorage.getItem('kb-task-page') || 'Tasks';
+  document.getElementById('setting-task-page').value = saved;
+}
+function closeSettings() {
+  document.getElementById('settings-panel').classList.remove('open');
+}
+function saveSettings() {
+  const page = document.getElementById('setting-task-page').value.trim() || 'Tasks';
+  localStorage.setItem('kb-task-page', page);
+  closeSettings();
+  showTodo();
+}
+document.getElementById('sidebar-settings-btn').addEventListener('click', openSettings);
+document.getElementById('settings-panel').addEventListener('click', (e) => {
+  if (e.target.id === 'settings-panel') closeSettings();
+});
+
+// ── TODO ───────────────────────────────────────────────────────
+
+function getTaskPage() {
+  return localStorage.getItem('kb-task-page') || 'Tasks';
+}
+
+function parseTaskLine(line) {
+  // Format: priority start-date [[links]] content due:end-date rec:cycle
+  const m = line.match(/^\s*(p[1-4]|\d)\s+(\d{4}-\d{2}-\d{2})\s+(.*?)(?:\s+due:(\d{4}-\d{2}-\d{2}))?(?:\s+(rec:\S+))?\s*$/i);
+  if (!m) return null;
+  let [, priority, startDate, middle, dueDate, rec] = m;
+  priority = priority.toLowerCase();
+  if (priority === '1' || priority === '2' || priority === '3' || priority === '4') priority = 'p' + priority;
+
+  // Extract [[links]] from middle
+  const links = [];
+  const linkRe = /\[\[([^\]]+)\]\]/g;
+  let lm;
+  while ((lm = linkRe.exec(middle)) !== null) {
+    links.push(lm[1].split('|')[0].trim());
+  }
+  const title = middle.replace(linkRe, '').trim().replace(/\s+/g, ' ');
+  if (!title) return null;
+
+  return { priority, startDate, title, links, dueDate: dueDate || null, rec: rec || null };
+}
+
+function parseTasks(content) {
+  const tasks = [];
+  for (const line of content.split('\n')) {
+    const t = parseTaskLine(line);
+    if (t) tasks.push(t);
+  }
+  return tasks;
+}
+
+function recalcRecurring(task, completionDate) {
+  if (!task.rec) return null;\  const due = new Date(task.dueDate || task.startDate);
+  const comp = new Date(completionDate);
+  switch (task.rec) {
+    case 'rec:1w':
+      comp.setDate(comp.getDate() + 7);
+      return comp.toISOString().slice(0, 10);
+    case 'rec:+1m':
+      // Strict monthly: same day next month
+      due.setMonth(due.getMonth() + 1);
+      return due.toISOString().slice(0, 10);
+    case 'rec:1b': {
+      let d = new Date(comp);
+      let added = 0;
+      while (added < 1) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    case 'rec:3b': {
+      let d = new Date(comp);
+      let added = 0;
+      while (added < 3) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    case 'rec:+1y':
+      due.setFullYear(due.getFullYear() + 1);
+      return due.toISOString().slice(0, 10);
+    default:
+      // rec:Nw, rec:Nd pattern
+      const m = task.rec.match(/^rec:(\d+)(w|d)$/);
+      if (m) {
+        const n = parseInt(m[1]);
+        const unit = m[2];
+        let d = new Date(comp);
+        if (unit === 'w') d.setDate(d.getDate() + n * 7);
+        else d.setDate(d.getDate() + n);
+        return d.toISOString().slice(0, 10);
+      }
+      return null;
+  }
+}
+
+function switchTodoTab(tab) {
+  document.getElementById('tab-list').classList.toggle('active', tab === 'list');
+  document.getElementById('tab-gantt').classList.toggle('active', tab === 'gantt');
+  renderTodo(tab);
+}
+
+async function showTodo() {
+  hideAll();
+  document.getElementById('todo-view').style.display = 'block';
+  renderTodo(document.getElementById('tab-gantt').classList.contains('active') ? 'gantt' : 'list');
+}
+
+async function renderTodo(view) {
+  const content = document.getElementById('todo-content');
+  content.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(getTaskPage())}`);
+    if (!resp.ok) {
+      content.innerHTML = `<div style="padding:20px;color:var(--muted)">页面 "${escapeHtml(getTaskPage())}" 不存在。请在设置中指定任务来源页面。</div>`;
+      return;
+    }
+    const page = await resp.json();
+    const tasks = parseTasks(page.content);
+    if (tasks.length === 0) {
+      content.innerHTML = '<div style="padding:20px;color:var(--muted)">该页面没有检测到任务。任务格式：<br><code>p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w</code></div>';
+      return;
+    }
+    if (view === 'gantt') renderGantt(tasks);
+    else renderList(tasks);
+  } catch (e) {
+    content.innerHTML = `<div style="padding:20px;color:#e74c3c">错误: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderList(tasks) {
+  const content = document.getElementById('todo-content');
+  const today = new Date().toISOString().slice(0, 10);
+  let html = '';
+  for (const t of tasks) {
+    const isOverdue = t.dueDate && t.dueDate < today;
+    html += `<div class="todo-list-item">
+      <div class="priority ${t.priority}">${t.priority.slice(1)}</div>
+      <div class="task-info">
+        <div class="task-title">${escapeHtml(t.title)}</div>
+        <div class="task-meta">${t.startDate}${t.links.length ? ' · ' + t.links.map(l => `<a href="#" data-page="${escapeHtml(l)}" style="color:var(--accent)">${escapeHtml(l)}</a>`).join(', ') : ''}</div>
+      </div>
+      <div class="task-due${isOverdue ? ' overdue' : ''}">${t.dueDate || '—'}${t.rec ? ' 🔁' : ''}</div>
+    </div>`;
+  }
+  content.innerHTML = html;
+}
+
+function renderGantt(tasks) {
+  const content = document.getElementById('todo-content');
+  // Find date range
+  let minDate = Infinity, maxDate = 0;
+  for (const t of tasks) {
+    const s = new Date(t.startDate).getTime();
+    const e = new Date(t.dueDate || t.startDate).getTime();
+    if (s < minDate) minDate = s;
+    if (e > maxDate) maxDate = e;
+  }
+  // Pad range
+  minDate -= 86400000 * 3;
+  maxDate += 86400000 * 3;
+  const totalDays = Math.ceil((maxDate - minDate) / 86400000);
+  const dayWidth = 30;
+  const chartWidth = totalDays * dayWidth;
+
+  const today = new Date();
+  const todayX = (today.getTime() - minDate) / 86400000 * dayWidth;
+
+  // Build month header
+  let header = '<tr><th style="min-width:160px">任务</th>';
+  let prevMonth = '';
+  for (let i = 0; i < totalDays; i++) {
+    const d = new Date(minDate + i * 86400000);
+    const month = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const day = d.getDate();
+    if (month !== prevMonth) {
+      header += `<th style="min-width:60px;font-size:11px;color:var(--muted)">${month}</th>`;
+      prevMonth = month;
+    } else {
+      header += `<th style="font-size:10px;color:var(--muted);text-align:center">${day}</th>`;
+    }
+  }
+  header += '</tr>';
+
+  let rows = '';
+  for (const t of tasks) {
+    const s = new Date(t.startDate).getTime();
+    const e = new Date(t.dueDate || t.startDate).getTime();
+    const x = (s - minDate) / 86400000 * dayWidth;
+    const w = Math.max((e - s) / 86400000 * dayWidth, dayWidth);
+    rows += `<tr class="gantt-row"><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.title)}</td><td class="gantt-bar-cell" style="width:${chartWidth}px"><div style="position:relative;height:26px"><div class="gantt-bar ${t.priority}" style="left:${x}px;width:${w}px"></div><div class="gantt-today" style="left:${todayX}px"></div></div></td></tr>`;
+  }
+
+  content.innerHTML = `<div class="gantt-container"><table class="gantt-table">${header}${rows}</table>></div>`;
+}
+
 
 async function showGraph() {
   hideAll();
@@ -1350,6 +1678,7 @@ async function showGraph() {
 
 function hideAll() {
   document.getElementById('home-view').style.display = 'none';
+  document.getElementById('todo-view').style.display = 'none';
   document.getElementById('page-view').style.display = 'none';
   document.getElementById('editor').style.display = 'none';
 }
