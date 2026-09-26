@@ -352,7 +352,8 @@ body {
 #settings-panel .btns { display: flex; gap: 8px; justify-content: flex-end; }
 /* TODO Page */
 #todo-view { display: none; }
-#gantt-view-modes { display: flex; gap: 4px; margin-left: auto; }
+#gantt-view-modes { display: none; gap: 4px; margin-left: auto; align-items: center; }
+#todo-view.gantt-active #gantt-view-modes { display: flex; }
 #gantt-view-modes button {
   background: var(--card);
   border: 1px solid var(--border);
@@ -663,9 +664,12 @@ body {
           <button id="tab-gantt" onclick="switchTodoTab('gantt')">甘特图</button>
         </div>
         <div id="gantt-view-modes">
-          <button data-mode="Day" class="active" onclick="setGanttMode('Day')">日</button>
+          <button data-mode="Day" onclick="setGanttMode('Day')">日</button>
           <button data-mode="Week" onclick="setGanttMode('Week')">周</button>
-          <button data-mode="Month" onclick="setGanttMode('Month')">月</button>
+          <button data-mode="Month" class="active" onclick="setGanttMode('Month')">月</button>
+          <input type="date" id="gantt-date-from" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:3px 6px;border-radius:4px;font-size:12px" onchange="updateGanttRange()" title="开始日期">
+          <span style="color:var(--muted)">—</span>
+          <input type="date" id="gantt-date-to" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:3px 6px;border-radius:4px;font-size:12px" onchange="updateGanttRange()" title="结束日期">
         </div>
       </div>
       <div id="todo-content"></div>
@@ -1561,6 +1565,7 @@ function recalcRecurring(task, completionDate) {
 function switchTodoTab(tab) {
   document.getElementById('tab-list').classList.toggle('active', tab === 'list');
   document.getElementById('tab-gantt').classList.toggle('active', tab === 'gantt');
+  document.getElementById('todo-view').classList.toggle('gantt-active', tab === 'gantt');
   renderTodo(tab);
 }
 
@@ -1585,8 +1590,12 @@ async function renderTodo(view) {
       content.innerHTML = '<div style="padding:20px;color:var(--muted)">该页面没有检测到任务。任务格式：<br><code>p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w</code></div>';
       return;
     }
-    if (view === 'gantt') renderGantt(tasks);
-    else renderList(tasks);
+    if (view === 'gantt') {
+      ganttChart = null;  // force re-create
+      renderGantt(tasks);
+    } else {
+      renderList(tasks);
+    }
   } catch (e) {
     content.innerHTML = `<div style="padding:20px;color:#e74c3c">错误: ${escapeHtml(e.message)}</div>`;
   }
@@ -1612,12 +1621,58 @@ function renderList(tasks) {
 
 let ganttChart = null;
 let ganttCurrentMode = 'Month';
+let allGanttTasks = [];
+let ganttDateFrom = null;
+let ganttDateTo = null;
+
+function filterGanttTasks() {
+  let tasks = allGanttTasks;
+  if (ganttDateFrom || ganttDateTo) {
+    tasks = allGanttTasks.filter(t => {
+      const s = t.startDate;
+      const e = t.dueDate || t.startDate;
+      if (ganttDateFrom && e < ganttDateFrom) return false;
+      if (ganttDateTo && s > ganttDateTo) return false;
+      return true;
+    });
+  }
+  return tasks;
+}
+
+function updateGanttRange() {
+  ganttDateFrom = document.getElementById('gantt-date-from').value || null;
+  ganttDateTo = document.getElementById('gantt-date-to').value || null;
+  if (ganttChart) {
+    ganttChart.refresh(filterGanttTasks());
+    colorGanttBars();
+  }
+}
+
+function colorGanttBars() {
+  setTimeout(() => {
+    const bars = document.querySelectorAll('#gantt-area .bar');
+    const tasks = filterGanttTasks();
+    bars.forEach((bar, i) => {
+      if (tasks[i]) {
+        const colors = { p1: '#e74c3c', p2: '#e67e22', p3: '#f1c40f', p4: '#2ecc71' };
+        bar.setAttribute('fill', colors[tasks[i].priority] || 'var(--accent)');
+      }
+    });
+  }, 50);
+}
 
 function renderGantt(tasks) {
   const content = document.getElementById('todo-content');
   content.innerHTML = '<div id="gantt-area" style="width:100%;overflow-x:auto"></div>';
 
-  const ganttTasks = tasks.map((t, i) => ({
+  allGanttTasks = tasks;
+  const filtered = filterGanttTasks();
+  ganttDateFrom = null;
+  ganttDateTo = null;
+  document.getElementById('gantt-date-from').value = '';
+  document.getElementById('gantt-date-to').value = '';
+
+  const ganttTasks = filtered.map((t, i) => ({
     id: 'task-' + i,
     name: t.title,
     start: t.startDate,
@@ -1651,16 +1706,7 @@ function renderGantt(tasks) {
     });
   }
 
-  // Color bars by priority
-  setTimeout(() => {
-    const bars = document.querySelectorAll('#gantt-area .bar');
-    bars.forEach((bar, i) => {
-      if (tasks[i]) {
-        const colors = { p1: '#e74c3c', p2: '#e67e22', p3: '#f1c40f', p4: '#2ecc71' };
-        bar.setAttribute('fill', colors[tasks[i].priority] || 'var(--accent)');
-      }
-    });
-  }, 50);
+  colorGanttBars();
 }
 
 function setGanttMode(mode) {
@@ -1668,7 +1714,10 @@ function setGanttMode(mode) {
   document.querySelectorAll('#gantt-view-modes button').forEach(b => {
     b.classList.toggle('active', b.dataset.mode === mode);
   });
-  if (ganttChart) ganttChart.change_view_mode(mode);
+  if (ganttChart) {
+    ganttChart.change_view_mode(mode);
+    colorGanttBars();
+  }
 }
 
 
