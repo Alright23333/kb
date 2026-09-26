@@ -1642,10 +1642,9 @@ function filterGanttTasks() {
 function updateGanttRange() {
   ganttDateFrom = document.getElementById('gantt-date-from').value || null;
   ganttDateTo = document.getElementById('gantt-date-to').value || null;
-  if (ganttChart) {
-    ganttChart.refresh(filterGanttTasks());
-    colorGanttBars();
-  }
+  // Destroy and recreate — Frappe Gantt doesn't support set date range
+  ganttChart = null;
+  renderGantt(allGanttTasks);
 }
 
 function colorGanttBars() {
