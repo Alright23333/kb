@@ -14,6 +14,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/selection/active-line.min.js"></script>
 <!-- markdown-it -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.2/markdown-it.min.js"></script>
+<!-- Frappe Gantt -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.css">
+<script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
 <style>
 :root {
   --accent: #4a9eff;
@@ -349,6 +352,32 @@ body {
 #settings-panel .btns { display: flex; gap: 8px; justify-content: flex-end; }
 /* TODO Page */
 #todo-view { display: none; }
+#gantt-view-modes { display: flex; gap: 4px; margin-left: auto; }
+#gantt-view-modes button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#gantt-view-modes button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+/* Frappe Gantt theme */
+.gantt .bar { fill: var(--accent) !important; }
+.gantt .bar.p1 { fill: #e74c3c !important; }
+.gantt .bar.p2 { fill: #e67e22 !important; }
+.gantt .bar.p3 { fill: #f1c40f !important; }
+.gantt .bar.p4 { fill: #2ecc71 !important; }
+.gantt .bar-label { fill: #fff !important; font-size: 11px !important; }
+.gantt .grid-header { fill: var(--card) !important; stroke: var(--border) !important; }
+.gantt .grid-row { fill: var(--bg) !important; }
+.gantt .grid-row:nth-child(even) { fill: var(--card) !important; opacity: 0.3; }
+.gantt .row-line { stroke: var(--border) !important; }
+.gantt .today-highlight { fill: var(--accent) !important; opacity: 0.15 !important; }
+.gantt .arrow { stroke: var(--muted) !important; }
+.gantt .tick { stroke: var(--border) !important; }
+.gantt .bar-wrapper:hover .bar { filter: brightness(1.1); }
 #todo-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 #todo-tabs { display: flex; gap: 4px; }
 #todo-tabs button {
@@ -362,17 +391,24 @@ body {
 }
 #todo-tabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 #todo-content { flex: 1; overflow: auto; }
-.gantt-container { overflow-x: auto; padding-bottom: 20px; }
-.gantt-table { border-collapse: collapse; min-width: 100%; }
-.gantt-table th { text-align: left; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); }
-.gantt-row td { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
-.gantt-bar-cell { position: relative; min-width: 400px; }
-.gantt-bar { position: absolute; height: 20px; border-radius: 3px; top: 50%; transform: translateY(-50%); min-width: 4px; }
-.gantt-bar.p1 { background: #e74c3c; }
-.gantt-bar.p2 { background: #e67e22; }
-.gantt-bar.p3 { background: #f1c40f; }
-.gantt-bar.p4 { background: #2ecc71; }
-.gantt-today { position: absolute; width: 2px; background: var(--accent); top: 0; bottom: 0; z-index: 2; }
+/* Frappe Gantt theme */
+#gantt-area { min-height: 200px; }
+.gantt .bar-label { fill: #fff !important; font-size: 11px !important; font-weight: 500; }
+.gantt .grid-header { fill: var(--card) !important; }
+.gantt .grid-row { fill: var(--bg) !important; }
+.gantt .grid-row:nth-child(even) { fill: var(--card) !important; opacity: 0.4; }
+.gantt .row-line { stroke: var(--border) !important; }
+.gantt .today-highlight { fill: var(--accent) !important; opacity: 0.12 !important; }
+.gantt .arrow { stroke: var(--muted) !important; }
+.gantt .tick { stroke: var(--border) !important; }
+.gantt .bar-wrapper:hover .bar { filter: brightness(1.15); }
+.gantt .bar-progress { fill: rgba(255,255,255,0.25) !important; }
+.gantt .bar-label { fill: rgba(255,255,255,0.9) !important; }
+.gantt .lower-text, .gantt .upper-text { fill: var(--muted) !important; font-size: 11px !important; }
+[data-theme="light"] .gantt .bar-label { fill: #333 !important; }
+[data-theme="light"] .gantt .grid-header { fill: #f0f0f0 !important; }
+[data-theme="light"] .gantt .grid-row { fill: #fff !important; }
+[data-theme="light"] .gantt .grid-row:nth-child(even) { fill: #f7f7f7 !important; opacity: 1; }
 .todo-list-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--card); border-radius: 6px; margin-bottom: 6px; }
 .todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
 .todo-list-item .priority.p1 { background: #e74c3c; }
@@ -625,6 +661,11 @@ body {
         <div id="todo-tabs">
           <button id="tab-list" class="active" onclick="switchTodoTab('list')">列表</button>
           <button id="tab-gantt" onclick="switchTodoTab('gantt')">甘特图</button>
+        </div>
+        <div id="gantt-view-modes">
+          <button data-mode="Day" class="active" onclick="setGanttMode('Day')">日</button>
+          <button data-mode="Week" onclick="setGanttMode('Week')">周</button>
+          <button data-mode="Month" onclick="setGanttMode('Month')">月</button>
         </div>
       </div>
       <div id="todo-content"></div>
@@ -1569,89 +1610,65 @@ function renderList(tasks) {
   content.innerHTML = html;
 }
 
+let ganttChart = null;
+let ganttCurrentMode = 'Month';
+
 function renderGantt(tasks) {
   const content = document.getElementById('todo-content');
-  // Find date range
-  let minDate = Infinity, maxDate = 0;
-  for (const t of tasks) {
-    const s = new Date(t.startDate).getTime();
-    const e = new Date(t.dueDate || t.startDate).getTime();
-    if (s < minDate) minDate = s;
-    if (e > maxDate) maxDate = e;
+  content.innerHTML = '<div id="gantt-area" style="width:100%;overflow-x:auto"></div>';
+
+  const ganttTasks = tasks.map((t, i) => ({
+    id: 'task-' + i,
+    name: t.title,
+    start: t.startDate,
+    end: t.dueDate || t.startDate,
+    _priority: t.priority,
+    _links: t.links,
+    _rec: t.rec,
+    progress: 0,
+  }));
+
+  if (ganttChart) ganttChart.change_view_mode(ganttCurrentMode);
+  else {
+    ganttChart = new Gantt('#gantt-area', ganttTasks, {
+      view_mode: ganttCurrentMode,
+      date_format: 'YYYY-MM-DD',
+      language: 'zh',
+      custom_popup_html: (task) => {
+        const p = task._priority || 'p3';
+        const links = task._links && task._links.length
+          ? task._links.map(l => `<a href="#" data-page="${escapeHtml(l)}" style="color:var(--accent)">${escapeHtml(l)}</a>`).join(', ')
+          : '';
+        const rec = task._rec ? `<br>🔁 ${escapeHtml(task._rec)}` : '';
+        return `<div style="padding:10px;background:var(--card);border:1px solid var(--border);border-radius:6px;min-width:180px">
+          <div style="font-weight:600;margin-bottom:4px">${escapeHtml(task.name)}</div>
+          <div style="font-size:12px;color:var(--muted)">📅 ${task.start} → ${task.end}${rec}</div>
+          ${links ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">🔗 ${links}</div>` : ''}
+          <div style="margin-top:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p==='p1'?'#e74c3c':p==='p2'?'#e67e22':p==='p3'?'#f1c40f':'#2ecc71'};margin-right:4px"></span>优先级 ${p.slice(1)}</div>
+        </div>`;
+      },
+      on_click: (task) => {},
+    });
   }
-  minDate -= 86400000 * 3;
-  maxDate += 86400000 * 3;
-  const totalDays = Math.ceil((maxDate - minDate) / 86400000);
 
-  const dayWidth = 28;
-  const labelWidth = 180;
-  const rowHeight = 32;
-  const headerHeight = 40;
-  const chartWidth = totalDays * dayWidth;
-  const svgWidth = labelWidth + chartWidth;
-  const svgHeight = headerHeight + tasks.length * rowHeight;
-
-  const today = new Date();
-  const todayX = labelWidth + (today.getTime() - minDate) / 86400000 * dayWidth;
-
-  // Build SVG
-  let svg = `<svg width="${svgWidth}" height="${svgHeight}" style="background:var(--bg);display:block;overflow:visible">`;
-
-  // Month header background + labels
-  svg += `<rect x="0" y="0" width="${svgWidth}" height="${headerHeight}" fill="var(--card)"/>`;
-  let prevMonth = '';
-  for (let i = 0; i < totalDays; i++) {
-    const d = new Date(minDate + i * 86400000);
-    const month = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const x = labelWidth + i * dayWidth;
-    if (month !== prevMonth) {
-      const monthStart = i;
-      // Find end of month
-      let monthEnd = i + 1;
-      while (monthEnd < totalDays && new Date(minDate + monthEnd * 86400000).getMonth() === d.getMonth()) monthEnd++;
-      svg += `<rect x="${x}" y="0" width="${(monthEnd - i) * dayWidth}" height="${headerHeight}" fill="var(--accent-dim)" opacity="0.3"/>`;
-      svg += `<text x="${x + 6}" y="16" font-size="11" fill="var(--fg)">${month}</text>`;
-      // Day numbers
-      for (let j = monthStart; j < monthEnd; j++) {
-        const dd = new Date(minDate + j * 86400000);
-        svg += `<text x="${labelWidth + j * dayWidth + dayWidth/2}" y="32" font-size="9" fill="var(--muted)" text-anchor="middle">${dd.getDate()}</text>`;
+  // Color bars by priority
+  setTimeout(() => {
+    const bars = document.querySelectorAll('#gantt-area .bar');
+    bars.forEach((bar, i) => {
+      if (tasks[i]) {
+        const colors = { p1: '#e74c3c', p2: '#e67e22', p3: '#f1c40f', p4: '#2ecc71' };
+        bar.setAttribute('fill', colors[tasks[i].priority] || 'var(--accent)');
       }
-      prevMonth = month;
-    }
-  }
+    });
+  }, 50);
+}
 
-  // Grid lines
-  for (let i = 0; i <= totalDays; i += 7) {
-    const x = labelWidth + i * dayWidth;
-    svg += `<line x1="${x}" y1="${headerHeight}" x2="${x}" y2="${svgHeight}" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>`;
-  }
-
-  // Task rows
-  for (let i = 0; i < tasks.length; i++) {
-    const t = tasks[i];
-    const y = headerHeight + i * rowHeight;
-    const s = new Date(t.startDate).getTime();
-    const e = new Date(t.dueDate || t.startDate).getTime();
-    const barX = labelWidth + (s - minDate) / 86400000 * dayWidth;
-    const barW = Math.max((e - s) / 86400000 * dayWidth, dayWidth * 0.6);
-    const barY = y + 6;
-    const barH = rowHeight - 12;
-
-    // Row background
-    if (i % 2 === 0) svg += `<rect x="0" y="${y}" width="${svgWidth}" height="${rowHeight}" fill="var(--card)" opacity="0.3"/>`;
-
-    // Label
-    svg += `<text x="${labelWidth - 10}" y="${y + rowHeight/2 + 4}" font-size="12" fill="var(--fg)" text-anchor="end">${escapeHtml(t.title)}</text>`;
-
-    // Bar
-    svg += `<rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="3" class="gantt-bar ${t.priority}"/>`;
-  }
-
-  // Today line
-  svg += `<line x1="${todayX}" y1="0" x2="${todayX}" y2="${svgHeight}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4,3"/>`;
-
-  svg += '</svg>';
-  content.innerHTML = `<div class="gantt-container">${svg}</div>`;
+function setGanttMode(mode) {
+  ganttCurrentMode = mode;
+  document.querySelectorAll('#gantt-view-modes button').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  if (ganttChart) ganttChart.change_view_mode(mode);
 }
 
 
