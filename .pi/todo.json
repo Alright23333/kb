@@ -29,7 +29,27 @@
 			"createdAt": "2026-09-26T01:15:18.365Z",
 			"updatedAt": "2026-09-26T01:15:18.365Z",
 			"blockedBy": null
+		},
+		{
+			"id": "T-010",
+			"text": "修复 CodeMaker 上下键被吞的 bug",
+			"status": "in-progress",
+			"priority": "critical",
+			"assignee": null,
+			"createdAt": "2026-09-26T01:33:53.400Z",
+			"updatedAt": "2026-09-26T01:34:03.230Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-011",
+			"text": "TODO 任务管理页面（甘特图 + 列表 + 设置）",
+			"status": "pending",
+			"priority": "high",
+			"assignee": null,
+			"createdAt": "2026-09-26T01:33:53.401Z",
+			"updatedAt": "2026-09-26T01:33:53.401Z",
+			"blockedBy": null
 		}
 	],
-	"counter": 9
+	"counter": 11
 }

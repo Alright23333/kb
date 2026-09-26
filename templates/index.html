@@ -849,7 +849,7 @@ function initCodeMirror() {
           navigateRefItems(-1);
           return;
         }
-        CodeMirror.Pass;
+        return CodeMirror.Pass;
       },
       'Down': (cm) => {
         const refMenu = document.getElementById('ref-autocomplete');
@@ -857,7 +857,7 @@ function initCodeMirror() {
           navigateRefItems(1);
           return;
         }
-        CodeMirror.Pass;
+        return CodeMirror.Pass;
       },
     },
   });
