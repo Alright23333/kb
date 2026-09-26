@@ -1579,42 +1579,79 @@ function renderGantt(tasks) {
     if (s < minDate) minDate = s;
     if (e > maxDate) maxDate = e;
   }
-  // Pad range
   minDate -= 86400000 * 3;
   maxDate += 86400000 * 3;
   const totalDays = Math.ceil((maxDate - minDate) / 86400000);
-  const dayWidth = 30;
+
+  const dayWidth = 28;
+  const labelWidth = 180;
+  const rowHeight = 32;
+  const headerHeight = 40;
   const chartWidth = totalDays * dayWidth;
+  const svgWidth = labelWidth + chartWidth;
+  const svgHeight = headerHeight + tasks.length * rowHeight;
 
   const today = new Date();
-  const todayX = (today.getTime() - minDate) / 86400000 * dayWidth;
+  const todayX = labelWidth + (today.getTime() - minDate) / 86400000 * dayWidth;
 
-  // Build month header
-  let header = '<tr><th style="min-width:160px">任务</th>';
+  // Build SVG
+  let svg = `<svg width="${svgWidth}" height="${svgHeight}" style="background:var(--bg);display:block;overflow:visible">`;
+
+  // Month header background + labels
+  svg += `<rect x="0" y="0" width="${svgWidth}" height="${headerHeight}" fill="var(--card)"/>`;
   let prevMonth = '';
   for (let i = 0; i < totalDays; i++) {
     const d = new Date(minDate + i * 86400000);
     const month = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const day = d.getDate();
+    const x = labelWidth + i * dayWidth;
     if (month !== prevMonth) {
-      header += `<th style="min-width:60px;font-size:11px;color:var(--muted)">${month}</th>`;
+      const monthStart = i;
+      // Find end of month
+      let monthEnd = i + 1;
+      while (monthEnd < totalDays && new Date(minDate + monthEnd * 86400000).getMonth() === d.getMonth()) monthEnd++;
+      svg += `<rect x="${x}" y="0" width="${(monthEnd - i) * dayWidth}" height="${headerHeight}" fill="var(--accent-dim)" opacity="0.3"/>`;
+      svg += `<text x="${x + 6}" y="16" font-size="11" fill="var(--fg)">${month}</text>`;
+      // Day numbers
+      for (let j = monthStart; j < monthEnd; j++) {
+        const dd = new Date(minDate + j * 86400000);
+        svg += `<text x="${labelWidth + j * dayWidth + dayWidth/2}" y="32" font-size="9" fill="var(--muted)" text-anchor="middle">${dd.getDate()}</text>`;
+      }
       prevMonth = month;
-    } else {
-      header += `<th style="font-size:10px;color:var(--muted);text-align:center">${day}</th>`;
     }
   }
-  header += '</tr>';
 
-  let rows = '';
-  for (const t of tasks) {
-    const s = new Date(t.startDate).getTime();
-    const e = new Date(t.dueDate || t.startDate).getTime();
-    const x = (s - minDate) / 86400000 * dayWidth;
-    const w = Math.max((e - s) / 86400000 * dayWidth, dayWidth);
-    rows += `<tr class="gantt-row"><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.title)}</td><td class="gantt-bar-cell" style="width:${chartWidth}px"><div style="position:relative;height:26px"><div class="gantt-bar ${t.priority}" style="left:${x}px;width:${w}px"></div><div class="gantt-today" style="left:${todayX}px"></div></div></td></tr>`;
+  // Grid lines
+  for (let i = 0; i <= totalDays; i += 7) {
+    const x = labelWidth + i * dayWidth;
+    svg += `<line x1="${x}" y1="${headerHeight}" x2="${x}" y2="${svgHeight}" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>`;
   }
 
-  content.innerHTML = `<div class="gantt-container"><table class="gantt-table">${header}${rows}</table>></div>`;
+  // Task rows
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const y = headerHeight + i * rowHeight;
+    const s = new Date(t.startDate).getTime();
+    const e = new Date(t.dueDate || t.startDate).getTime();
+    const barX = labelWidth + (s - minDate) / 86400000 * dayWidth;
+    const barW = Math.max((e - s) / 86400000 * dayWidth, dayWidth * 0.6);
+    const barY = y + 6;
+    const barH = rowHeight - 12;
+
+    // Row background
+    if (i % 2 === 0) svg += `<rect x="0" y="${y}" width="${svgWidth}" height="${rowHeight}" fill="var(--card)" opacity="0.3"/>`;
+
+    // Label
+    svg += `<text x="${labelWidth - 10}" y="${y + rowHeight/2 + 4}" font-size="12" fill="var(--fg)" text-anchor="end">${escapeHtml(t.title)}</text>`;
+
+    // Bar
+    svg += `<rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="3" class="gantt-bar ${t.priority}"/>`;
+  }
+
+  // Today line
+  svg += `<line x1="${todayX}" y1="0" x2="${todayX}" y2="${svgHeight}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4,3"/>`;
+
+  svg += '</svg>';
+  content.innerHTML = `<div class="gantt-container">${svg}</div>`;
 }
 
 
