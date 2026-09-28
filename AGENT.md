@@ -54,6 +54,18 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - `pages/子目录/页面.md` → 页面名 `子目录/页面`
 - `_reset_db()` 会删除 `kb.db`、`kb.db-wal`、`kb.db-shm` 三个文件
 
+### `mcp_server.py` — MCP Server（stdio）
+
+- 13 个工具（读/写/版本恢复），直连 SQLite 不走 FastAPI
+- `_sync_refs()` 与 api.py 的 `_sync()` 逻辑对等，改解析逻辑时两边同步改
+- 注意陷阱 #12：环境变量白名单问题
+
+### `export.py` — 导出 CLI
+
+- 三种格式：`markdown`（目录）、`json`（单文件）、`zip`（归档）
+- front matter 含 name/created/updated/tags/properties
+- API 端点 `/api/export/*` 用相同逻辑（_build_front_matter）
+
 ### `main.py` — FastAPI 应用
 
 - CORS 全开（`allow_origins=["*"]`），仅供 Tailscale 内网使用
@@ -126,6 +138,22 @@ Frappe Gantt 的 `refresh()` 不重算视图日期范围。切换日期筛选必
 ### 10. 主题切换联动 CodeMirror
 
 `setTheme()` 调用 `cm.setOption('theme', ...)` 时，如果 `cm` 尚未初始化（用户还没打开编辑器），会报错。必须判空：`if (cm) { ... }`。
+
+### 11. FastAPI 路由顺序：path 通配会吞掉子路径
+
+`/pages/{name:path}` 会匹配 `/pages/foo/versions`（name="foo/versions"）。所有 `/pages/{name:path}/xxx` 子路由（versions、rename）**必须注册在通配路由之前**。新增子路由时检查 `@router.get` 出现顺序。
+
+### 12. MCP SDK 只继承白名单环境变量
+
+MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定义 `KB_DB_PATH` 不会被继承**。必须：客户端配置里显式传 `env`，或依赖默认回退路径 `<脚本目录>/data/kb.db`。
+
+### 13. page_versions 按页面名追踪，不用 FK
+
+版本表故意不用外键（FK + CASCADE 会在删页面时连带删版本）。改名后旧版本仍挂在旧名下，UI 查不到但数据还在——这是设计取舍，不是 bug。
+
+### 14. 改名时 refs 主键冲突预处理
+
+页面 A 同时链接 `[[Old]]` 和 `[[New]]` 时，直接 `UPDATE refs SET target_name='New'` 会撞 `(source_id, target_name, kind)` 主键。必须先删旧名 refs（`_rename_page()` 已处理），PUT 和 PATCH 都走同一辅助函数。
 
 ## 修改流程
 

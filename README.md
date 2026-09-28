@@ -17,12 +17,14 @@
 ```
 kb/
 ├── main.py              # FastAPI 应用、路由、启动事件
-├── database.py          # SQLite schema、连接池、FTS 触发器
+├── database.py          # SQLite schema、连接池、FTS/版本触发器
 ├── routers/api.py       # REST API 端点
 ├── parse.py             # Markdown 解析：[[links]]、#tags、key:: value
+├── mcp_server.py        # MCP Server（stdio，13 个工具，供 AI agent 使用）
+├── export.py            # 导出 CLI（markdown / json / zip）
+├── import_logseq.py     # 从 Logseq 文件版导入
 ├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt）
 ├── static/              # 静态资源（预留）
-├── import_logseq.py     # 从 Logseq 文件版导入
 ├── run.sh               # 启动脚本
 ├── data/kb.db           # SQLite 数据库（首次启动自动创建）
 └── venv/                # Python 虚拟环境
@@ -56,12 +58,22 @@ CREATE TABLE properties (
     PRIMARY KEY (page_id, key)
 );
 
+CREATE TABLE page_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_name  TEXT NOT NULL COLLATE NOCASE,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX idx_versions_name ON page_versions(page_name);
+
 CREATE VIRTUAL TABLE pages_fts USING fts5(
     name, content, content='pages', content_rowid='id', tokenize='trigram'
 );
 ```
 
-触发器自动同步 FTS 索引（insert/update/delete），无需手动维护。
+触发器自动同步：
+- FTS 索引（insert/update/delete）
+- 版本快照：内容变更时自动将旧内容存入 `page_versions`；删除页面时快照全部内容（回收站数据源）
 
 ## 已实现功能
 
@@ -74,6 +86,21 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 - 斜杠命令（`/` 触发：标题、列表、代码块等）
 - **引用补全**：`[[` 触发，上下箭头导航，Enter/Tab 选中，失焦安全
 - 保存 `Ctrl+S`，重命名支持
+- **🕘 版本历史**：编辑已有页面时头部按钮，侧滑面板预览 + 一键恢复
+- **🗑️ 删除**：确认弹窗，删除后可从回收站恢复
+
+### 版本历史与回收站
+
+- 内容变更/删除时自动快照（SQL 触发器，零成本）
+- 按页面名追踪，删除后版本仍可恢复
+- 恢复动作本身也先快照（双保险，恢复错了还能再恢复回来）
+- **回收站**：「所有页面」底部折叠区，一键恢复最新版本
+
+### 导入/导出
+
+- **📤 导出**：「所有页面」顶部按钮，zip 格式（每页一个 .md，front matter 含 tags/properties/时间戳）
+- **📥 导入**：支持 .md 和 .zip，冲突策略可选跳过/覆盖
+- CLI 工具：`python export.py markdown|json|zip`
 
 ### 导航与侧边栏
 
@@ -120,6 +147,11 @@ p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w
 ### 知识图谱
 
 - 力导向布局，内联 SVG，节点可点击导航
+- **全屏模式**：填充整个内容区
+- **缩放**：滚轮缩放（以鼠标位置为中心，0.1x-5x）+ +/-/⟲ 按钮
+- **平移**：拖拽背景平移（grab 光标）
+- **节点拖动**：拖拽单个节点重新布局，连线跟随
+- 节点大小随连接数变化，悬浮 tooltip
 
 ## 解析层 (`parse.py`)
 
@@ -147,7 +179,26 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 | `GET` | `/api/pages/{name}` | — | 详情 + tags + links + backlinks + properties |
 | `POST` | `/api/pages` | `{name, content}` | 创建 |
 | `PUT` | `/api/pages/{name}` | `{name?, content?}` | 更新（改名时重写引用） |
-| `DELETE` | `/api/pages/{name}` | — | 删除 |
+| `PATCH` | `/api/pages/{name}/rename` | `{name}` | 原子改名（含 refs 冲突预处理） |
+| `DELETE` | `/api/pages/{name}` | — | 删除（自动快照到版本历史） |
+
+### Versions（版本历史）
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/pages/{name}/versions` | 版本列表（最新 100 条，含大小/时间） |
+| `GET` | `/api/pages/{name}/versions/{id}` | 查看版本内容 |
+| `POST` | `/api/pages/{name}/versions/{id}/restore` | 恢复（已删除页面会重建） |
+| `DELETE` | `/api/pages/{name}/versions` | 清空该页历史 |
+| `GET` | `/api/trash` | 回收站：已删除页面列表 |
+
+### Export / Import
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/export/zip` | 导出 zip（每页一个 .md + front matter） |
+| `GET` | `/api/export/json` | 全量 JSON 导出（pages + refs） |
+| `POST` | `/api/import` | 导入 .md 或 .zip（`?conflict=skip\|overwrite`） |
 
 ### Tags
 
@@ -161,6 +212,42 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/graph` | 全图（nodes + edges） |
+
+## MCP Server（AI Agent 接入）
+
+`mcp_server.py` 通过 stdio transport 暴露 13 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
+
+| 类别 | 工具 | 说明 |
+|------|------|------|
+| 读 | `search(query)` | FTS 全文搜索 |
+| 读 | `get_page(name)` | 页面详情（内容+tags+links+backlinks） |
+| 读 | `list_pages()` | 所有页面名 |
+| 读 | `get_recent_pages(limit)` | 最近更新页面 |
+| 读 | `get_tags()` | 所有标签 + 计数 |
+| 读 | `get_pages_by_tag(tag)` | 按标签查页面 |
+| 读 | `get_backlinks(name)` | 反向链接 |
+| 写 | `create_page(name, content)` | 创建页面 |
+| 写 | `update_page(name, content)` | 更新页面 |
+| 写 | `rename_page(old, new)` | 原子改名 + 重写入链 |
+| 写 | `delete_page(name)` | 删除（版本快照保留，可恢复） |
+| 保险 | `get_page_versions(name)` | 版本历史（已删除页面也可查） |
+| 保险 | `restore_page_version(name, id)` | 恢复旧版本 |
+
+Claude Desktop 配置（`claude_desktop_config.json`）：
+
+```json
+{
+  "mcpServers": {
+    "kb": {
+      "command": "python3",
+      "args": ["/path/to/kb/mcp_server.py"],
+      "env": { "KB_DB_PATH": "/path/to/kb/data/kb.db" }
+    }
+  }
+}
+```
+
+> ⚠️ MCP SDK 只继承白名单环境变量（PATH、HOME 等），`KB_DB_PATH` **必须在客户端配置里显式设置**，否则回退到 `<脚本目录>/data/kb.db`。
 
 ## 启动
 
@@ -222,6 +309,12 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 - [x] 任务管理（甘特图 + 列表 + 日期范围筛选）
 - [x] Docker 部署方案
 - [x] 性能优化（列表渲染、日期格式化、HTML 转义）
+- [x] 日记编辑器升级 CodeMirror（复用 initCM）
+- [x] 知识图谱缩放/平移/节点拖动（原生 SVG，无需库）
+- [x] 重命名事务（`PATCH /rename` + refs 冲突预处理）
+- [x] 导入/导出（zip + JSON + CLI）
+- [x] 页面历史（自动快照 + 恢复 + 回收站）
+- [x] MCP Server（13 个工具：读/写/版本恢复闭环）
 
 ### 待办
 
@@ -230,8 +323,6 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 | 优化 | 影响 | 复杂度 |
 |------|------|--------|
 | **无认证**：CORS `*` + API 裸奔，需 token 或 IP 白名单 | 安全 | 低 |
-| **日记编辑器升级**：纯 textarea → CodeMirror | 体验 | 中 |
-| **导入/导出**：Markdown/JSON 导出 | 互操作 | 低 |
 | **移动端适配**：触摸事件 + 响应式布局 | 移动 | 中 |
 | **PWA**：离线访问 + 添加到主屏幕 | 离线 | 中 |
 
@@ -239,17 +330,13 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 
 | 优化 | 影响 | 复杂度 |
 |------|------|--------|
-| **重命名事务**：独立 `PATCH /pages/{name}/rename` + 事务 | 数据完整性 | 中 |
-| **页面历史**：`page_versions` 表 + 版本回溯 | 安全 | 中 |
 | **block reference**：`((uuid))` 支持 | 功能 | 高 |
-| **图谱交互**：D3.js/cytoscape.js 缩放/拖拽 | 体验 | 中 |
 | **FTS 优化**：jieba 分词辅助 CJK 短查询 | 搜索 | 中 |
 
 #### 架构演进
 
 | 优化 | 影响 | 复杂度 |
 |------|------|--------|
-| **MCP Server**：暴露 `get_page`/`create_page`/`search` 工具 | AI 集成 | 中 |
 | **多用户**：`users` 表 + JWT | 多租户 | 高 |
 | **插件系统**：slash commands 注册制 | 可扩展性 | 中 |
 | **实时协同**：WebSocket + Yjs/OT | 协作 | 高 |
