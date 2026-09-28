@@ -568,6 +568,9 @@ body {
 [data-theme="light"] .gantt .grid-row { fill: #fff !important; }
 [data-theme="light"] .gantt .grid-row:nth-child(even) { fill: #f7f7f7 !important; opacity: 1; }
 .todo-list-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--card); border-radius: 6px; margin-bottom: 6px; }
+.todo-list-item.task-done { opacity: 0.45; }
+.todo-list-item.task-done .task-title { text-decoration: line-through; }
+.todo-list-item .task-check { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
 .todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
 .todo-list-item .priority.p1 { background: #e74c3c; }
 .todo-list-item .priority.p2 { background: #e67e22; }
@@ -2158,10 +2161,10 @@ function getTaskPage() {
 }
 
 function parseTaskLine(line) {
-  // Format: priority start-date [[links]] content due:end-date rec:cycle
-  const m = line.match(/^\s*(p[1-4]|\d)\s+(\d{4}-\d{2}-\d{2})\s+(.*?)(?:\s+due:(\d{4}-\d{2}-\d{2}))?(?:\s+(rec:\S+))?\s*$/i);
+  // Format: priority start-date [[links]] content due:end-date rec:cycle done:date
+  const m = line.match(/^\s*(p[1-4]|\d)\s+(\d{4}-\d{2}-\d{2})\s+(.*?)(?:\s+due:(\d{4}-\d{2}-\d{2}))?(?:\s+(rec:\S+))?(?:\s+done:(\d{4}-\d{2}-\d{2}))?\s*$/i);
   if (!m) return null;
-  let [, priority, startDate, middle, dueDate, rec] = m;
+  let [, priority, startDate, middle, dueDate, rec, doneDate] = m;
   priority = priority.toLowerCase();
   if (priority === '1' || priority === '2' || priority === '3' || priority === '4') priority = 'p' + priority;
 
@@ -2175,14 +2178,18 @@ function parseTaskLine(line) {
   const title = middle.replace(linkRe, '').trim().replace(/\s+/g, ' ');
   if (!title) return null;
 
-  return { priority, startDate, title, links, dueDate: dueDate || null, rec: rec || null };
+  return { priority, startDate, title, links, dueDate: dueDate || null, rec: rec || null, doneDate: doneDate || null, raw: line };
 }
 
 function parseTasks(content) {
   const tasks = [];
-  for (const line of content.split('\n')) {
-    const t = parseTaskLine(line);
-    if (t) tasks.push(t);
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const t = parseTaskLine(lines[i]);
+    if (t) {
+      t.lineIndex = i;
+      tasks.push(t);
+    }
   }
   return tasks;
 }
@@ -2239,7 +2246,56 @@ function switchTodoTab(tab) {
   document.getElementById('tab-list').classList.toggle('active', tab === 'list');
   document.getElementById('tab-gantt').classList.toggle('active', tab === 'gantt');
   document.getElementById('todo-view').classList.toggle('gantt-active', tab === 'gantt');
+  todoCurrentView = tab;
   renderTodo(tab);
+}
+
+let currentTasks = [];        // tasks from last render (for checkbox handlers)
+let todoSourceContent = '';   // raw content of task source page
+let todoCurrentView = 'list';
+
+async function toggleTaskDone(task) {
+  const taskPage = getTaskPage();
+  try {
+    // Always work on the latest content (bypass cache)
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(taskPage)}`);
+    if (!resp.ok) { showToast('任务页不可读', 'error'); return; }
+    const page = await resp.json();
+    const lines = page.content.split('\n');
+    const idx = lines.findIndex(l => l.trim() === task.raw.trim());
+    if (idx === -1) { showToast('任务行已变化，刷新后重试', 'error'); return; }
+
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    let newLine;
+
+    if (task.doneDate) {
+      // Un-complete: strip done:DATE
+      newLine = task.raw.replace(/\s+done:\S+\s*$/i, '').trimEnd();
+    } else if (task.rec) {
+      // Recurring: roll to next cycle, stays active
+      const nextDue = recalcRecurring(task, today);
+      if (!nextDue) { showToast('无法计算重复周期', 'error'); return; }
+      const base = task.raw.replace(/\s+due:\S+/g, '').replace(/\s+rec:\S+/g, '').replace(/\s+done:\S+\s*$/i, '').trimEnd();
+      newLine = base + ' due:' + nextDue + ' ' + task.rec;
+      showToast(`🔁 已滚动到 ${nextDue}`);
+    } else {
+      // Complete: append done:today
+      newLine = task.raw.replace(/\s+done:\S+\s*$/i, '').trimEnd() + ' done:' + today;
+      showToast('✓ 已完成');
+    }
+
+    lines[idx] = newLine;
+    const putResp = await fetch(`${API}/pages/${encodeURIComponent(taskPage)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: lines.join('\n') }),
+    });
+    if (!putResp.ok) { showToast('保存失败', 'error'); return; }
+    invalidateCache();
+    renderTodo(todoCurrentView);
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
 }
 
 async function showTodo() {
@@ -2253,11 +2309,13 @@ async function renderTodo(view) {
   content.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
   try {
     const page = await cachedFetch(`page:${getTaskPage()}`, `${API}/pages/${encodeURIComponent(getTaskPage())}`);
+    todoSourceContent = page.content;
     const tasks = parseTasks(page.content);
     if (tasks.length === 0) {
       content.innerHTML = '<div style="padding:20px;color:var(--muted)">该页面没有检测到任务。任务格式：<br><code>p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w</code></div>';
       return;
     }
+    currentTasks = tasks;
     if (view === 'gantt') {
       ganttChart = null;  // force re-create
       renderGantt(tasks);
@@ -2277,17 +2335,20 @@ function renderList(tasks) {
   const content = document.getElementById('todo-content');
   const today = new Date().toISOString().slice(0, 10);
   let html = '';
-  for (const t of tasks) {
-    const isOverdue = t.dueDate && t.dueDate < today;
-    html += `<div class="todo-list-item">
+  tasks.forEach((t, i) => {
+    const isDone = !!t.doneDate;
+    const isOverdue = !isDone && t.dueDate && t.dueDate < today;
+    const links = t.links.map(l => `<a href="#" data-page="${escapeHtml(l)}" style="color:var(--accent)">${escapeHtml(l)}</a>`).join(', ');
+    html += `<div class="todo-list-item${isDone ? ' task-done' : ''}">
+      <input type="checkbox" class="task-check" ${isDone ? 'checked' : ''} onchange="toggleTaskDone(currentTasks[${i}])" title="${isDone ? '取消完成' : t.rec ? '完成并滚动到下周期' : '标记完成'}">
       <div class="priority ${t.priority}">${t.priority.slice(1)}</div>
       <div class="task-info">
         <div class="task-title">${escapeHtml(t.title)}</div>
-        <div class="task-meta">${t.startDate}${t.links.length ? ' · ' + t.links.map(l => `<a href="#" data-page="${escapeHtml(l)}" style="color:var(--accent)">${escapeHtml(l)}</a>`).join(', ') : ''}</div>
+        <div class="task-meta">${t.startDate}${links ? ' · ' + links : ''}</div>
       </div>
       <div class="task-due${isOverdue ? ' overdue' : ''}">${t.dueDate || '—'}${t.rec ? ' 🔁' : ''}</div>
     </div>`;
-  }
+  });
   content.innerHTML = html;
 }
 
