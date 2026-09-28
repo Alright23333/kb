@@ -328,6 +328,20 @@ location /kb/ {
 
 两种方式下 URL 路由、API 调用、静态资源全部自动适配，无需配置。
 
+### IP 白名单（内网保护）
+
+应用内置 IP 白名单中间件，默认只允许 Tailscale 网段和本机访问，外部 IP 返回 403：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `KB_IP_WHITELIST` | `1` | 设为 `0` 关闭（本地开发） |
+| `KB_ALLOWED_CIDRS` | `100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48` | 放行网段（逗号分隔） |
+
+- `100.64.0.0/10` = Tailscale CGNAT 网段；`fd7a:115c:a1e0::/48` = Tailscale IPv6 ULA
+- 反向代理后自动读 `X-Forwarded-For` 第一跳作为真实客户端 IP
+- MCP Server / CLI / export.py 直连 SQLite，不走 HTTP，不受影响
+- 被拦截时：API 返回 JSON 403，页面返回中文提示页
+
 ### 备份
 
 ```bash

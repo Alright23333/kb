@@ -171,6 +171,10 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。
 
+### 19. IP 白名单信任 X-Forwarded-For
+
+`ip_whitelist` 中间件优先读 XFF 第一跳作为真实 IP。这要求应用只能从受信代理（nginx/Tailscale）访问——如果应用端口直接暴露且攻击者可伪造 XFF，白名单可被绕过。生产环境确保端口不直接对公网开放。中间件在 CORS 之后注册（最外层），被拦截请求不会到达 API。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改
