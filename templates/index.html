@@ -946,7 +946,74 @@ body {
 <div id="toast"></div>
 
 <script>
-const API = '/api';
+// ── URL routing: base detection + route helpers ─────────────
+// Supports subdomain (base='') and path-prefix (base='/kb') deployments.
+// nginx must pass prefix through WITHOUT stripping:
+//   location /kb/ { proxy_pass http://kb:8080; }  // no trailing slash
+function detectBase() {
+  const p = location.pathname;
+  const m = p.match(/^(.*?)(?:\/(page|all|graph|todo|journal|tag|edit|new)(?:\/|$))/);
+  if (m) return m[1] || '';
+  // No known route suffix: whole path is the base root
+  if (p === '/' || p === '') return '';
+  return p.replace(/\/+$/, '');
+}
+const BASE = detectBase();
+const API = BASE + '/api';
+
+function routeToUrl(target, args = []) {
+  switch (target) {
+    case 'all': return BASE + '/all';
+    case 'graph': return BASE + '/graph';
+    case 'todo': return BASE + '/todo';
+    case 'journal': return BASE + '/journal' + (args[0] ? '/' + args[0] : '');
+    case 'page': return BASE + '/page/' + encodeURIComponent(args[0] || '');
+    case 'tag': return BASE + '/tag/' + encodeURIComponent(args[0] || '');
+    case 'edit': return BASE + '/edit/' + encodeURIComponent(args[0] || '');
+    case 'new': return BASE + '/new';
+    default: return BASE + '/';
+  }
+}
+
+function parseUrl(path) {
+  // Strip base prefix, then match route
+  let p = path;
+  if (BASE && p.startsWith(BASE)) p = p.slice(BASE.length);
+  p = p.replace(/^\/+/, '');
+  if (!p) return { target: 'home', args: [] };
+  const parts = p.split('/');
+  const rest = parts.slice(1).map(decodeURIComponent).join('/');
+  switch (parts[0]) {
+    case 'all': return { target: 'all', args: [] };
+    case 'graph': return { target: 'graph', args: [] };
+    case 'todo': return { target: 'todo', args: [] };
+    case 'journal': return { target: 'journal', args: rest ? [rest] : [] };
+    case 'page': return { target: 'page', args: rest ? [rest] : [] };
+    case 'tag': return { target: 'tag', args: rest ? [rest] : [] };
+    case 'edit': return { target: 'edit', args: rest ? [rest] : [] };
+    case 'new': return { target: 'new', args: [] };
+    default: return { target: 'home', args: [] };
+  }
+}
+
+let suppressPush = false;
+
+function pushRoute(target, args = []) {
+  if (suppressPush) return;
+  history.pushState({ target, args }, '', routeToUrl(target, args));
+}
+
+function navigateFromUrl() {
+  const { target, args } = parseUrl(location.pathname);
+  suppressPush = true;
+  try {
+    navigate(target, ...args);
+  } finally {
+    suppressPush = false;
+  }
+}
+
+window.addEventListener('popstate', navigateFromUrl);
 let currentName = null;   // page currently being edited
 let cm = null;
 let md = window.markdownit({
@@ -1015,24 +1082,47 @@ document.addEventListener('click', (e) => {
 function navigate(target, ...args) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (target === 'home') {
+    pushRoute('home');
     showHome();
     document.querySelectorAll('.nav-item')[0].classList.add('active');
   } else if (target === 'all') {
+    pushRoute('all');
     showAllPages();
     document.querySelectorAll('.nav-item')[1].classList.add('active');
   } else if (target === 'journal') {
+    pushRoute('journal', args[0]);
     showJournal(args[0]);
     document.querySelectorAll('.nav-item')[2].classList.add('active');
   } else if (target === 'graph') {
+    pushRoute('graph');
     showGraph();
     document.querySelectorAll('.nav-item')[3].classList.add('active');
   } else if (target === 'todo') {
+    pushRoute('todo');
     showTodo();
     document.querySelectorAll('.nav-item')[4].classList.add('active');
   } else if (target === 'page') {
+    pushRoute('page', args[0]);
     loadPage(args[0]);
   } else if (target === 'tag') {
+    pushRoute('tag', args[0]);
     showTagPages(args[0]);
+  } else if (target === 'edit') {
+    // editPage() pushes its own route
+    loadAndEdit(args[0]);
+  } else if (target === 'new') {
+    // newPage() pushes its own route
+    newPage();
+  }
+}
+
+async function loadAndEdit(name) {
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
+    if (!resp.ok) { showToast('页面不存在: ' + name, 'error'); navigate('home'); return; }
+    editPage(await resp.json());
+  } catch (e) {
+    showToast('加载失败: ' + e.message, 'error');
   }
 }
 
@@ -1578,6 +1668,7 @@ function newPage() {
   hideAll();
   currentName = null;
   currentSaveMode = 'page';
+  pushRoute('new');
   document.getElementById('editor').style.display = 'block';
   document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = '';
@@ -1593,9 +1684,11 @@ function editPage(page) {
   hideAll();
   currentName = page.name;
   currentSaveMode = 'page';
+  pushRoute('edit', page.name);
   document.getElementById('editor').style.display = 'block';
   document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = page.name;
+  trackRecent(page.name);
   const hb = document.getElementById('history-btn');
   if (hb) hb.style.display = '';
   const dbBtn = document.getElementById('delete-btn');
@@ -2965,7 +3058,12 @@ document.addEventListener('keydown', (e) => {
 
 // ── Boot ────────────────────────────────────────────────────────
 
-showHome();
+// Fix logo href for path-prefix deployments
+const logoLink = document.querySelector('.nav-text');
+if (logoLink) logoLink.href = BASE + '/';
+
+// Route from initial URL (deep link / refresh / shared link)
+navigateFromUrl();
 </script>
 </body>
 </html>

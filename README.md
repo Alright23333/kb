@@ -279,6 +279,34 @@ docker compose logs -f        # 查看日志
 
 数据库 `./data/kb.db` 挂载到宿主机，重建容器数据不丢。
 
+### nginx 反向代理
+
+支持两种部署方式，前端自动检测 base 路径：
+
+**方式 A：子域名（推荐）**
+
+```nginx
+server {
+    server_name kb.example.com;
+    location / {
+        proxy_pass http://kb:8080;
+    }
+}
+```
+
+**方式 B：路径前缀**
+
+```nginx
+# 注意：proxy_pass 结尾不加斜杠——前缀 /kb 原样传给应用，前端自动识别
+location /kb/ {
+    proxy_pass http://kb:8080;
+}
+```
+
+> ⚠️ 不要用 `proxy_pass http://kb:8080/;`（尾斜杠会剥掉前缀，API 请求会 404）。
+
+两种方式下 URL 路由、API 调用、静态资源全部自动适配，无需配置。
+
 ### 备份
 
 ```bash

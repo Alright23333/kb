@@ -1,5 +1,5 @@
 """Main FastAPI application."""
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,17 +32,18 @@ async def startup():
     await init_db()
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index():
-    """Serve the main Web UI."""
-    template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
-    with open(template_path, "r") as f:
-        return f.read()
+@app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
+async def spa_catch_all(full_path: str):
+    """SPA catch-all: serve index.html for any non-API GET.
 
-
-@app.get("/page/{slug:path}", response_class=HTMLResponse)
-async def page_view(slug: str):
-    """Serve the page editor/viewer."""
+    Supports both deployment styles:
+    - Subdomain:  /page/Ideas          → base = ''
+    - Path prefix: /kb/page/Ideas      → base = '/kb' (detected by frontend)
+    nginx must pass the prefix through WITHOUT stripping:
+        location /kb/ { proxy_pass http://kb:8080; }   # no trailing slash
+    """
+    if full_path.startswith("api/"):
+        raise HTTPException(404, "Not found")
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     with open(template_path, "r") as f:
         return f.read()
