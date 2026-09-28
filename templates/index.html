@@ -2995,6 +2995,10 @@ function setTheme(theme) {
   if (cm) {
     cm.setOption('theme', theme === 'dark' ? 'dracula' : 'default');
   }
+  // Re-apply custom CSS after theme change
+  if (typeof applyCustomCSS === 'function') {
+    setTimeout(applyCustomCSS, 50);
+  }
 }
 
 themeToggle.addEventListener('click', () => {
@@ -3430,6 +3434,74 @@ const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
 
 // Inject user-defined custom CSS (data/custom.css)
+function applyCustomCSS() {
+  const root = document.documentElement;
+  const isDark = root.getAttribute('data-theme') === 'dark';
+  if (!isDark) return; // Only apply Tokyo Night in dark mode for now
+
+  const bg = '#1a1b26', card = '#16161e', fg = '#c0caf5', muted = '#565f89', accent = '#7aa2f7', border = '#292e42';
+  const cardHover = '#292e42', cardActive = '#1f2335';
+  const tagColor = '#bb9af7', overdueColor = '#ff757f';
+  const prioColors = { p1: '#ff757f', p2: '#ff9e64', p3: '#e0af68', p4: '#9ece6a' };
+
+  document.body.style.backgroundColor = bg;
+  document.body.style.color = fg;
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.style.backgroundColor = card;
+  const header = document.getElementById('header');
+  if (header) header.style.backgroundColor = card;
+
+  // Cards with hover effect
+  document.querySelectorAll('.page-list-item, .todo-list-item, .pal-item, .ref-item, .vp-item').forEach(el => {
+    el.style.backgroundColor = card;
+    el.style.borderColor = border;
+    el.style.color = fg;
+    el.addEventListener('mouseenter', () => { el.style.backgroundColor = cardHover; });
+    el.addEventListener('mouseleave', () => { el.style.backgroundColor = card; });
+  });
+
+  // Text colors
+  document.querySelectorAll('.title, .task-title, .ref-title').forEach(el => { el.style.color = fg; });
+  document.querySelectorAll('.meta, .task-meta, .ref-meta, .pal-hint').forEach(el => { el.style.color = muted; });
+
+  // Links
+  document.querySelectorAll('a').forEach(el => { el.style.color = accent; });
+
+  // Buttons
+  document.querySelectorAll('button, .btn-imp, .todo-stat').forEach(el => {
+    el.style.backgroundColor = card;
+    el.style.borderColor = border;
+    el.style.color = fg;
+  });
+
+  // Inputs
+  document.querySelectorAll('input, textarea').forEach(el => {
+    el.style.backgroundColor = bg;
+    el.style.borderColor = border;
+    el.style.color = fg;
+  });
+
+  // Priority colors
+  document.querySelectorAll('.priority').forEach(el => {
+    for (const [cls, color] of Object.entries(prioColors)) {
+      if (el.classList.contains(cls)) {
+        el.style.backgroundColor = color;
+        el.style.color = '#fff';
+        break;
+      }
+    }
+  });
+
+  // Tag colors
+  document.querySelectorAll('.tag').forEach(el => {
+    el.style.color = tagColor;
+    el.style.backgroundColor = 'rgba(187, 154, 247, 0.12)';
+  });
+
+  // Overdue
+  document.querySelectorAll('.task-due.overdue').forEach(el => { el.style.color = overdueColor; });
+}
+
 (async function loadCustomCSS() {
   try {
     const resp = await fetch(`${BASE}/custom.css`, { cache: 'no-store' });
@@ -3442,8 +3514,9 @@ if (logoLink) logoLink.href = BASE + '/';
         document.head.appendChild(styleEl);
       }
       styleEl.textContent = css;
+      applyCustomCSS();
     }
-  } catch (e) { /* no custom CSS or fetch failed — ignore */ }
+  } catch (e) { /* ignore */ }
 })();
 
 // Route from initial URL (deep link / refresh / shared link)

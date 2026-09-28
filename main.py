@@ -112,4 +112,4 @@ async def spa_catch_all(full_path: str):
         raise HTTPException(404, "Not found")
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     with open(template_path, "r") as f:
-        return f.read()
+        return HTMLResponse(f.read(), headers={"Cache-Control": "no-cache"})
