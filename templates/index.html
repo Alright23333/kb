@@ -353,6 +353,13 @@ body {
 #link-preview-card .lp-missing {
   color: var(--muted); font-style: italic;
 }
+#link-preview-card .lp-create {
+  cursor: pointer;
+  color: var(--accent);
+}
+#link-preview-card .lp-create:hover { text-decoration: underline; }
+#link-preview-card .lp-goto { cursor: pointer; }
+#link-preview-card .lp-goto:hover { color: var(--accent); }
 
 #version-panel {
   position: fixed;
@@ -2525,14 +2532,14 @@ async function lpShow(linkEl) {
   if (!page) {
     lpCard.innerHTML = `
       <div class="lp-title">📄 ${escapeHtml(name)}</div>
-      <div class="lp-missing">页面不存在——点击创建它</div>`;
+      <div class="lp-missing lp-create" data-create="${escapeHtml(name)}">➕ 页面不存在——点击创建</div>`;
   } else {
     const preview = page.content.length > 500
       ? page.content.slice(0, 500).replace(/\n\S.*$/s, '') + '\n…'
       : page.content;
     const backlinkCount = (page.backlinks || []).length;
     lpCard.innerHTML = `
-      <div class="lp-title">📄 ${escapeHtml(page.name)}</div>
+      <div class="lp-title lp-goto" data-goto="${escapeHtml(page.name)}">📄 ${escapeHtml(page.name)}</div>
       <div class="lp-body">${renderContent(preview)}</div>
       <div class="lp-footer">🔗 ${backlinkCount} 个反向链接 · 更新于 ${formatDate(page.updated_at)}</div>`;
   }
@@ -2543,6 +2550,24 @@ function lpHide() {
   lpCard.classList.remove('open');
   lpCurrentLink = null;
 }
+
+// Card click: create missing page, or navigate to existing
+lpCard.addEventListener('click', (e) => {
+  const createEl = e.target.closest('[data-create]');
+  if (createEl) {
+    const name = createEl.dataset.create;
+    lpHide();
+    newPage();
+    document.getElementById('page-name').value = name;
+    if (cm) cm.focus();
+    return;
+  }
+  const gotoEl = e.target.closest('[data-goto]');
+  if (gotoEl) {
+    lpHide();
+    navigate('page', gotoEl.dataset.goto);
+  }
+});
 
 document.addEventListener('mouseover', (e) => {
   const link = e.target.closest('a[data-page]');
