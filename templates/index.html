@@ -928,6 +928,14 @@ body {
     <h3>⚙️ 设置</h3>
     <label>任务来源页面</label>
     <input type="text" id="setting-task-page" placeholder="例如: Tasks" value="Tasks">
+    <label>自定义 CSS <span style="font-weight:400;color:var(--muted);font-size:12px">（保存到 data/custom.css，实时预览）</span></label>
+    <textarea id="setting-custom-css" placeholder="例如: body { font-family: 'Georgia', serif; }" style="width:100%;height:120px;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px;border-radius:4px;font-family:monospace;font-size:12px;resize:vertical;box-sizing:border-box" oninput="previewCustomCSS(this.value)"></textarea>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+      <button onclick="insertCustomCSSTemplate('font')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">字体</button>
+      <button onclick="insertCustomCSSTemplate('spacing')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">间距</button>
+      <button onclick="insertCustomCSSTemplate('accent')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">强调色</button>
+      <button onclick="clearCustomCSS()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">清空</button>
+    </div>
     <label>任务重复语法说明</label>
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
       <code>rec:1w</code> 普通每周（完成日+7天）<br>
@@ -2161,13 +2169,77 @@ function openSettings() {
   document.getElementById('settings-panel').classList.add('open');
   const saved = localStorage.getItem('kb-task-page') || 'Tasks';
   document.getElementById('setting-task-page').value = saved;
+  loadCustomCSSForSettings();
 }
 function closeSettings() {
   document.getElementById('settings-panel').classList.remove('open');
 }
+// ── Custom CSS settings ───────────────────────────────────────
+
+function previewCustomCSS(css) {
+  let styleEl = document.getElementById('custom-css');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'custom-css';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = css;
+}
+
+async function saveCustomCSS() {
+  const css = document.getElementById('setting-custom-css').value;
+  try {
+    const resp = await fetch(`${API}/custom.css`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/plain' },
+      body: css,
+    });
+    if (!resp.ok) { showToast('保存失败', 'error'); return; }
+    showToast('自定义 CSS 已保存 ✓');
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+const CUSTOM_CSS_TEMPLATES = {
+  font: `/* 衬线字体 */
+body { font-family: 'Georgia', 'Noto Serif SC', serif; }
+#editor input, #page-name { font-family: inherit; }`,
+  spacing: `/* 宽松行距 */
+#preview-pane, #page-view { line-height: 1.8; }
+.todo-list-item { padding: 14px 12px; }`,
+  accent: `/* 自定义强调色 */
+:root, [data-theme="dark"] { --accent: #7aa2f7; }
+[data-theme="light"] { --accent: #3b6ea5; }`,
+};
+
+function insertCustomCSSTemplate(name) {
+  const ta = document.getElementById('setting-custom-css');
+  const tpl = CUSTOM_CSS_TEMPLATES[name] || '';
+  ta.value = ta.value ? ta.value.trimEnd() + '\n\n' + tpl : tpl;
+  previewCustomCSS(ta.value);
+  ta.focus();
+}
+
+function clearCustomCSS() {
+  const ta = document.getElementById('setting-custom-css');
+  ta.value = '';
+  previewCustomCSS('');
+}
+
+async function loadCustomCSSForSettings() {
+  try {
+    const resp = await fetch(`${API}/custom.css`, { cache: 'no-store' });
+    if (resp.ok) {
+      document.getElementById('setting-custom-css').value = await resp.text();
+    }
+  } catch (e) { /* ignore */ }
+}
+
 function saveSettings() {
   const page = document.getElementById('setting-task-page').value.trim() || 'Tasks';
   localStorage.setItem('kb-task-page', page);
+  saveCustomCSS();
   closeSettings();
   showTodo();
 }
@@ -3356,6 +3428,23 @@ document.addEventListener('keydown', (e) => {
 // Fix logo href for path-prefix deployments
 const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
+
+// Inject user-defined custom CSS (data/custom.css)
+(async function loadCustomCSS() {
+  try {
+    const resp = await fetch(`${BASE}/custom.css`, { cache: 'no-store' });
+    if (resp.ok) {
+      const css = await resp.text();
+      let styleEl = document.getElementById('custom-css');
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'custom-css';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = css;
+    }
+  } catch (e) { /* no custom CSS or fetch failed — ignore */ }
+})();
 
 // Route from initial URL (deep link / refresh / shared link)
 navigateFromUrl();

@@ -7,14 +7,15 @@ name is a date (YYYY-MM-DD).
 import aiosqlite
 import io
 import json
+import os
 import zipfile
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Body, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from database import get_db
+from database import get_db, DB_PATH
 from parse import parse as parse_content
 
 router = APIRouter()
@@ -156,6 +157,33 @@ async def _rename_page(db: aiosqlite.Connection, page_id: int, old_name: str, ne
         "UPDATE refs SET target_name = ? WHERE target_name = ? COLLATE NOCASE",
         (new_name, old_name),
     )
+
+
+# ── Custom CSS ─────────────────────────────────────────────────
+
+CUSTOM_CSS_PATH = os.path.join(os.path.dirname(DB_PATH), "custom.css")
+
+
+@router.get("/custom.css")
+async def get_custom_css():
+    """Serve user-defined custom CSS (data/custom.css). 404 if not set."""
+    if not os.path.exists(CUSTOM_CSS_PATH):
+        raise HTTPException(404, "No custom CSS")
+    return StreamingResponse(
+        open(CUSTOM_CSS_PATH, "rb"),
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.put("/custom.css")
+async def put_custom_css(request: Request):
+    """Save user-defined custom CSS to data/custom.css."""
+    content = (await request.body()).decode("utf-8")
+    os.makedirs(os.path.dirname(CUSTOM_CSS_PATH), exist_ok=True)
+    with open(CUSTOM_CSS_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+    return {"saved": True, "path": CUSTOM_CSS_PATH}
 
 
 # ── Pages CRUD ────────────────────────────────────────────────────

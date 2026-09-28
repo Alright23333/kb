@@ -1,105 +1,15 @@
 {
 	"items": [
 		{
-			"id": "T-015",
-			"text": "导入/导出：Markdown 批量导出 + JSON 全量导出 + Markdown 导入",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T02:43:16.288Z",
-			"updatedAt": "2026-09-28T02:52:22.885Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-016",
-			"text": "页面历史：page_versions 表 + 触发器 + 版本列表 UI",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T02:43:16.289Z",
-			"updatedAt": "2026-09-28T03:01:19.465Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-017",
-			"text": "后端：GET /api/export/zip + /api/export/json + POST /api/import",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T02:46:16.612Z",
-			"updatedAt": "2026-09-28T02:52:20.426Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-018",
-			"text": "删除按钮 + 回收站：编辑器🗑️按钮、GET /api/trash、所有页面回收站区",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T03:13:17.991Z",
-			"updatedAt": "2026-09-28T03:20:10.142Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-019",
-			"text": "MCP 补充 6 个工具：rename_page/delete_page/get_pages_by_tag/get_recent_pages/get_page_versions/restore_page_version",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T03:20:52.577Z",
-			"updatedAt": "2026-09-28T03:25:28.822Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-020",
-			"text": "命令面板 Ctrl+K：混合搜索 + 前缀指令（>/#）+ 最近访问 + 上下文操作",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T03:38:45.140Z",
-			"updatedAt": "2026-09-28T03:50:30.329Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-021",
-			"text": "hover 链接预览：悬停 [[链接]] 弹内容摘要卡片，缓存+智能定位",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T04:00:04.441Z",
-			"updatedAt": "2026-09-28T04:11:37.163Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-022",
-			"text": "快速捕获：命令面板 + 前缀，一句话建页",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T04:20:57.309Z",
-			"updatedAt": "2026-09-28T04:26:00.005Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-023",
-			"text": "标签补全：输入 # 弹出已有标签列表，复用引用补全模式",
-			"status": "done",
-			"priority": "high",
-			"assignee": null,
-			"createdAt": "2026-09-28T04:20:57.309Z",
-			"updatedAt": "2026-09-28T04:26:04.116Z",
-			"blockedBy": null
-		},
-		{
-			"id": "T-024",
-			"text": "URL 路由 + base 检测：pushState/popstate、catch-all、nginx 双模式兼容",
+			"id": "T-033",
+			"text": "自定义 CSS：data/custom.css 文件 + GET/PUT 端点 + 设置面板 UI + 启动注入",
 			"status": "in-progress",
 			"priority": "high",
 			"assignee": null,
-			"createdAt": "2026-09-28T05:28:18.535Z",
-			"updatedAt": "2026-09-28T05:28:22.432Z",
+			"createdAt": "2026-09-28T06:50:33.245Z",
+			"updatedAt": "2026-09-28T06:50:36.779Z",
 			"blockedBy": null
 		}
 	],
-	"counter": 24
+	"counter": 33
 }
