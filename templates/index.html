@@ -318,6 +318,42 @@ body {
   flex-shrink: 0;
 }
 
+#link-preview-card {
+  position: fixed;
+  z-index: 450;
+  width: 380px; max-width: 90vw;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.3);
+  padding: 14px 16px;
+  font-size: 13px;
+  display: none;
+  pointer-events: auto;
+}
+#link-preview-card.open { display: block; }
+#link-preview-card .lp-title {
+  font-weight: 600; font-size: 14px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+#link-preview-card .lp-body {
+  max-height: 260px; overflow: hidden;
+  color: var(--fg);
+  line-height: 1.5;
+}
+#link-preview-card .lp-body img { max-width: 100%; }
+#link-preview-card .lp-body pre { font-size: 12px; }
+#link-preview-card .lp-footer {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 12px;
+}
+#link-preview-card .lp-missing {
+  color: var(--muted); font-style: italic;
+}
+
 #version-panel {
   position: fixed;
   top: 0; right: -420px;
@@ -897,6 +933,8 @@ body {
     <div id="palette-footer">↑↓ 导航　↵ 打开　Esc 关闭</div>
   </div>
 </div>
+<!-- Link hover preview -->
+<div id="link-preview-card"></div>
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -2418,6 +2456,115 @@ themeToggle.addEventListener('click', () => {
     setTheme(prefersLight ? 'light' : 'dark');
   }
 })();
+
+// ── Link Hover Preview ───────────────────────────────────────
+
+const lpCard = document.getElementById('link-preview-card');
+const lpCache = new Map();   // name → {page or null, ts}
+let lpTimer = null;
+let lpHideTimer = null;
+let lpCurrentLink = null;
+
+function lpCacheGet(name) {
+  const hit = lpCache.get(name);
+  if (hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.page;
+  lpCache.delete(name);
+  return undefined;  // expired
+}
+
+function lpCacheSet(name, page) {
+  if (lpCache.size >= 20) {
+    lpCache.delete(lpCache.keys().next().value);
+  }
+  lpCache.set(name, { page, ts: Date.now() });
+}
+
+async function lpFetch(name) {
+  const cached = lpCacheGet(name);
+  if (cached !== undefined) return cached;
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
+    const page = resp.ok ? await resp.json() : null;
+    lpCacheSet(name, page);
+    return page;
+  } catch (e) {
+    return null;
+  }
+}
+
+function lpPosition(linkEl) {
+  const rect = linkEl.getBoundingClientRect();
+  const card = lpCard;
+  card.style.visibility = 'hidden';
+  card.classList.add('open');
+  const cw = card.offsetWidth;
+  const ch = card.offsetHeight;
+
+  let x = rect.left;
+  let y = rect.bottom + 8;
+  if (y + ch > window.innerHeight - 8) {
+    y = rect.top - ch - 8;
+    if (y < 8) y = 8;
+  }
+  if (x + cw > window.innerWidth - 8) x = window.innerWidth - cw - 8;
+  if (x < 8) x = 8;
+
+  card.style.left = x + 'px';
+  card.style.top = y + 'px';
+  card.style.visibility = '';
+}
+
+async function lpShow(linkEl) {
+  const name = linkEl.dataset.page;
+  if (!name) return;
+  lpCurrentLink = linkEl;
+
+  const page = await lpFetch(name);
+  if (lpCurrentLink !== linkEl) return;
+
+  if (!page) {
+    lpCard.innerHTML = `
+      <div class="lp-title">📄 ${escapeHtml(name)}</div>
+      <div class="lp-missing">页面不存在——点击创建它</div>`;
+  } else {
+    const preview = page.content.length > 500
+      ? page.content.slice(0, 500).replace(/\n\S.*$/s, '') + '\n…'
+      : page.content;
+    const backlinkCount = (page.backlinks || []).length;
+    lpCard.innerHTML = `
+      <div class="lp-title">📄 ${escapeHtml(page.name)}</div>
+      <div class="lp-body">${renderContent(preview)}</div>
+      <div class="lp-footer">🔗 ${backlinkCount} 个反向链接 · 更新于 ${formatDate(page.updated_at)}</div>`;
+  }
+  lpPosition(linkEl);
+}
+
+function lpHide() {
+  lpCard.classList.remove('open');
+  lpCurrentLink = null;
+}
+
+document.addEventListener('mouseover', (e) => {
+  const link = e.target.closest('a[data-page]');
+  if (!link) return;
+  clearTimeout(lpHideTimer);
+  clearTimeout(lpTimer);
+  lpTimer = setTimeout(() => lpShow(link), 300);
+});
+
+document.addEventListener('mouseout', (e) => {
+  const link = e.target.closest('a[data-page]');
+  if (!link) return;
+  clearTimeout(lpTimer);
+  lpHideTimer = setTimeout(() => {
+    if (!lpCard.matches(':hover')) lpHide();
+  }, 200);
+});
+
+window.addEventListener('scroll', lpHide, true);
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#link-preview-card')) lpHide();
+}, true);
 
 // ── Command Palette (Ctrl+K) ────────────────────────────────
 
