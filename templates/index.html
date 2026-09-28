@@ -935,7 +935,7 @@ body {
 <!-- Command palette -->
 <div id="palette-overlay">
   <div id="palette">
-    <input type="text" id="palette-input" placeholder="搜索页面…　> 操作　# 标签" autocomplete="off">
+    <input type="text" id="palette-input" placeholder="搜索页面…　> 操作　# 标签　+ 快速创建" autocomplete="off">
     <div id="palette-results"></div>
     <div id="palette-footer">↑↓ 导航　↵ 打开　Esc 关闭</div>
   </div>
@@ -1442,11 +1442,10 @@ function initCM(textareaEl, opts) {
       'Ctrl-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
       'Cmd-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
       'Enter': (cm) => {
-        // If ref autocomplete is open, select the active item
+        // If ref/tag autocomplete is open, select the active item
         const refMenu = document.getElementById('ref-autocomplete');
         if (refMenu.style.display !== 'none') {
-          const active = refMenu.querySelector('.ref-item.active');
-          if (active) { savedRefCursor = cm.getCursor(); insertRef(active.dataset.ref); return; }
+          if (insertActiveRefOrTag()) return;
         }
         const cursor = cm.getCursor();
         const line = cm.getLine(cursor.line);
@@ -1470,8 +1469,7 @@ function initCM(textareaEl, opts) {
       'Tab': (cm) => {
         const refMenu = document.getElementById('ref-autocomplete');
         if (refMenu.style.display !== 'none') {
-          const active = refMenu.querySelector('.ref-item.active');
-          if (active) { savedRefCursor = cm.getCursor(); insertRef(active.dataset.ref); return; }
+          if (insertActiveRefOrTag()) return;
         }
         cm.replaceRange('  ', cm.getCursor());
       },
@@ -1500,8 +1498,11 @@ function initCM(textareaEl, opts) {
     const line = cm.getLine(cursor.line);
     const beforeCursor = line.slice(0, cursor.ch);
     const refMatch = beforeCursor.match(/\[\[([^\]]*)$/);
+    const tagMatch = beforeCursor.match(TAG_TRIGGER_RE);
     if (refMatch) {
       showRefAutocomplete(refMatch[1], cursor);
+    } else if (tagMatch) {
+      showTagAutocomplete(tagMatch[2], cursor);
     } else {
       hideRefAutocomplete();
     }
@@ -1729,6 +1730,7 @@ let savedRefCursor = null; // cursor captured at autocomplete open time
 let isInsertingRef = false; // guard: don't clear savedRefCursor during insert
 
 async function showRefAutocomplete(query, cursor) {
+  autocompleteMode = 'ref';
   savedRefCursor = { line: cursor.line, ch: cursor.ch };
   if (allPages.length === 0) {
     const resp = await fetch(`${API}/pages?limit=200`);
@@ -1758,6 +1760,7 @@ async function showRefAutocomplete(query, cursor) {
 
 function hideRefAutocomplete() {
   document.getElementById('ref-autocomplete').style.display = 'none';
+  autocompleteMode = null;
   // Don't clear savedRefCursor if we're in the middle of an insert
   if (!isInsertingRef) savedRefCursor = null;
 }
@@ -1781,7 +1784,11 @@ document.getElementById('ref-autocomplete').addEventListener('mousedown', (e) =>
 document.getElementById('ref-autocomplete').addEventListener('click', (e) => {
   const item = e.target.closest('[data-ref]');
   if (!item) return;
-  insertRef(item.dataset.ref);
+  if (autocompleteMode === 'tag') {
+    insertTag(item.dataset.ref);
+  } else {
+    insertRef(item.dataset.ref);
+  }
 });
 
 function insertRef(name) {
@@ -1802,6 +1809,79 @@ function insertRef(name) {
   updatePreview();
   savedRefCursor = null;
   isInsertingRef = false;
+}
+
+// ── Tag autocomplete (# prefix) ────────────────────────────────
+
+let autocompleteMode = null;   // 'ref' | 'tag'
+let tagCache = null;           // [{name, count}]
+
+// Trigger pattern: # not preceded by another # (heading) or word char
+const TAG_TRIGGER_RE = /(^|[^#\w])#([^\s#\[\]()]*)$/;
+
+async function showTagAutocomplete(query, cursor) {
+  autocompleteMode = 'tag';
+  savedRefCursor = { line: cursor.line, ch: cursor.ch };
+
+  if (!tagCache) {
+    try {
+      const resp = await fetch(`${API}/tags`);
+      tagCache = resp.ok ? await resp.json() : [];
+    } catch (e) { tagCache = []; }
+  }
+
+  const q = query.toLowerCase();
+  const filtered = tagCache
+    .filter(t => t.name.toLowerCase().includes(q))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  const menu = document.getElementById('ref-autocomplete');
+  if (filtered.length === 0) { hideRefAutocomplete(); return; }
+
+  let html = '';
+  filtered.forEach((t, i) => {
+    html += `<div class="ref-item${i === 0 ? ' active' : ''}" data-ref="${escapeHtml(t.name)}">
+      <div class="ref-title">#${escapeHtml(t.name)}</div>
+      <div class="ref-meta">${t.count} 个页面</div>
+    </div>`;
+  });
+  menu.innerHTML = html;
+  menu.style.display = 'block';
+
+  const coords = cm.cursorCoords(cursor, 'local');
+  menu.style.left = (coords.left + 20) + 'px';
+  menu.style.top = (coords.bottom + 20) + 'px';
+}
+
+function insertTag(tag) {
+  const cursor = cm.getCursor();
+  const line = cm.getLine(cursor.line);
+  const before = line.slice(0, cursor.ch);
+  const m = before.match(TAG_TRIGGER_RE);
+  if (m) {
+    // Replace from the # to cursor with #tag + space
+    const start = cursor.ch - m[2].length - 1;
+    cm.replaceRange('#' + tag + ' ', { line: cursor.line, ch: start }, { line: cursor.line, ch: cursor.ch });
+  } else {
+    cm.replaceRange('#' + tag + ' ', cursor);
+  }
+  cm.focus();
+  hideRefAutocomplete();
+  updatePreview();
+}
+
+function insertActiveRefOrTag() {
+  const refMenu = document.getElementById('ref-autocomplete');
+  const active = refMenu.querySelector('.ref-item.active');
+  if (!active) return false;
+  if (autocompleteMode === 'tag') {
+    insertTag(active.dataset.ref);
+  } else {
+    savedRefCursor = cm.getCursor();
+    insertRef(active.dataset.ref);
+  }
+  return true;
 }
 
 // ── Journal ────────────────────────────────────────────────────
@@ -2702,6 +2782,18 @@ async function handlePaletteInput() {
       if (!query || fuzzyScore(query, a.label) > 0) {
         items.push({ icon: a.icon, label: a.label, hint: a.hint || '', section: '操作', run: a.run });
       }
+    }
+    palItems = items;
+    renderPaletteResults();
+  } else if (prefix === '+') {
+    // Quick capture: create page with this name
+    const name = query;
+    if (name) {
+      items.push({ icon: '➕', label: `创建页面「${name}」`, hint: '快速捕获', section: '创建', run: () => {
+        newPage();
+        document.getElementById('page-name').value = name;
+        if (cm) cm.focus();
+      }});
     }
     palItems = items;
     renderPaletteResults();
