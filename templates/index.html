@@ -2224,10 +2224,16 @@ function recalcRecurring(task, completionDate) {
     case 'rec:1w':
       comp.setDate(comp.getDate() + 7);
       return comp.toISOString().slice(0, 10);
-    case 'rec:+1m':
-      // Strict monthly: same day next month
-      due.setMonth(due.getMonth() + 1);
-      return due.toISOString().slice(0, 10);
+    case 'rec:+1m': {
+      // Strict monthly: same day next month, with catch-up for overdue cycles
+      let d = new Date(due);
+      if (d < comp) {
+        while (d < comp) d.setMonth(d.getMonth() + 1);
+      } else {
+        d.setMonth(d.getMonth() + 1);
+      }
+      return d.toISOString().slice(0, 10);
+    }
     case 'rec:1b': {
       let d = new Date(comp);
       let added = 0;
@@ -2246,9 +2252,16 @@ function recalcRecurring(task, completionDate) {
       }
       return d.toISOString().slice(0, 10);
     }
-    case 'rec:+1y':
-      due.setFullYear(due.getFullYear() + 1);
-      return due.toISOString().slice(0, 10);
+    case 'rec:+1y': {
+      // Strict yearly: same date next year, with catch-up
+      let d = new Date(due);
+      if (d < comp) {
+        while (d < comp) d.setFullYear(d.getFullYear() + 1);
+      } else {
+        d.setFullYear(d.getFullYear() + 1);
+      }
+      return d.toISOString().slice(0, 10);
+    }
     default:
       // rec:Nw, rec:Nd pattern
       const m = task.rec.match(/^rec:(\d+)(w|d)$/);
@@ -2521,15 +2534,53 @@ function updateGanttRange() {
 function colorGanttBars() {
   setTimeout(() => {
     const bars = document.querySelectorAll('#gantt-area .bar');
-    const tasks = filterGanttTasks();
     bars.forEach((bar, i) => {
-      if (tasks[i]) {
+      const t = ganttRenderTasks[i];
+      if (t) {
         const colors = { p1: '#e74c3c', p2: '#e67e22', p3: '#f1c40f', p4: '#2ecc71' };
-        bar.setAttribute('fill', colors[tasks[i].priority] || 'var(--accent)');
+        bar.setAttribute('fill', colors[t.priority] || 'var(--accent)');
+        if (t.phantom) bar.setAttribute('fill-opacity', '0.4');
       }
     });
   }, 50);
 }
+
+// Advance a due date by one recurrence cycle (pure date math, no completion semantics)
+function nextCycleDate(dueDate, rec) {
+  const d = new Date(dueDate);
+  switch (rec) {
+    case 'rec:1w': d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10);
+    case 'rec:+1m': d.setMonth(d.getMonth() + 1); return d.toISOString().slice(0, 10);
+    case 'rec:1b': {
+      let added = 0;
+      while (added < 1) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    case 'rec:3b': {
+      let added = 0;
+      while (added < 3) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    case 'rec:+1y': d.setFullYear(d.getFullYear() + 1); return d.toISOString().slice(0, 10);
+    default: {
+      const m = rec.match(/^rec:(\d+)(w|d)$/);
+      if (m) {
+        const n = parseInt(m[1]);
+        d.setDate(d.getDate() + (m[2] === 'w' ? n * 7 : n));
+        return d.toISOString().slice(0, 10);
+      }
+      return null;
+    }
+  }
+}
+
+let ganttRenderTasks = [];  // full render list incl. phantom occurrences (for bar coloring)
 
 function renderGantt(tasks) {
   const content = document.getElementById('todo-content');
@@ -2542,16 +2593,43 @@ function renderGantt(tasks) {
   document.getElementById('gantt-date-from').value = '';
   document.getElementById('gantt-date-to').value = '';
 
-  const ganttTasks = filtered.map((t, i) => ({
-    id: 'task-' + i,
-    name: t.title,
-    start: t.startDate,
-    end: t.dueDate || t.startDate,
-    _priority: t.priority,
-    _links: t.links,
-    _rec: t.rec,
-    progress: 0,
-  }));
+  const ganttTasks = [];
+  const renderMeta = [];
+  filtered.forEach((t, i) => {
+    ganttTasks.push({
+      id: 'task-' + i,
+      name: t.title,
+      start: t.startDate,
+      end: t.dueDate || t.startDate,
+      _priority: t.priority,
+      _links: t.links,
+      _rec: t.rec,
+      progress: 0,
+    });
+    renderMeta.push({ priority: t.priority, phantom: false });
+
+    // Recurring tasks: preview next 2 cycles as phantom bars
+    if (t.rec && t.dueDate) {
+      let due = t.dueDate;
+      for (let occ = 1; occ <= 2; occ++) {
+        const next = nextCycleDate(due, t.rec);
+        if (!next) break;
+        ganttTasks.push({
+          id: `task-${i}-occ${occ}`,
+          name: `${t.title}·第${occ + 1}期`,
+          start: due,
+          end: next,
+          _priority: t.priority,
+          _links: t.links,
+          _rec: t.rec,
+          progress: 0,
+        });
+        renderMeta.push({ priority: t.priority, phantom: true });
+        due = next;
+      }
+    }
+  });
+  ganttRenderTasks = renderMeta;
 
   if (ganttChart) ganttChart.change_view_mode(ganttCurrentMode);
   else {
