@@ -1014,6 +1014,29 @@ function navigateFromUrl() {
 }
 
 window.addEventListener('popstate', navigateFromUrl);
+
+// ── View data cache (60s TTL, invalidated on writes) ──────────
+
+const CACHE_TTL = 60 * 1000;
+const viewCache = {};
+
+async function cachedFetch(key, url) {
+  const hit = viewCache[key];
+  if (hit && Date.now() - hit.ts < CACHE_TTL) return hit.data;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  viewCache[key] = { data, ts: Date.now() };
+  return data;
+}
+
+function invalidateCache() {
+  Object.keys(viewCache).forEach(k => delete viewCache[k]);
+  tagCache = null;       // tag autocomplete
+  allPages = [];         // ref autocomplete
+  allNames = null;       // unresolved-link detection
+  if (typeof lpCache !== 'undefined') lpCache.clear();  // hover preview
+}
 let currentName = null;   // page currently being edited
 let cm = null;
 let md = window.markdownit({
@@ -1131,12 +1154,10 @@ async function loadAndEdit(name) {
 async function showHome() {
   hideAll();
   document.getElementById('home-view').style.display = 'block';
-  const [pagesResp, tagsResp] = await Promise.all([
-    fetch(`${API}/pages?limit=50`),
-    fetch(`${API}/tags`),
+  const [pages, tags] = await Promise.all([
+    cachedFetch('homePages', `${API}/pages?limit=50`),
+    cachedFetch('tags', `${API}/tags`),
   ]);
-  const pages = await pagesResp.json();
-  const tags = await tagsResp.json();
 
   let html = '<h2 style="margin-bottom:16px">最近页面</h2>';
   if (pages.length === 0) {
@@ -1161,8 +1182,12 @@ async function showAllPages() {
   view.style.display = 'block';
   view.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
 
-  const resp = await fetch(`${API}/pages?limit=500`);
-  const pages = await resp.json();
+  let pages;
+  try {
+    pages = await cachedFetch('allPages', `${API}/pages?limit=500`);
+  } catch (e) {
+    pages = [];
+  }
 
   // Fast sort: pre-compute lowercase names, use simple comparison
   pages.sort((a, b) => {
@@ -1257,6 +1282,7 @@ async function handleImportFiles(files) {
     }
   }
   showToast(`导入完成: 新建 ${created}, 跳过 ${skipped}, 覆盖 ${overwritten}`);
+  invalidateCache();
   const nav = document.querySelector('.nav-item[data-nav="all"]');
   if (nav) nav.click();
 }
@@ -1347,6 +1373,7 @@ async function restoreSelectedVersion() {
     }
     closeVersionHistory();
     showToast('已恢复到历史版本 ✓');
+    invalidateCache();
     // Reload the page in editor
     const pageResp = await fetch(`${API}/pages/${encodeURIComponent(vpPageName)}`);
     if (pageResp.ok) {
@@ -1374,6 +1401,7 @@ async function deleteCurrentPage() {
       return;
     }
     showToast(`已删除「${name}」，可在回收站恢复`);
+    invalidateCache();
     currentName = null;
     showHome();
   } catch (e) {
@@ -1438,6 +1466,7 @@ async function restoreFromTrash(name, versionId) {
       return;
     }
     showToast(`已恢复「${name}」 ✓`);
+    invalidateCache();
     await loadTrash();
     // Refresh page count
     const nav = document.querySelector('.nav-item[data-nav="all"]');
@@ -1470,13 +1499,14 @@ async function loadPage(name) {
   hideAll();
   currentName = null;
   trackRecent(name);
-  const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
-  if (!resp.ok) {
+  let page;
+  try {
+    page = await cachedFetch(`page:${name}`, `${API}/pages/${encodeURIComponent(name)}`);
+  } catch (e) {
     showToast('页面不存在: ' + name, 'error');
     navigate('home');
     return;
   }
-  const page = await resp.json();
 
   document.getElementById('page-view').style.display = 'block';
   document.getElementById('page-name-display').textContent = page.name;
@@ -1735,7 +1765,7 @@ async function savePage() {
   }
 
   if (resp.ok) {
-    allNames = null;  // invalidate name cache
+    invalidateCache();
     showToast('保存成功');
     navigate('page', name);
   } else {
@@ -1918,8 +1948,7 @@ async function showTagAutocomplete(query, cursor) {
 
   if (!tagCache) {
     try {
-      const resp = await fetch(`${API}/tags`);
-      tagCache = resp.ok ? await resp.json() : [];
+      tagCache = await cachedFetch('tags', `${API}/tags`);
     } catch (e) { tagCache = []; }
   }
 
@@ -1992,10 +2021,11 @@ async function showJournal(date) {
   journalDate = date;
 
   let content = '';
-  const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`);
-  if (resp.ok) {
-    const data = await resp.json();
+  try {
+    const data = await cachedFetch(`page:${date}`, `${API}/pages/${encodeURIComponent(date)}`);
     content = data.content;
+  } catch (e) {
+    // New journal entry: empty content is fine
   }
 
   // Use the editor view with a date picker in the header
@@ -2022,7 +2052,7 @@ async function saveJournal() {
   });
 
   if (resp.ok) {
-    allNames = null;
+    invalidateCache();
     showToast('日记已保存');
   } else {
     const err = await resp.json();
@@ -2035,8 +2065,7 @@ async function saveJournal() {
 async function showTagPages(tag) {
   hideAll();
   document.getElementById('home-view').style.display = 'block';
-  const resp = await fetch(`${API}/tags/${encodeURIComponent(tag)}/pages`);
-  const pages = await resp.json();
+  const pages = await cachedFetch(`tag:${tag}`, `${API}/tags/${encodeURIComponent(tag)}/pages`);
 
   let html = `<h2 style="margin-bottom:16px">#${escapeHtml(tag)}</h2>`;
   if (pages.length === 0) {
@@ -2223,12 +2252,7 @@ async function renderTodo(view) {
   const content = document.getElementById('todo-content');
   content.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
   try {
-    const resp = await fetch(`${API}/pages/${encodeURIComponent(getTaskPage())}`);
-    if (!resp.ok) {
-      content.innerHTML = `<div style="padding:20px;color:var(--muted)">页面 "${escapeHtml(getTaskPage())}" 不存在。请在设置中指定任务来源页面。</div>`;
-      return;
-    }
-    const page = await resp.json();
+    const page = await cachedFetch(`page:${getTaskPage()}`, `${API}/pages/${encodeURIComponent(getTaskPage())}`);
     const tasks = parseTasks(page.content);
     if (tasks.length === 0) {
       content.innerHTML = '<div style="padding:20px;color:var(--muted)">该页面没有检测到任务。任务格式：<br><code>p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w</code></div>';
@@ -2241,7 +2265,11 @@ async function renderTodo(view) {
       renderList(tasks);
     }
   } catch (e) {
-    content.innerHTML = `<div style="padding:20px;color:#e74c3c">错误: ${escapeHtml(e.message)}</div>`;
+    if (String(e.message).includes('404')) {
+      content.innerHTML = `<div style="padding:20px;color:var(--muted)">页面 "${escapeHtml(getTaskPage())}" 不存在。请在设置中指定任务来源页面。</div>`;
+    } else {
+      content.innerHTML = `<div style="padding:20px;color:#e74c3c">错误: ${escapeHtml(e.message)}</div>`;
+    }
   }
 }
 
@@ -2436,8 +2464,7 @@ async function showGraph() {
   hideAll();
   document.getElementById('content').classList.add('graph-active');
   document.getElementById('graph-view').style.display = 'flex';
-  const resp = await fetch(`${API}/graph`);
-  const data = await resp.json();
+  const data = await cachedFetch('graph', `${API}/graph`);
   document.getElementById('graph-stats').textContent = `${data.nodes.length} 节点 · ${data.edges.length} 边`;
 
   // Circular layout (deterministic)
@@ -2893,13 +2920,10 @@ async function handlePaletteInput() {
   } else if (prefix === '#') {
     // Tags only
     try {
-      const resp = await fetch(`${API}/tags`);
-      if (resp.ok) {
-        const tags = await resp.json();
-        for (const t of tags) {
-          if (!query || fuzzyScore(query, t.name) > 0) {
-            items.push({ icon: '#', label: t.name, hint: `${t.count} 页`, section: '标签', run: () => navigate('tag', t.name) });
-          }
+      const tags = await cachedFetch('tags', `${API}/tags`);
+      for (const t of tags) {
+        if (!query || fuzzyScore(query, t.name) > 0) {
+          items.push({ icon: '#', label: t.name, hint: `${t.count} 页`, section: '标签', run: () => navigate('tag', t.name) });
         }
       }
     } catch (e) { /* ignore */ }
@@ -2920,17 +2944,14 @@ async function handlePaletteInput() {
 
     // Tags (limit 5)
     try {
-      const resp = await fetch(`${API}/tags`);
-      if (resp.ok) {
-        const tags = await resp.json();
-        const tagItems = [];
-        for (const t of tags) {
-          const sc = fuzzyScore(q, t.name);
-          if (sc > 0) tagItems.push({ icon: '#', label: t.name, hint: `${t.count} 页`, section: '标签', score: sc, run: () => navigate('tag', t.name) });
-        }
-        tagItems.sort((a, b) => b.score - a.score);
-        items.push(...tagItems.slice(0, 5));
+      const tags = await cachedFetch('tags', `${API}/tags`);
+      const tagItems = [];
+      for (const t of tags) {
+        const sc = fuzzyScore(q, t.name);
+        if (sc > 0) tagItems.push({ icon: '#', label: t.name, hint: `${t.count} 页`, section: '标签', score: sc, run: () => navigate('tag', t.name) });
       }
+      tagItems.sort((a, b) => b.score - a.score);
+      items.push(...tagItems.slice(0, 5));
     } catch (e) { /* ignore */ }
 
     // Actions (limit 3)
@@ -2974,12 +2995,9 @@ async function handlePaletteInput() {
 
 async function refreshAllPagesCache() {
   try {
-    const resp = await fetch(`${API}/pages/names`);
-    if (resp.ok) {
-      const names = await resp.json();
-      allPages = names.map(n => ({ name: n }));
-      return allPages;
-    }
+    const names = await cachedFetch('names', `${API}/pages/names`);
+    allPages = names.map(n => ({ name: n }));
+    return allPages;
   } catch (e) { /* ignore */ }
   return allPages;
 }
