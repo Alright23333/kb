@@ -246,6 +246,56 @@ body {
   border-bottom: 1px solid var(--border);
   align-items: center;
 }
+#history-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+#history-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+#version-panel {
+  position: fixed;
+  top: 0; right: -420px;
+  width: 400px; height: 100vh;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  z-index: 300;
+  transition: right 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.15);
+}
+#version-panel.open { right: 0; }
+#version-panel .vp-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+#version-panel .vp-list {
+  flex: 1; overflow-y: auto; padding: 8px;
+}
+#version-panel .vp-item {
+  padding: 10px 12px; border-radius: 4px; cursor: pointer; margin-bottom: 4px;
+  border: 1px solid transparent;
+}
+#version-panel .vp-item:hover { background: var(--hover); }
+#version-panel .vp-item.selected { border-color: var(--accent); background: var(--hover); }
+#version-panel .vp-preview {
+  max-height: 280px; overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  font-size: 13px; white-space: pre-wrap; font-family: monospace;
+  color: var(--muted); background: var(--bg);
+}
+#version-panel .vp-actions {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  display: flex; gap: 8px;
+}
 #editor input {
   background: var(--card);
   border: 1px solid var(--border);
@@ -555,6 +605,18 @@ body {
 }
 .page-list-item:hover { background: var(--hover); }
 .page-list-item .title { font-weight: 500; font-size: 15px; }
+
+.btn-imp {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-imp:hover { border-color: var(--accent); color: var(--accent); }
 .page-list-item .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
 /* Journal */
 .journal-nav {
@@ -716,6 +778,7 @@ body {
         <div id="editor-pane">
           <div id="editor-header">
             <input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">
+            <button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button>
           </div>
           <textarea id="cm-editor"></textarea>
           <div id="editor-footer">
@@ -754,6 +817,18 @@ body {
 <div id="slash-menu"></div>
 <!-- Reference autocomplete -->
 <div id="ref-autocomplete"></div>
+<!-- Version history panel -->
+<div id="version-panel">
+  <div class="vp-header">
+    <strong id="vp-title">🕘 版本历史</strong>
+    <button onclick="closeVersionHistory()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">✕</button>
+  </div>
+  <div class="vp-list" id="vp-list"></div>
+  <div class="vp-preview" id="vp-preview" style="display:none"></div>
+  <div class="vp-actions">
+    <button id="vp-restore-btn" onclick="restoreSelectedVersion()" disabled style="flex:1;background:var(--accent);border:none;color:#fff;padding:8px;border-radius:4px;cursor:pointer">恢复此版本</button>
+  </div>
+</div>
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -896,8 +971,15 @@ async function showAllPages() {
   const frag = document.createDocumentFragment();
 
   const header = document.createElement('div');
-  header.innerHTML = `<h2 style="margin-bottom:16px">📄 所有页面 <span style="color:var(--muted);font-size:14px;font-weight:400">(${pages.length})</span></h2>
-    <input type="text" id="all-pages-filter" placeholder="筛选页面名..." style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px;margin-bottom:16px" oninput="filterAllPages()">`;
+  header.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <h2 style="margin:0">📄 所有页面 <span style="color:var(--muted);font-size:14px;font-weight:400">(${pages.length})</span></h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn-imp" onclick="document.getElementById('import-file-input').click()" title="导入 .md 或 .zip">📥 导入</button>
+      <button class="btn-imp" onclick="exportPages('zip')" title="导出为 zip（Markdown + front matter）">📤 导出</button>
+    </div>
+  </div>
+    <input type="text" id="all-pages-filter" placeholder="筛选页面名..." style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px;margin-bottom:16px" oninput="filterAllPages()">
+    <input type="file" id="import-file-input" accept=".md,.zip" multiple style="display:none" onchange="handleImportFiles(this.files); this.value=''">`;
   frag.appendChild(header);
 
   const list = document.createElement('div');
@@ -921,6 +1003,143 @@ function filterAllPages() {
   document.querySelectorAll('#all-pages-list .page-list-item').forEach(el => {
     el.style.display = (!q || el.dataset.nameLower.includes(q)) ? '' : 'none';
   });
+}
+
+function exportPages(fmt) {
+  window.open(`/api/export/${fmt}`, '_blank');
+}
+
+async function handleImportFiles(files) {
+  if (!files || files.length === 0) return;
+
+  const uploads = [...files].filter(f => /\.(md|zip)$/i.test(f.name));
+  if (uploads.length === 0) {
+    showToast('只支持 .md 或 .zip 文件');
+    return;
+  }
+
+  const strategy = confirm(
+    `导入 ${uploads.length} 个文件\n\n「确定」= 跳过已存在的同名页面\n「取消」= 覆盖已存在的同名页面`
+  ) ? 'skip' : 'overwrite';
+
+  let created = 0, skipped = 0, overwritten = 0;
+  for (const f of uploads) {
+    const fd = new FormData();
+    fd.append('file', f);
+    fd.append('conflict', strategy);
+    try {
+      const resp = await fetch('/api/import', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        showToast(`导入失败: ${err.detail || resp.status}`);
+        return;
+      }
+      const r = await resp.json();
+      created += r.created; skipped += r.skipped; overwritten += r.overwritten;
+    } catch (e) {
+      showToast(`导入失败: ${e.message}`);
+      return;
+    }
+  }
+  showToast(`导入完成: 新建 ${created}, 跳过 ${skipped}, 覆盖 ${overwritten}`);
+  const nav = document.querySelector('.nav-item[data-nav="all"]');
+  if (nav) nav.click();
+}
+
+// ── Version History ─────────────────────────────────────────────
+
+let vpVersions = [];
+let vpSelectedId = null;
+let vpPageName = null;
+
+async function showVersionHistory() {
+  const nameInput = document.getElementById('page-name');
+  vpPageName = (nameInput && nameInput.value.trim()) || currentName;
+  if (!vpPageName) return;
+
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(vpPageName)}/versions`);
+    if (!resp.ok) { showToast('获取版本失败'); return; }
+    vpVersions = await resp.json();
+  } catch (e) {
+    showToast(`获取版本失败: ${e.message}`);
+    return;
+  }
+
+  vpSelectedId = null;
+  const list = document.getElementById('vp-list');
+  const preview = document.getElementById('vp-preview');
+  const restoreBtn = document.getElementById('vp-restore-btn');
+  preview.style.display = 'none';
+  restoreBtn.disabled = true;
+
+  document.getElementById('vp-title').textContent = `🕘 ${vpPageName} 的历史`;
+
+  if (vpVersions.length === 0) {
+    list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">暂无历史版本<br><span style="font-size:12px">保存内容修改后会自动记录</span></div>';
+  } else {
+    let html = '';
+    for (const v of vpVersions) {
+      html += `<div class="vp-item" data-vid="${v.id}" onclick="selectVersion(${v.id})">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>${formatDate(v.created_at)}</span>
+          <span style="color:var(--muted);font-size:12px">${v.size} 字节</span>
+        </div>
+      </div>`;
+    }
+    list.innerHTML = html;
+  }
+
+  document.getElementById('version-panel').classList.add('open');
+}
+
+function closeVersionHistory() {
+  document.getElementById('version-panel').classList.remove('open');
+}
+
+async function selectVersion(vid) {
+  vpSelectedId = vid;
+  document.querySelectorAll('#vp-list .vp-item').forEach(el => {
+    el.classList.toggle('selected', +el.dataset.vid === vid);
+  });
+
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(vpPageName)}/versions/${vid}`);
+    if (!resp.ok) { showToast('获取版本内容失败'); return; }
+    const v = await resp.json();
+    const preview = document.getElementById('vp-preview');
+    preview.textContent = v.content.slice(0, 2000) + (v.content.length > 2000 ? '\n... (截断)' : '');
+    preview.style.display = 'block';
+    document.getElementById('vp-restore-btn').disabled = false;
+  } catch (e) {
+    showToast(`获取版本内容失败: ${e.message}`);
+  }
+}
+
+async function restoreSelectedVersion() {
+  if (!vpSelectedId || !vpPageName) return;
+  if (!confirm('恢复到选中的版本？\n当前未保存的修改将丢失（已保存的内容会先记录为新版本）')) return;
+
+  try {
+    const resp = await fetch(
+      `${API}/pages/${encodeURIComponent(vpPageName)}/versions/${vpSelectedId}/restore`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(`恢复失败: ${err.detail || resp.status}`);
+      return;
+    }
+    closeVersionHistory();
+    showToast('已恢复到历史版本 ✓');
+    // Reload the page in editor
+    const pageResp = await fetch(`${API}/pages/${encodeURIComponent(vpPageName)}`);
+    if (pageResp.ok) {
+      editPage(await pageResp.json());
+    }
+  } catch (e) {
+    showToast(`恢复失败: ${e.message}`);
+  }
 }
 
 function loadTags(tags) {
@@ -1136,7 +1355,7 @@ function renderContent(content) {
   return md.render(content || '');
 }
 
-let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">';
+let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）"><button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button>';
 
 function newPage() {
   hideAll();
@@ -1145,7 +1364,6 @@ function newPage() {
   document.getElementById('editor').style.display = 'block';
   document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = '';
-
   if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue('');
   cm.focus();
@@ -1161,6 +1379,8 @@ function editPage(page) {
   document.getElementById('editor').style.display = 'block';
   document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = page.name;
+  const hb = document.getElementById('history-btn');
+  if (hb) hb.style.display = '';
 
   if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue(page.content);

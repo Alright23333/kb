@@ -5,9 +5,13 @@ Single-namespace model: a page is identified by `name` only
 name is a date (YYYY-MM-DD).
 """
 import aiosqlite
+import io
+import json
+import zipfile
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_db
@@ -206,6 +210,93 @@ async def list_page_names():
         await db.close()
 
 
+# ── Page Versions ────────────────────────────────────────────────
+
+@router.get("/pages/{name:path}/versions")
+async def list_versions(name: str):
+    """List version snapshots for a page (newest first)."""
+    db = await get_db()
+    try:
+        rows = await _fetchall(
+            db,
+            "SELECT id, page_name, created_at, length(content) AS size "
+            "FROM page_versions WHERE page_name = ? COLLATE NOCASE "
+            "ORDER BY id DESC LIMIT 100",
+            (name,),
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/pages/{name:path}/versions/{version_id}")
+async def get_version(name: str, version_id: int):
+    """Get full content of a specific version."""
+    db = await get_db()
+    try:
+        row = await _fetchone(
+            db,
+            "SELECT id, page_name, content, created_at "
+            "FROM page_versions WHERE id = ? AND page_name = ? COLLATE NOCASE",
+            (version_id, name),
+        )
+        if not row:
+            raise HTTPException(404, "Version not found")
+        return dict(row)
+    finally:
+        await db.close()
+
+
+@router.post("/pages/{name:path}/versions/{version_id}/restore")
+async def restore_version(name: str, version_id: int):
+    """Restore a page to a previous version. Creates the page if deleted."""
+    db = await get_db()
+    try:
+        ver = await _fetchone(
+            db,
+            "SELECT content FROM page_versions WHERE id = ? AND page_name = ? COLLATE NOCASE",
+            (version_id, name),
+        )
+        if not ver:
+            raise HTTPException(404, "Version not found")
+
+        row = await _fetchone(db, "SELECT id FROM pages WHERE name = ? COLLATE NOCASE", (name,))
+        if row:
+            await db.execute("UPDATE pages SET content = ? WHERE id = ?", (ver["content"], row["id"]))
+            await _sync(db, row["id"], ver["content"])
+            await db.execute(
+                "UPDATE pages SET updated_at = datetime('now', 'localtime') WHERE id = ?",
+                (row["id"],),
+            )
+        else:
+            # Page was deleted; re-create it from the version snapshot.
+            cur = await db.execute("INSERT INTO pages (name, content) VALUES (?, ?)", (name, ver["content"]))
+            await _sync(db, cur.lastrowid, ver["content"])
+        await db.commit()
+        return {"name": name, "restored": True, "version_id": version_id}
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+@router.delete("/pages/{name:path}/versions")
+async def purge_versions(name: str):
+    """Delete all version snapshots for a page."""
+    db = await get_db()
+    try:
+        cur = await db.execute("DELETE FROM page_versions WHERE page_name = ? COLLATE NOCASE", (name,))
+        await db.commit()
+        return {"name": name, "purged": cur.rowcount}
+    finally:
+        await db.close()
+
+
+
 @router.get("/pages/{name:path}")
 async def get_page(name: str):
     db = await get_db()
@@ -402,6 +493,204 @@ async def get_pages_by_tag(tag_name: str):
             (tag_name,),
         )
         return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+# ── Export / Import ─────────────────────────────────────────────
+
+
+def _safe_filename(name: str) -> str:
+    return (
+        name.replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "-")
+        .replace("?", "")
+        .replace("*", "")
+        .replace('"', "'")
+        .replace("<", "(")
+        .replace(">", ")")
+        .replace("|", "_")
+    )
+
+
+async def _export_all_pages(db: aiosqlite.Connection) -> list[dict]:
+    """Fetch all pages with tags/links/properties for export."""
+    pages = []
+    rows = await _fetchall(db, "SELECT * FROM pages ORDER BY name")
+    for row in rows:
+        p = dict(row)
+        p["tags"] = [
+            r["target_name"]
+            for r in await _fetchall(
+                db, "SELECT target_name FROM refs WHERE source_id=? AND kind='tag'", (row["id"],)
+            )
+        ]
+        p["links"] = [
+            r["target_name"]
+            for r in await _fetchall(
+                db, "SELECT target_name FROM refs WHERE source_id=? AND kind='link'", (row["id"],)
+            )
+        ]
+        p["properties"] = {
+            r["key"]: r["value"]
+            for r in await _fetchall(
+                db, "SELECT key, value FROM properties WHERE page_id=?", (row["id"],)
+            )
+        }
+        pages.append(p)
+    return pages
+
+
+def _build_front_matter(p: dict) -> str:
+    lines = ["---"]
+    lines.append(f"name: {p['name']}")
+    lines.append(f"created: {p['created_at']}")
+    lines.append(f"updated: {p['updated_at']}")
+    if p.get("tags"):
+        lines.append(f"tags: [{', '.join(p['tags'])}]")
+    for k, v in p.get("properties", {}).items():
+        lines.append(f"{k}: {v or ''}")
+    lines.append("---\n")
+    return "\n".join(lines)
+
+
+@router.get("/export/zip")
+async def export_zip():
+    """Download all pages as a zip of .md files (with front matter)."""
+    db = await get_db()
+    try:
+        pages = await _export_all_pages(db)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in pages:
+                zf.writestr(_safe_filename(p["name"]) + ".md", _build_front_matter(p) + p["content"])
+        buf.seek(0)
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="kb_export_{ts}.zip"'},
+        )
+    finally:
+        await db.close()
+
+
+@router.get("/export/json")
+async def export_json():
+    """Download full database dump as JSON."""
+    db = await get_db()
+    try:
+        pages = await _export_all_pages(db)
+        refs = await _fetchall(
+            db,
+            "SELECT p.name AS source_name, r.target_name, r.kind "
+            "FROM refs r JOIN pages p ON p.id = r.source_id",
+        )
+        data = {
+            "version": 1,
+            "pages": pages,
+            "refs": [dict(r) for r in refs],
+        }
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return StreamingResponse(
+            io.BytesIO(content.encode("utf-8")),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="kb_export_{ts}.json"'},
+        )
+    finally:
+        await db.close()
+
+
+def _parse_front_matter(text: str) -> tuple[str, str]:
+    """Extract front matter and body. Returns (name, body)."""
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end > 0:
+            fm = text[4:end]
+            body = text[end + 5 :]
+            name = ""
+            for line in fm.split("\n"):
+                if line.startswith("name:"):
+                    name = line[5:].strip()
+                    break
+            return name, body
+    return "", text.lstrip("\ufeff")
+
+
+@router.post("/import")
+async def import_pages(
+    file: UploadFile = File(...),
+    conflict: str = Form("skip"),  # skip | overwrite
+):
+    """Import .md file or zip of .md files.
+
+    Front matter `name:` overrides filename. Conflict resolution:
+    skip (default) or overwrite existing pages.
+    """
+    raw = await file.read()
+    entries: list[tuple[str, str]] = []  # (name, content)
+
+    if file.filename and file.filename.lower().endswith(".zip"):
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(raw))
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "Invalid zip file")
+        for info in zf.infolist():
+            if info.is_dir() or not info.filename.lower().endswith(".md"):
+                continue
+            text = zf.read(info).decode("utf-8", errors="replace")
+            fm_name, body = _parse_front_matter(text)
+            name = fm_name or info.filename.rsplit("/", 1)[-1][:-3]
+            entries.append((name, body))
+    elif file.filename and file.filename.lower().endswith(".md"):
+        text = raw.decode("utf-8", errors="replace")
+        fm_name, body = _parse_front_matter(text)
+        name = fm_name or file.filename[:-3]
+        entries.append((name, body))
+    else:
+        raise HTTPException(400, "Only .md or .zip files are supported")
+
+    db = await get_db()
+    try:
+        created, skipped, overwritten = 0, 0, 0
+        for name, content in entries:
+            name = name.strip()
+            if not name:
+                skipped += 1
+                continue
+            existing = await _fetchone(db, "SELECT id FROM pages WHERE name = ? COLLATE NOCASE", (name,))
+            if existing:
+                if conflict == "overwrite":
+                    await db.execute("UPDATE pages SET content = ? WHERE id = ?", (content, existing["id"]))
+                    await _sync(db, existing["id"], content)
+                    await db.execute(
+                        "UPDATE pages SET updated_at = datetime('now', 'localtime') WHERE id = ?",
+                        (existing["id"],),
+                    )
+                    overwritten += 1
+                else:
+                    skipped += 1
+            else:
+                cur = await db.execute(
+                    "INSERT INTO pages (name, content) VALUES (?, ?)", (name, content)
+                )
+                page_id = cur.lastrowid
+                await _sync(db, page_id, content)
+                created += 1
+        await db.commit()
+        return {
+            "created": created,
+            "skipped": skipped,
+            "overwritten": overwritten,
+            "total": len(entries),
+        }
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
 

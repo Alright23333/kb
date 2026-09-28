@@ -49,6 +49,33 @@ CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     tokenize='trigram'
 );
 
+-- Page versions: snapshot on every content change or delete.
+-- Tracked by page NAME (not FK) so versions survive deletion/rename.
+CREATE TABLE IF NOT EXISTS page_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_name  TEXT NOT NULL COLLATE NOCASE,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_versions_name ON page_versions(page_name);
+
+-- Snapshot previous content when it actually changes.
+CREATE TRIGGER IF NOT EXISTS pages_version_on_update
+AFTER UPDATE OF content ON pages
+WHEN old.content != new.content
+BEGIN
+    INSERT INTO page_versions (page_name, content, created_at)
+    VALUES (old.name, old.content, datetime('now', 'localtime'));
+END;
+
+-- Snapshot full page before deletion (enables restore).
+CREATE TRIGGER IF NOT EXISTS pages_version_on_delete
+BEFORE DELETE ON pages
+BEGIN
+    INSERT INTO page_versions (page_name, content, created_at)
+    VALUES (old.name, old.content, datetime('now', 'localtime'));
+END;
+
 CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
     INSERT INTO pages_fts(rowid, name, content) VALUES (new.id, new.name, new.content);
 END;
