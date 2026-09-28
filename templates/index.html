@@ -585,6 +585,14 @@ body {
   background: var(--card); border: 1px solid var(--border); color: var(--fg);
   padding: 4px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
 }
+.todo-quickadd {
+  width: 100%; box-sizing: border-box;
+  background: var(--card); border: 1px dashed var(--border); color: var(--fg);
+  padding: 9px 14px; border-radius: 6px; font-size: 14px;
+  margin-bottom: 12px; outline: none;
+}
+.todo-quickadd:focus { border-color: var(--accent); border-style: solid; }
+.todo-quickadd::placeholder { color: var(--muted); }
 .todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
 .todo-list-item .priority.p1 { background: #e74c3c; }
 .todo-list-item .priority.p2 { background: #e67e22; }
@@ -2400,6 +2408,40 @@ function setTodoSort(s) {
   renderTodo(todoCurrentView);
 }
 
+async function quickAddTask(text) {
+  text = text.trim();
+  if (!text) return;
+  const input = document.getElementById('quick-add-input');
+  if (input) input.value = '';
+  const taskPage = getTaskPage();
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(taskPage)}`);
+    if (!resp.ok) { showToast('任务页不可读', 'error'); return; }
+    const page = await resp.json();
+
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    let line;
+    if (/^\s*(p[1-4]|\d)\s+\d{4}-\d{2}-\d{2}\s+/i.test(text)) {
+      line = text;  // full task syntax
+    } else {
+      line = 'p2 ' + today + ' ' + text;  // plain text → default p2, starts today
+    }
+
+    const newContent = (page.content || '').trimEnd() + '\n' + line;
+    const putResp = await fetch(`${API}/pages/${encodeURIComponent(taskPage)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: newContent }),
+    });
+    if (!putResp.ok) { showToast('保存失败', 'error'); return; }
+    invalidateCache();
+    renderTodo(todoCurrentView);
+    showToast('✓ 已添加');
+  } catch (e) {
+    showToast('添加失败: ' + e.message, 'error');
+  }
+}
+
 function renderList(tasks) {
   const content = document.getElementById('todo-content');
   const today = new Date().toISOString().slice(0, 10);
@@ -2407,7 +2449,8 @@ function renderList(tasks) {
   const shown = applyTaskFilter(tasks);
   currentTasks = shown;
 
-  // Stats bar (clickable filters)
+  // Quick add + stats bar (clickable filters)
+  let html = `<input type="text" id="quick-add-input" class="todo-quickadd" placeholder="+ 新任务，回车添加（支持 p1 due:2026-09-30 rec:1w 完整语法，纯文本默认 p2 今天开始）" onkeydown="if(event.key==='Enter')quickAddTask(this.value)">`;
   const statItems = [
     { key: 'all', label: `全部 ${tasks.length}`, cls: '' },
     { key: 'overdue', label: `🔴 逾期 ${stats.overdue}`, cls: '' },
@@ -2415,7 +2458,7 @@ function renderList(tasks) {
     { key: 'week', label: `🔵 本周 ${stats.week}`, cls: '' },
     { key: 'done', label: `✓ 已完成 ${stats.done}`, cls: '' },
   ];
-  let html = `<div class="todo-stats">`;
+  html += `<div class="todo-stats">`;
   for (const s of statItems) {
     html += `<button class="todo-stat${todoFilter === s.key ? ' active' : ''}" onclick="setTodoFilter('${s.key}')">${s.label}</button>`;
   }
