@@ -571,6 +571,20 @@ body {
 .todo-list-item.task-done { opacity: 0.45; }
 .todo-list-item.task-done .task-title { text-decoration: line-through; }
 .todo-list-item .task-check { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+
+.todo-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.todo-stat {
+  background: var(--card); border: 1px solid var(--border); color: var(--muted);
+  padding: 4px 12px; border-radius: 14px; font-size: 13px; cursor: pointer;
+  transition: all 0.15s;
+}
+.todo-stat:hover { border-color: var(--accent); color: var(--fg); }
+.todo-stat.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.todo-sort {
+  margin-left: auto;
+  background: var(--card); border: 1px solid var(--border); color: var(--fg);
+  padding: 4px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
+}
 .todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
 .todo-list-item .priority.p1 { background: #e74c3c; }
 .todo-list-item .priority.p2 { background: #e67e22; }
@@ -2331,11 +2345,92 @@ async function renderTodo(view) {
   }
 }
 
+let todoFilter = 'all';
+let todoSort = 'due';
+
+function computeTaskStats(tasks) {
+  const today = new Date().toISOString().slice(0, 10);
+  const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const s = { overdue: 0, today: 0, week: 0, done: 0 };
+  for (const t of tasks) {
+    if (t.doneDate) { s.done++; continue; }
+    if (t.dueDate) {
+      if (t.dueDate < today) s.overdue++;
+      else if (t.dueDate === today) s.today++;
+      else if (t.dueDate <= weekEnd) s.week++;
+    }
+  }
+  return s;
+}
+
+function applyTaskFilter(tasks) {
+  const today = new Date().toISOString().slice(0, 10);
+  const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  let out = tasks;
+  switch (todoFilter) {
+    case 'active': out = tasks.filter(t => !t.doneDate); break;
+    case 'overdue': out = tasks.filter(t => !t.doneDate && t.dueDate && t.dueDate < today); break;
+    case 'today': out = tasks.filter(t => !t.doneDate && t.dueDate === today); break;
+    case 'week': out = tasks.filter(t => !t.doneDate && t.dueDate && t.dueDate >= today && t.dueDate <= weekEnd); break;
+    case 'done': out = tasks.filter(t => t.doneDate); break;
+  }
+  const prioOrder = { p1: 0, p2: 1, p3: 2, p4: 3 };
+  if (todoSort === 'due') {
+    out = [...out].sort((a, b) => {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0;
+    });
+  } else if (todoSort === 'priority') {
+    out = [...out].sort((a, b) => prioOrder[a.priority] - prioOrder[b.priority]);
+  } else if (todoSort === 'created') {
+    out = [...out].sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0);
+  }
+  return out;
+}
+
+function setTodoFilter(f) {
+  todoFilter = f;
+  renderTodo(todoCurrentView);
+}
+
+function setTodoSort(s) {
+  todoSort = s;
+  renderTodo(todoCurrentView);
+}
+
 function renderList(tasks) {
   const content = document.getElementById('todo-content');
   const today = new Date().toISOString().slice(0, 10);
-  let html = '';
-  tasks.forEach((t, i) => {
+  const stats = computeTaskStats(tasks);
+  const shown = applyTaskFilter(tasks);
+  currentTasks = shown;
+
+  // Stats bar (clickable filters)
+  const statItems = [
+    { key: 'all', label: `全部 ${tasks.length}`, cls: '' },
+    { key: 'overdue', label: `🔴 逾期 ${stats.overdue}`, cls: '' },
+    { key: 'today', label: `🟠 今天 ${stats.today}`, cls: '' },
+    { key: 'week', label: `🔵 本周 ${stats.week}`, cls: '' },
+    { key: 'done', label: `✓ 已完成 ${stats.done}`, cls: '' },
+  ];
+  let html = `<div class="todo-stats">`;
+  for (const s of statItems) {
+    html += `<button class="todo-stat${todoFilter === s.key ? ' active' : ''}" onclick="setTodoFilter('${s.key}')">${s.label}</button>`;
+  }
+  html += `<select class="todo-sort" onchange="setTodoSort(this.value)" title="排序">
+    <option value="due"${todoSort === 'due' ? ' selected' : ''}>按截止日</option>
+    <option value="priority"${todoSort === 'priority' ? ' selected' : ''}>按优先级</option>
+    <option value="created"${todoSort === 'created' ? ' selected' : ''}>按开始日</option>
+  </select>`;
+  html += `</div>`;
+
+  if (shown.length === 0) {
+    html += `<div style="padding:20px;color:var(--muted)">没有符合条件的任务</div>`;
+  }
+
+  shown.forEach((t, i) => {
     const isDone = !!t.doneDate;
     const isOverdue = !isDone && t.dueDate && t.dueDate < today;
     const links = t.links.map(l => `<a href="#" data-page="${escapeHtml(l)}" style="color:var(--accent)">${escapeHtml(l)}</a>`).join(', ');
