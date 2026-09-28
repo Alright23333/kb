@@ -18,6 +18,10 @@ router = APIRouter()
 
 # ── Pydantic models ──────────────────────────────────────────────
 
+class PageRename(BaseModel):
+    name: str
+
+
 class PageCreate(BaseModel):
     name: str
     content: str = ""
@@ -107,6 +111,47 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
         (like, like, limit, offset),
     )
     return [dict(r) for r in rows]
+
+
+async def _rename_page(db: aiosqlite.Connection, page_id: int, old_name: str, new_name: str) -> None:
+    """Rename a page atomically, handling refs PK collisions.
+
+    Collision case: page A links to both [[OldName]] and [[NewName]].
+    After rename, refs would have (A.id, 'NewName', 'link') twice → PK violation.
+    Fix: delete the old-name refs first, then update.
+    """
+    # 1. Check new name doesn't exist (excluding self)
+    dup = await _fetchone(
+        db,
+        "SELECT id FROM pages WHERE name = ? COLLATE NOCASE AND id != ?",
+        (new_name, page_id),
+    )
+    if dup:
+        raise HTTPException(409, f"Page '{new_name}' already exists")
+
+    # 2. Pre-delete refs that would collide after rename
+    #    (refs pointing to old_name from pages that also link to new_name)
+    await db.execute(
+        """
+        DELETE FROM refs
+        WHERE target_name = ? COLLATE NOCASE
+          AND kind = 'link'
+          AND source_id IN (
+            SELECT DISTINCT source_id FROM refs
+            WHERE target_name = ? COLLATE NOCASE AND kind = 'link'
+          )
+        """,
+        (old_name, new_name),
+    )
+
+    # 3. Update page name
+    await db.execute("UPDATE pages SET name = ? WHERE id = ?", (new_name, page_id))
+
+    # 4. Rewrite inbound links
+    await db.execute(
+        "UPDATE refs SET target_name = ? WHERE target_name = ? COLLATE NOCASE",
+        (new_name, old_name),
+    )
 
 
 # ── Pages CRUD ────────────────────────────────────────────────────
@@ -251,19 +296,7 @@ async def update_page(name: str, data: PageUpdate):
         if data.name is not None and data.name.strip():
             new_name = data.name.strip()
             if new_name.casefold() != name.casefold():
-                dup = await _fetchone(
-                    db,
-                    "SELECT id FROM pages WHERE name = ? COLLATE NOCASE AND id != ?",
-                    (new_name, page_id),
-                )
-                if dup:
-                    raise HTTPException(409, f"Page '{new_name}' already exists")
-                await db.execute("UPDATE pages SET name = ? WHERE id = ?", (new_name, page_id))
-                # Rewrite inbound links that pointed at the old name.
-                await db.execute(
-                    "UPDATE refs SET target_name = ? WHERE target_name = ? COLLATE NOCASE",
-                    (new_name, name),
-                )
+                await _rename_page(db, page_id, name, new_name)
 
         if data.content is not None:
             await db.execute("UPDATE pages SET content = ? WHERE id = ?", (data.content, page_id))
@@ -281,6 +314,41 @@ async def update_page(name: str, data: PageUpdate):
         await db.rollback()
         if "UNIQUE constraint" in str(e):
             raise HTTPException(409, f"Page '{name}' already exists")
+        raise
+    finally:
+        await db.close()
+
+
+@router.patch("/pages/{name:path}/rename")
+async def rename_page(name: str, data: PageRename):
+    """Rename a page. Atomic: either succeeds or rolls back entirely."""
+    new_name = data.name.strip()
+    if not new_name:
+        raise HTTPException(400, "New name must not be empty")
+
+    db = await get_db()
+    try:
+        row = await _fetchone(db, "SELECT id FROM pages WHERE name = ? COLLATE NOCASE", (name,))
+        if not row:
+            raise HTTPException(404, "Page not found")
+
+        if new_name.casefold() == name.casefold():
+            return {"name": new_name, "renamed": False, "reason": "same name"}
+
+        await _rename_page(db, row["id"], name, new_name)
+        await db.execute(
+            "UPDATE pages SET updated_at = datetime('now', 'localtime') WHERE id = ?",
+            (row["id"],),
+        )
+        await db.commit()
+        return {"name": new_name, "renamed": True}
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(409, f"Page '{new_name}' already exists")
         raise
     finally:
         await db.close()
