@@ -155,6 +155,22 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 页面 A 同时链接 `[[Old]]` 和 `[[New]]` 时，直接 `UPDATE refs SET target_name='New'` 会撞 `(source_id, target_name, kind)` 主键。必须先删旧名 refs（`_rename_page()` 已处理），PUT 和 PATCH 都走同一辅助函数。
 
+### 15. 前端视图缓存必须写后失效
+
+`cachedFetch()` 缓存 60s。任何写操作（保存/删除/导入/恢复/任务勾选/快速添加）后必须调 `invalidateCache()`，否则界面显示旧数据。新增写操作时记得加。
+
+### 16. URL 路由的 suppressPush 模式
+
+`navigate()` 会 pushState，但 popstate 恢复时不能再次 push（否则历史栈并嗂）。`navigateFromUrl()` 设置 `suppressPush=true` 再调 navigate。newPage/editPage 自己推送路由，navigate('new'/'edit') 不重复推。
+
+### 17. 任务勾选写回用 raw 行匹配
+
+`toggleTaskDone` 不能用行号定位（内容可能已变），必须用 `task.raw` 全行匹配。写回前 bypass 缓存 fetch 最新内容。循环任务勾选不加 done: 而是滚动 due:（recalcRecurring 含追赶逻辑）。
+
+### 18. 甘特图幻影条与 colorGanttBars 索引对齐
+
+循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改
