@@ -296,6 +296,29 @@ async def purge_versions(name: str):
         await db.close()
 
 
+@router.get("/trash")
+async def list_trash():
+    """List deleted pages: names with version snapshots but no live page."""
+    db = await get_db()
+    try:
+        rows = await _fetchall(
+            db,
+            """
+            SELECT page_name,
+                   COUNT(*) AS version_count,
+                   MAX(created_at) AS last_modified,
+                   MAX(id) AS latest_version_id
+            FROM page_versions
+            WHERE page_name NOT IN (SELECT name FROM pages)
+            GROUP BY page_name
+            ORDER BY last_modified DESC
+            """,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
 
 @router.get("/pages/{name:path}")
 async def get_page(name: str):

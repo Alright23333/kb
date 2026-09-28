@@ -13,11 +13,11 @@
 		{
 			"id": "T-016",
 			"text": "页面历史：page_versions 表 + 触发器 + 版本列表 UI",
-			"status": "in-progress",
+			"status": "done",
 			"priority": "high",
 			"assignee": null,
 			"createdAt": "2026-09-28T02:43:16.289Z",
-			"updatedAt": "2026-09-28T02:52:22.885Z",
+			"updatedAt": "2026-09-28T03:01:19.465Z",
 			"blockedBy": null
 		},
 		{
@@ -29,7 +29,17 @@
 			"createdAt": "2026-09-28T02:46:16.612Z",
 			"updatedAt": "2026-09-28T02:52:20.426Z",
 			"blockedBy": null
+		},
+		{
+			"id": "T-018",
+			"text": "删除按钮 + 回收站：编辑器🗑️按钮、GET /api/trash、所有页面回收站区",
+			"status": "in-progress",
+			"priority": "high",
+			"assignee": null,
+			"createdAt": "2026-09-28T03:13:17.991Z",
+			"updatedAt": "2026-09-28T03:13:20.981Z",
+			"blockedBy": null
 		}
 	],
-	"counter": 17
+	"counter": 18
 }

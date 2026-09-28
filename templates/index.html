@@ -779,6 +779,7 @@ body {
           <div id="editor-header">
             <input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">
             <button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button>
+            <button id="delete-btn" onclick="deleteCurrentPage()" title="删除页面（可在回收站恢复）" style="display:none">🗑️</button>
           </div>
           <textarea id="cm-editor"></textarea>
           <div id="editor-footer">
@@ -994,6 +995,18 @@ async function showAllPages() {
   }
   frag.appendChild(list);
 
+  // Trash section (collapsed by default)
+  const trash = document.createElement('div');
+  trash.style.marginTop = '24px';
+  trash.innerHTML = `
+    <div onclick="toggleTrash()" style="cursor:pointer;color:var(--muted);font-size:14px;padding:8px 0;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px">
+      🗑️ 回收站 <span id="trash-toggle-hint" style="font-size:12px">（点击展开）</span>
+    </div>
+    <div id="trash-box" style="display:none">
+      <div id="trash-list"></div>
+    </div>`;
+  frag.appendChild(trash);
+
   view.innerHTML = '';
   view.appendChild(frag);
 }
@@ -1137,6 +1150,96 @@ async function restoreSelectedVersion() {
     if (pageResp.ok) {
       editPage(await pageResp.json());
     }
+  } catch (e) {
+    showToast(`恢复失败: ${e.message}`);
+  }
+}
+
+// ── Delete & Trash ─────────────────────────────────────────────
+
+async function deleteCurrentPage() {
+  const nameInput = document.getElementById('page-name');
+  const name = (nameInput && nameInput.value.trim()) || currentName;
+  if (!name) return;
+
+  if (!confirm(`删除页面「${name}」？\n\n删除后可在「所有页面」底部的回收站恢复。`)) return;
+
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(`删除失败: ${err.detail || resp.status}`);
+      return;
+    }
+    showToast(`已删除「${name}」，可在回收站恢复`);
+    currentName = null;
+    showHome();
+  } catch (e) {
+    showToast(`删除失败: ${e.message}`);
+  }
+}
+
+async function toggleTrash() {
+  const box = document.getElementById('trash-box');
+  const hint = document.getElementById('trash-toggle-hint');
+  if (!box) return;
+  if (box.style.display === 'none') {
+    box.style.display = '';
+    if (hint) hint.textContent = '（点击收起）';
+    await loadTrash();
+  } else {
+    box.style.display = 'none';
+    if (hint) hint.textContent = '（点击展开）';
+  }
+}
+
+async function loadTrash() {
+  const list = document.getElementById('trash-list');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--muted);padding:8px">加载中...</div>';
+  try {
+    const resp = await fetch(`${API}/trash`);
+    if (!resp.ok) { list.innerHTML = '<div style="color:var(--muted);padding:8px">加载失败</div>'; return; }
+    const items = await resp.json();
+    if (items.length === 0) {
+      list.innerHTML = '<div style="color:var(--muted);padding:8px;font-size:13px">回收站为空</div>';
+      return;
+    }
+    let html = '';
+    for (const it of items) {
+      html += `<div class="page-list-item" style="opacity:0.75">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="title">${escapeHtml(it.page_name)}</div>
+            <div class="meta">${it.version_count} 个版本 · 删除于 ${formatDate(it.last_modified)}</div>
+          </div>
+          <button onclick="restoreFromTrash('${escapeHtml(it.page_name).replace(/'/g, "\\'")}', ${it.latest_version_id})" style="background:var(--accent);border:none;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">恢复</button>
+        </div>
+      </div>`;
+    }
+    list.innerHTML = html;
+  } catch (e) {
+    list.innerHTML = `<div style="color:var(--muted);padding:8px">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function restoreFromTrash(name, versionId) {
+  if (!confirm(`恢复页面「${name}」？`)) return;
+  try {
+    const resp = await fetch(
+      `${API}/pages/${encodeURIComponent(name)}/versions/${versionId}/restore`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(`恢复失败: ${err.detail || resp.status}`);
+      return;
+    }
+    showToast(`已恢复「${name}」 ✓`);
+    await loadTrash();
+    // Refresh page count
+    const nav = document.querySelector('.nav-item[data-nav="all"]');
+    if (nav) nav.click();
   } catch (e) {
     showToast(`恢复失败: ${e.message}`);
   }
@@ -1355,7 +1458,7 @@ function renderContent(content) {
   return md.render(content || '');
 }
 
-let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）"><button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button>';
+let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）"><button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button><button id="delete-btn" onclick="deleteCurrentPage()" title="删除页面（可在回收站恢复）" style="display:none">🗑️</button>';
 
 function newPage() {
   hideAll();
@@ -1381,6 +1484,8 @@ function editPage(page) {
   document.getElementById('page-name').value = page.name;
   const hb = document.getElementById('history-btn');
   if (hb) hb.style.display = '';
+  const dbBtn = document.getElementById('delete-btn');
+  if (dbBtn) dbBtn.style.display = '';
 
   if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue(page.content);
