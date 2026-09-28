@@ -285,26 +285,58 @@ python3 -m uvicorn main:app --host 0.0.0.0 --port 8080
 services:
   kb:
     build: .
+    container_name: kb
     ports:
       - "8080:8080"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    environment:
+      - KB_DB_PATH=/app/data/kb.db
+      - KB_IP_WHITELIST=1
+      - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48
 ```
 
 ```bash
 docker compose up -d        # 启动
 docker compose up -d --build  # 更新后重建
 docker compose logs -f        # 查看日志
+docker logs kb --tail 20     # 查看容器日志
 ```
 
 数据库 `./data/kb.db` 挂载到宿主机，重建容器数据不丢。
 
 ### nginx 反向代理
 
-支持两种部署方式，前端自动检测 base 路径：
+**生产环境（fajita）**：Tailscale Serve → nginx :8081 → Docker :8080
 
-**方式 A：子域名（推荐）**
+```nginx
+# API 路径：剥掉 /kb 前缀
+location /kb/api/ {
+    proxy_pass http://127.0.0.1:8080/api/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_buffering off;
+}
+
+# 页面路径：不剥前缀，前端 detectBase() 自动处理
+location /kb/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Accept-Encoding "";
+    proxy_buffering off;
+    add_header Cache-Control "no-store" always;
+    expires off;
+}
+```
+
+> ⚠️ 不要用 `sub_filter` 重写 HTML/JS——前端 `detectBase()` 已自动处理 `/kb/` 前缀。
+> ⚠️ 不要用 `proxy_pass http://kb:8080/;`（尾斜杠会剥掉前缀，API 请求会 404）。
+
+**子域名部署**
 
 ```nginx
 server {
@@ -314,19 +346,6 @@ server {
     }
 }
 ```
-
-**方式 B：路径前缀**
-
-```nginx
-# 注意：proxy_pass 结尾不加斜杠——前缀 /kb 原样传给应用，前端自动识别
-location /kb/ {
-    proxy_pass http://kb:8080;
-}
-```
-
-> ⚠️ 不要用 `proxy_pass http://kb:8080/;`（尾斜杠会剥掉前缀，API 请求会 404）。
-
-两种方式下 URL 路由、API 调用、静态资源全部自动适配，无需配置。
 
 ### IP 白名单（内网保护）
 
