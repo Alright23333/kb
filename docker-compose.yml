@@ -1,0 +1,13 @@
+services:
+  kb:
+    build: .
+    container_name: kb
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - KB_DB_PATH=/app/data/kb.db
+      - KB_IP_WHITELIST=1
+      - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48

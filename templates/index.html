@@ -3504,7 +3504,7 @@ function applyCustomCSS() {
 
 (async function loadCustomCSS() {
   try {
-    const resp = await fetch(`${BASE}/custom.css`, { cache: 'no-store' });
+    const resp = await fetch(`${API}/custom.css`, { cache: 'no-store' });
     if (resp.ok) {
       const css = await resp.text();
       let styleEl = document.getElementById('custom-css');
