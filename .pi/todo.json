@@ -9,7 +9,57 @@
 			"createdAt": "2026-09-28T06:50:33.245Z",
 			"updatedAt": "2026-09-28T12:23:46.593Z",
 			"blockedBy": null
+		},
+		{
+			"id": "T-034",
+			"text": "移动端适配 P0: 侧边栏抽屉化 + 汉堡按钮",
+			"status": "done",
+			"priority": "high",
+			"assignee": "Aurora",
+			"createdAt": "2026-09-29T13:16:42.880Z",
+			"updatedAt": "2026-09-29T13:21:08.088Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-035",
+			"text": "移动端适配 P0: 编辑器单栏切换 + FAB 保存按钮",
+			"status": "done",
+			"priority": "high",
+			"assignee": "Aurora",
+			"createdAt": "2026-09-29T13:16:42.880Z",
+			"updatedAt": "2026-09-29T13:21:14.927Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-036",
+			"text": "移动端适配 P1: Header 折叠 + 图标按钮 + 响应式搜索",
+			"status": "done",
+			"priority": "medium",
+			"assignee": "Aurora",
+			"createdAt": "2026-09-29T13:16:42.880Z",
+			"updatedAt": "2026-09-29T13:21:51.591Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-037",
+			"text": "移动端适配 P1: 触摸事件（图谱/分隔条/链接预览）",
+			"status": "done",
+			"priority": "medium",
+			"assignee": "Aurora",
+			"createdAt": "2026-09-29T13:16:42.881Z",
+			"updatedAt": "2026-09-29T13:21:51.591Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-038",
+			"text": "移动端适配 P2: 面板响应式（palette/version/preview card）",
+			"status": "done",
+			"priority": "low",
+			"assignee": "Aurora",
+			"createdAt": "2026-09-29T13:16:42.881Z",
+			"updatedAt": "2026-09-29T13:21:56.202Z",
+			"blockedBy": null
 		}
 	],
-	"counter": 33
+	"counter": 38
 }

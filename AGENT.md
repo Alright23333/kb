@@ -175,6 +175,15 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 `ip_whitelist` 中间件优先读 XFF 第一跳作为真实 IP。这要求应用只能从受信代理（nginx/Tailscale）访问——如果应用端口直接暴露且攻击者可伪造 XFF，白名单可被绕过。生产环境确保端口不直接对公网开放。中间件在 CORS 之后注册（最外层），被拦截请求不会到达 API。
 
+### 20. 移动端适配的 CSS/JS 分离
+
+移动端适配使用 `@media (max-width: 768px)` 断点。新增移动端样式时：
+- **CSS 放在 media query 块内**：不要写 `!important` 覆盖桌面样式
+- **JS 用 `isMobile()` 判断**：触摸事件、sidebar 模式、FAB 显示等都需要
+- **新增面板响应式**：所有固定宽度面板（palette、version、settings、link-preview）都需要在 media query 中加移动样式
+- **不要修改桌面行为**：桌面端 sidebar 仍是 narrow 模式，不要改成 drawer
+- **触摸事件不替代鼠标事件**：触摸事件和鼠标事件是并存的，都要支持
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改
@@ -239,3 +248,6 @@ assert len(seen) == 1  # 归并后只有 1 个
 - ❌ 不要把 insertRef 改回 cursor 范围方式（会吞字符）
 - ❌ 不要在 extraKeys 里写 `CodeMirror.Pass;` 而不 return（会吞上下键）
 - ❌ 不要用 `ganttChart.refresh()` 换日期范围（不重算视图，需销毁重建）
+- ❌ 不要在桌面端使用 `sidebar.classList.add('open')`（drawer 模式仅限移动端）
+- ❌ 不要在 `@media` 外写移动端专属样式（FAB、preview tab 等）
+- ❌ 不要忘记新增面板的移动响应式（所有固定宽度面板都需要）

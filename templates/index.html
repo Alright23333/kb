@@ -813,9 +813,288 @@ body {
 .ref-item:hover, .ref-item.active { background: var(--accent-dim); }
 .ref-item .ref-title { font-weight: 500; }
 .ref-item .ref-meta { color: var(--muted); font-size: 11px; }
+
+/* Hamburger: hidden on desktop */
+#hamburger { display: none; }
+/* Mobile preview tab: hidden on desktop */
+#mobile-preview-tab { display: none; }
+
+/* ─── Mobile Adaptation (≤ 768px) ─────────────────────── */
+@media (max-width: 768px) {
+  body { flex-direction: column; }
+
+  /* Header: compact, hamburger button */
+  #header {
+    padding: 8px 12px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  #hamburger {
+    display: flex;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 18px;
+    align-items: center;
+    justify-content: center;
+  }
+  #hamburger:active { background: var(--hover); }
+  #header #search-input {
+    flex: 1 1 100%;
+    order: 1;
+    min-width: 0;
+  }
+  #header > button:not(#hamburger) { flex-shrink: 0; }
+  #search-btn, #new-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    order: 2;
+  }
+  #theme-toggle {
+    order: 2;
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+
+  /* Sidebar: fixed drawer overlay */
+  #sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 280px;
+    height: 100vh;
+    z-index: 600;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.3);
+  }
+  #sidebar.open {
+    transform: translateX(0);
+  }
+  #sidebar.narrow {
+    width: 280px; /* disable narrow on mobile */
+  }
+  #sidebar.narrow #sidebar-header a,
+  #sidebar.narrow #tags-section,
+  #sidebar.narrow .nav-text {
+    display: flex;
+  }
+  #sidebar.narrow .nav-item {
+    justify-content: flex-start;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  #sidebar-scrim {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 599;
+  }
+  #sidebar-scrim.open { display: block; }
+
+  /* Editor: single column, tab switching */
+  #editor-layout {
+    flex-direction: column;
+  }
+  #editor-pane {
+    width: 100% !important;
+    flex: 1;
+  }
+  #divider { display: none; }
+  #preview-pane {
+    display: none;
+    flex: 1;
+    padding: 12px 16px;
+    min-width: 0;
+  }
+  #editor.preview-active #editor-pane { display: none; }
+  #editor.preview-active #preview-pane { display: block; }
+
+  /* Editor footer: add preview toggle tab */
+  #editor-footer {
+    padding: 6px 12px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  #mobile-preview-tab {
+    display: flex;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    align-items: center;
+    gap: 4px;
+  }
+  #editor.preview-active #mobile-preview-tab {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* FAB save button */
+  #fab-save {
+    display: flex;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 400;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 28px;
+    padding: 14px 24px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    align-items: center;
+    gap: 6px;
+  }
+  #fab-save:active { background: #3a8eef; }
+
+  /* Command palette: full width */
+  #palette {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 12px 12px 0 0;
+    position: absolute;
+    bottom: 0;
+  }
+  #palette-overlay {
+    align-items: flex-end;
+    padding-top: 0;
+  }
+  #palette-results { max-height: 60vh; }
+
+  /* Version panel: bottom sheet */
+  #version-panel {
+    top: auto;
+    bottom: -100%;
+    right: 0;
+    width: 100%;
+    height: 70vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+    transition: bottom 0.25s ease;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.15);
+  }
+  #version-panel.open {
+    bottom: 0;
+    right: auto;
+  }
+  #version-panel .vp-preview { max-height: 40vh; }
+
+  /* Settings panel: full screen */
+  #settings-panel .panel {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #settings-panel .panel > *:nth-child(n+3) {
+    flex: 1;
+    min-height: 0;
+  }
+  #setting-custom-css { height: auto; flex: 1; min-height: 80px; }
+
+  /* Link preview card: bottom sheet */
+  #link-preview-card {
+    width: 100%;
+    max-width: 100%;
+    left: 0 !important;
+    top: auto !important;
+    bottom: -300px;
+    border-radius: 12px 12px 0 0;
+    transition: bottom 0.25s ease;
+    padding: 16px 20px;
+    font-size: 14px;
+  }
+  #link-preview-card.open {
+    bottom: 0;
+    display: block;
+  }
+  #link-preview-card .lp-body { max-height: 40vh; }
+
+  /* Graph: full screen already, just adjust stats */
+  #graph-stats { font-size: 12px; }
+  #graph-container svg { touch-action: none; }
+
+  /* Page view: narrower padding */
+  #content { padding: 12px; }
+  #page-view h1 { font-size: 22px; }
+  #page-content { font-size: 15px; }
+
+  /* Todo: compact header */
+  #todo-header { flex-wrap: wrap; gap: 8px; }
+  #gantt-view-modes { margin-left: 0; width: 100%; order: 3; }
+
+  /* Slash menu & ref autocomplete: bottom sheet */
+  #slash-menu {
+    bottom: 0;
+    top: auto !important;
+    left: 0 !important;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 12px 12px 0 0;
+    max-height: 50vh;
+  }
+  #ref-autocomplete {
+    bottom: 0;
+    top: auto !important;
+    left: 0 !important;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 12px 12px 0 0;
+    max-height: 50vh;
+  }
+
+  /* Toast: center bottom */
+  #toast {
+    left: 50%;
+    transform: translateX(-50%);
+    right: auto;
+    bottom: 80px;
+    width: max-content;
+    max-width: 90vw;
+  }
+
+  /* Disable hover effects on touch */
+  .nav-item:hover, .tag-item:hover, .pal-item:hover,
+  .ref-item:hover, .slash-item:hover, .backlink-item:hover,
+  .page-list-item:hover {
+    background: none;
+  }
+  .nav-item:active, .tag-item:active, .pal-item:active,
+  .ref-item:active, .slash-item:active, .backlink-item:active,
+  .page-list-item:active {
+    background: var(--hover);
+  }
+
+  /* Larger tap targets */
+  .nav-item { padding: 10px 14px; min-height: 44px; }
+  .tag-item { padding: 6px 14px; min-height: 36px; }
+  .pal-item { padding: 12px 14px; min-height: 44px; }
+  .ref-item, .slash-item { padding: 12px 14px; min-height: 44px; }
+  .todo-list-item { padding: 12px; min-height: 48px; }
+  .todo-stat { padding: 6px 12px; min-height: 36px; }
+  .page-list-item { padding: 14px 16px; min-height: 48px; }
+  .backlink-item { padding: 10px 14px; min-height: 44px; }
+}
 </style>
 </head>
 <body>
+<!-- Sidebar scrim overlay (mobile) -->
+<div id="sidebar-scrim"></div>
 <!-- Sidebar -->
 <div id="sidebar">
   <div id="sidebar-header">
@@ -841,6 +1120,7 @@ body {
 <!-- Main -->
 <div id="main">
   <div id="header">
+    <button id="hamburger">☰</button>
     <input type="text" id="search-input" placeholder="搜索... (或输入 [[页面名]] 直达)" onkeydown="if(event.key==='Enter')doSearch()">
     <button id="search-btn" onclick="doSearch()">搜索</button>
     <button id="new-btn" onclick="newPage()">+ 新页面</button>
@@ -911,6 +1191,7 @@ body {
           <textarea id="cm-editor"></textarea>
           <div id="editor-footer">
             <span>正文中用 [[链接]] 和 #标签</span>
+            <button id="mobile-preview-tab" onclick="toggleMobilePreview()">预览</button>
             <label style="margin-left:auto;cursor:pointer;display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted)"><input type="checkbox" id="scroll-sync" checked style="accent-color:var(--accent)"> 同步滚动</label>
             <button id="save-btn" onclick="savePage()">保存 (Ctrl+S)</button>
           </div>
@@ -977,6 +1258,8 @@ body {
 <div id="link-preview-card"></div>
 <!-- Toast -->
 <div id="toast"></div>
+<!-- FAB save (mobile) -->
+<button id="fab-save" onclick="savePage()" style="display:none">💾 保存</button>
 
 <script>
 // ── URL routing: base detection + route helpers ─────────────
@@ -1691,6 +1974,7 @@ function initCM(textareaEl, opts) {
   let startX = 0, startWidth = 0;
 
   divider.addEventListener('mousedown', (e) => {
+    if (window.innerWidth <= 768) return; // disabled on mobile
     e.preventDefault();
     divider.classList.add('dragging');
     startX = e.clientX;
@@ -2919,6 +3203,102 @@ async function showGraph() {
       tooltip.style.display = 'none';
     });
 
+    // Touch events for mobile graph interaction
+    let touchStartDist = 0;
+    let touchStartMid = null;
+    let touchStartTransform = null;
+    let singleTouchStart = null;
+    let singleTouchNode = null;
+    let singleTouchMoved = false;
+
+    svgEl.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        const rect = container.getBoundingClientRect();
+        const tx = touch.clientX - rect.left;
+        const ty = touch.clientY - rect.top;
+        // Check if touching a node
+        const svgPt = svgEl.createSVGPoint();
+        svgPt.x = tx; svgPt.y = ty;
+        let hitNode = null;
+        for (const node of graphNodes) {
+          const dx = (node.x * graphTransform.k + graphTransform.x) - tx;
+          const dy = (node.y * graphTransform.k + graphTransform.y) - ty;
+          if (Math.sqrt(dx*dx + dy*dy) < 14) {
+            hitNode = node;
+            break;
+          }
+        }
+        if (hitNode) {
+          singleTouchNode = hitNode;
+          singleTouchStart = { x: touch.clientX, y: touch.clientY };
+          singleTouchMoved = false;
+        } else {
+          singleTouchStart = { x: touch.clientX, y: touch.clientY };
+          singleTouchNode = null;
+          singleTouchMoved = false;
+          touchStartTransform = { x: graphTransform.x, y: graphTransform.y };
+        }
+      } else if (e.touches.length === 2) {
+        singleTouchStart = null;
+        singleTouchNode = null;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        touchStartDist = Math.sqrt(dx*dx + dy*dy);
+        touchStartMid = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+        };
+        touchStartTransform = { x: graphTransform.x, y: graphTransform.y, k: graphTransform.k };
+      }
+    }, { passive: false });
+
+    svgEl.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      if (e.touches.length === 1 && singleTouchStart) {
+        const touch = e.touches[0];
+        const dx = touch.clientX - singleTouchStart.x;
+        const dy = touch.clientY - singleTouchStart.y;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) singleTouchMoved = true;
+        if (singleTouchNode) {
+          const gx = (touch.clientX - rect.left - graphTransform.x) / graphTransform.k;
+          const gy = (touch.clientY - rect.top - graphTransform.y) / graphTransform.k;
+          singleTouchNode.x = gx;
+          singleTouchNode.y = gy;
+          updateGraphNode(singleTouchNode);
+        } else {
+          graphTransform.x = touchStartTransform.x + dx;
+          graphTransform.y = touchStartTransform.y + dy;
+          applyGraphTransform();
+        }
+      } else if (e.touches.length === 2 && touchStartDist > 0) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const scale = dist / touchStartDist;
+        const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+        const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+        const newK = Math.max(0.1, Math.min(5, touchStartTransform.k * scale));
+        graphTransform.k = newK;
+        graphTransform.x = mx - (mx - touchStartTransform.x) * (newK / touchStartTransform.k);
+        graphTransform.y = my - (my - touchStartTransform.y) * (newK / touchStartTransform.k);
+        applyGraphTransform();
+      }
+    }, { passive: false });
+
+    svgEl.addEventListener('touchend', (e) => {
+      if (singleTouchNode && !singleTouchMoved) {
+        navigate('page', singleTouchNode.name);
+      }
+      singleTouchStart = null;
+      singleTouchNode = null;
+      touchStartDist = 0;
+      touchStartMid = null;
+      touchStartTransform = null;
+    });
+
     document.getElementById('graph-zoom-in').addEventListener('click', () => {
       const s = document.getElementById('graph-svg');
       graphZoomAt(s.clientWidth / 2, s.clientHeight / 2, 1.3);
@@ -2969,18 +3349,103 @@ function showToast(msg, type) {
   t._timer = setTimeout(() => { t.style.display = 'none'; }, 2500);
 }
 
-// ── Sidebar toggle (narrow mode) ────────────────────────────
+// ── Sidebar toggle (mobile drawer + desktop narrow) ──────
 
 const sidebar = document.getElementById('sidebar');
 const sidebarToggle = document.getElementById('sidebar-toggle');
+const sidebarScrim = document.getElementById('sidebar-scrim');
+const hamburger = document.getElementById('hamburger');
 
-sidebarToggle.addEventListener('click', () => {
-  sidebar.classList.toggle('narrow');
-  const isNarrow = sidebar.classList.contains('narrow');
-  sidebarToggle.innerHTML = isNarrow ? '▶' : '◀';
-  sidebarToggle.title = isNarrow ? '展开侧边栏' : '收起侧边栏';
-  // Refresh CM after transition so it re-measures its container
-  setTimeout(() => { if (cm) cm.refresh(); }, 250);
+function isMobile() { return window.innerWidth <= 768; }
+
+function openSidebar() {
+  if (isMobile()) {
+    sidebar.classList.add('open');
+    if (sidebarScrim) sidebarScrim.classList.add('open');
+  } else {
+    sidebar.classList.remove('narrow');
+  }
+}
+
+function closeSidebar() {
+  if (isMobile()) {
+    sidebar.classList.remove('open');
+    if (sidebarScrim) sidebarScrim.classList.remove('open');
+  }
+}
+
+function toggleSidebar() {
+  if (isMobile()) {
+    if (sidebar.classList.contains('open')) closeSidebar();
+    else openSidebar();
+  } else {
+    sidebar.classList.toggle('narrow');
+    const isNarrow = sidebar.classList.contains('narrow');
+    sidebarToggle.innerHTML = isNarrow ? '▶' : '◀';
+    sidebarToggle.title = isNarrow ? '展开侧边栏' : '收起侧边栏';
+    setTimeout(() => { if (cm) cm.refresh(); }, 250);
+  }
+}
+
+sidebarToggle.addEventListener('click', toggleSidebar);
+
+if (hamburger) {
+  hamburger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleSidebar();
+  });
+}
+if (sidebarScrim) {
+  sidebarScrim.addEventListener('click', closeSidebar);
+}
+
+// Mobile: close sidebar after clicking nav item
+document.addEventListener('click', (e) => {
+  if (!isMobile()) return;
+  const navItem = e.target.closest('[data-nav], .tag-item, .backlink-item, .page-list-item');
+  if (navItem && sidebar.classList.contains('open')) {
+    closeSidebar();
+  }
+});
+
+// Mobile preview toggle
+window.toggleMobilePreview = function() {
+  const editor = document.getElementById('editor');
+  editor.classList.toggle('preview-active');
+  if (editor.classList.contains('preview-active') && cm) {
+    updatePreview();
+    setTimeout(() => { if (cm) cm.refresh(); }, 50);
+  }
+};
+
+// FAB save visibility
+const fabSave = document.getElementById('fab-save');
+function updateFABVisibility() {
+  if (!fabSave) return;
+  const editorEl = document.getElementById('editor');
+  const editorVisible = editorEl && editorEl.style.display !== 'none';
+  fabSave.style.display = (isMobile() && editorVisible) ? 'flex' : 'none';
+}
+const _origHideAll = hideAll;
+window.hideAll = function() { _origHideAll(); updateFABVisibility(); };
+const _origNewPage = newPage;
+window.newPage = function() { _origNewPage(); updateFABVisibility(); };
+const _origEditPage = editPage;
+window.editPage = function(name) { _origEditPage(name); updateFABVisibility(); };
+
+// Breakpoint change handler
+let wasMobile = isMobile();
+window.addEventListener('resize', () => {
+  const nowMobile = isMobile();
+  if (wasMobile !== nowMobile) {
+    if (!nowMobile) {
+      sidebar.classList.remove('open');
+      if (sidebarScrim) sidebarScrim.classList.remove('open');
+      document.getElementById('editor').classList.remove('preview-active');
+    }
+    wasMobile = nowMobile;
+    if (cm) cm.refresh();
+  }
 });
 
 // ── Theme toggle ─────────────────────────────────────────────
@@ -3137,6 +3602,18 @@ document.addEventListener('mouseout', (e) => {
   lpHideTimer = setTimeout(() => {
     if (!lpCard.matches(':hover')) lpHide();
   }, 200);
+});
+
+// Mobile: tap wikilink to show preview instead of navigating
+document.addEventListener('click', (e) => {
+  if (window.innerWidth > 768) return;
+  const link = e.target.closest('a[data-page]');
+  if (!link) return;
+  if (link.classList.contains('unresolved')) return; // let normal click handle create
+  e.preventDefault();
+  e.stopPropagation();
+  clearTimeout(lpTimer);
+  lpShow(link);
 });
 
 window.addEventListener('scroll', lpHide, true);
