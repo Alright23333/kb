@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from database import get_db, DB_PATH
 from parse import parse as parse_content
+from search import build_search_query
 
 router = APIRouter()
 
@@ -86,10 +87,12 @@ async def _sync(db: aiosqlite.Connection, page_id: int, content: str) -> None:
 
 
 async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
-    """Full-text search with trigram FTS + LIKE fallback for short CJK queries."""
-    if len(q) >= 3:
+    """Full-text search with jieba CJK segmentation + trigram FTS + LIKE fallback."""
+    fts_expr, like_patterns = build_search_query(q)
+
+    # FTS path: OR'd terms for better CJK recall
+    if fts_expr:
         try:
-            phrase = '"' + q.replace('"', '""') + '"'
             rows = await _fetchall(
                 db,
                 """
@@ -98,13 +101,34 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
                 WHERE pages_fts MATCH ?
                 ORDER BY rank LIMIT ? OFFSET ?
                 """,
-                (phrase, limit, offset),
+                (fts_expr, limit, offset),
             )
             if rows:
                 return [dict(r) for r in rows]
         except Exception:
             pass
 
+    # LIKE fallback (short CJK segments or pure ASCII <3 chars)
+    if like_patterns:
+        conditions = []
+        params = []
+        for pat in like_patterns:
+            like = f"%{pat}%"
+            conditions.append("(name LIKE ? OR content LIKE ?)")
+            params.extend([like, like])
+        params.extend([limit, offset])
+        rows = await _fetchall(
+            db,
+            f"""
+            SELECT name, updated_at, created_at FROM pages
+            WHERE {' OR '.join(conditions)}
+            ORDER BY updated_at DESC LIMIT ? OFFSET ?
+            """,
+            tuple(params),
+        )
+        return [dict(r) for r in rows]
+
+    # Final fallback: raw query LIKE (for very short input)
     like = f"%{q}%"
     rows = await _fetchall(
         db,

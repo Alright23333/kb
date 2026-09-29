@@ -38,6 +38,7 @@ import os
 import sqlite3
 
 from fastmcp import FastMCP
+from search import build_search_query
 
 DB_PATH = os.environ.get("KB_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "kb.db"))
 DB_PATH = os.path.expanduser(DB_PATH)
@@ -92,23 +93,43 @@ def search(query: str, limit: int = 10) -> str:
     """Full-text search across all pages. Returns matching page names with dates.
 
     Args:
-        query: Search query (supports CJK, min 3 chars for FTS, shorter falls back to LIKE)
+        query: Search query (supports CJK with jieba segmentation)
         limit: Max results (default 10)
     """
     conn = _db()
     try:
+        fts_expr, like_patterns = build_search_query(query)
         rows = []
-        if len(query) >= 3:
-            phrase = '"' + query.replace('"', '""') + '"'
+
+        # FTS path
+        if fts_expr:
             try:
                 rows = conn.execute(
                     "SELECT p.name, p.updated_at FROM pages_fts f "
-                    "JOIN pages p ON p.id = f.rowid "
+                    "JOIN pages p ON p.id = frowid "
                     "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
-                    (phrase, limit),
+                    (fts_expr, limit),
                 ).fetchall()
             except Exception:
                 pass
+
+        # LIKE fallback for short segments
+        if not rows and like_patterns:
+            conditions = []
+            params = []
+            for pat in like_patterns:
+                like = f"%{pat}%"
+                conditions.append("(name LIKE ? OR content LIKE ?)")
+                params.extend([like, like])
+            params.append(limit)
+            rows = conn.execute(
+                f"SELECT name, updated_at FROM pages "
+                f"WHERE {' OR '.join(conditions)} "
+                f"ORDER BY updated_at DESC LIMIT ?",
+                tuple(params),
+            ).fetchall()
+
+        # Final fallback: raw LIKE
         if not rows:
             like = f"%{query}%"
             rows = conn.execute(
@@ -117,6 +138,7 @@ def search(query: str, limit: int = 10) -> str:
                 "ORDER BY updated_at DESC LIMIT ?",
                 (like, like, limit),
             ).fetchall()
+
         if not rows:
             return f"No results for '{query}'"
         return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in rows)
