@@ -72,6 +72,13 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - `startup` 事件调用 `init_db()` 确保表存在
 - `GET /` 和 `GET /page/{slug}` 都返回同一个 `index.html`（SPA 路由）
 
+### `search.py` — 搜索查询构建
+
+- `build_search_query(query)` → `(fts_expr, like_patterns)` 元组
+- jieba 可选依赖：`try/except import`，无 jieba 时降级为原始查询
+- api.py (`_search`) 和 mcp_server.py (`search`) 都调用此函数
+- 修改搜索逻辑时只改此函数，两处调用者自动生效
+
 ## 常见陷阱
 
 ### 1. refs UNIQUE 约束冲突
@@ -251,3 +258,5 @@ assert len(seen) == 1  # 归并后只有 1 个
 - ❌ 不要在桌面端使用 `sidebar.classList.add('open')`（drawer 模式仅限移动端）
 - ❌ 不要在 `@media` 外写移动端专属样式（FAB、preview tab 等）
 - ❌ 不要忘记新增面板的移动响应式（所有固定宽度面板都需要）
+- ❌ 不要直接修改 `_search()` 的 SQL（搜索逻辑在 `search.py` 的 `build_search_query()` 中，改了要同时改 API 和 MCP 两处调用者）
+- ❌ 不要在 `search.py` 里假设 jieba 一定存在（必须 try/except import，无 jieba 时降级）

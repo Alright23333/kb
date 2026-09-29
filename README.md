@@ -134,6 +134,9 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 ### 搜索
 
 - FTS5 trigram 全文搜索（支持 CJK）
+- **jieba 分词**：CJK 查询使用 jieba 分词后组合为 OR 查询，提升召回率
+  - "记笔记的方法" → `"记笔记的方法" OR "记笔记"`（"方法" 走 LIKE 降级）
+  - jieba 未安装时自动降级为原有行为
 - 搜索结果按**名称相关度排序**：精确匹配 > 开头匹配 > 包含匹配 > 内容匹配
 - 匹配部分**高亮标记**
 - `<3` 字符走 LIKE 兜底
@@ -252,7 +255,7 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
-| 读 | `search(query)` | FTS 全文搜索 |
+| 读 | `search(query)` | FTS 全文搜索（jieba 分词增强 CJK） |
 | 读 | `get_page(name)` | 页面详情（内容+tags+links+backlinks） |
 | 读 | `list_pages()` | 所有页面名 |
 | 读 | `get_recent_pages(limit)` | 最近更新页面 |
@@ -416,6 +419,7 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 - [x] URL 路由（刷新不丢位置 + nginx 双模式兼容）
 - [x] 视图数据缓存（60s TTL + 写失效，切换秒开）
 - [x] TODO 交互化（勾选完成 + 循环滚动 + 统计筛选 + 快速添加）
+- [x] FTS 搜索优化（jieba 分词 + OR 组合查询 + LIKE 降级，改善 CJK 短查询）
 
 ### 待办
 
@@ -432,7 +436,7 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 | 优化 | 影响 | 复杂度 |
 |------|------|--------|
 | **block reference**：`((uuid))` 支持 | 功能 | 高 |
-| **FTS 优化**：jieba 分词辅助 CJK 短查询 | 搜索 | 中 |
+| ~~FTS 优化~~：jieba 分词 + OR 组合查询 + LIKE 降级 | 搜索 | ✅ |
 
 #### 架构演进
 
