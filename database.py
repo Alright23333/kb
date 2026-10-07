@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS refs (
 );
 CREATE INDEX IF NOT EXISTS idx_refs_target ON refs(target_name);
 
+-- List views order by updated_at; without this the sort is a full scan.
+CREATE INDEX IF NOT EXISTS idx_pages_updated ON pages(updated_at);
+
 -- Properties: key:: value parsed from content (classification/query hooks).
 CREATE TABLE IF NOT EXISTS properties (
     page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
@@ -94,11 +97,18 @@ END;
 
 
 async def get_db() -> aiosqlite.Connection:
-    """Return a connection with sane pragmas."""
+    """Return a connection with sane per-connection pragmas.
+
+    journal_mode is persistent in the database file, so it is set once in
+    init_db() rather than on every connection. busy_timeout matters because
+    the web app and the MCP server write concurrently from separate
+    processes; without it SQLite raises 'database is locked' immediately.
+    """
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
-    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA busy_timeout=5000")
     await db.execute("PRAGMA foreign_keys=ON")
+    await db.execute("PRAGMA synchronous=NORMAL")
     return db
 
 
@@ -106,5 +116,6 @@ async def init_db() -> None:
     """Create the schema if it does not exist yet."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.executescript(SCHEMA)
         await db.commit()

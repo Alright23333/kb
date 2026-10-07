@@ -69,20 +69,19 @@ async def _sync(db: aiosqlite.Connection, page_id: int, content: str) -> None:
         if key not in seen_tags:
             seen_tags[key] = t
 
-    for target in seen_links.values():
-        await db.execute(
-            "INSERT INTO refs (source_id, target_name, kind) VALUES (?, ?, 'link')",
-            (page_id, target),
+    ref_rows = [(page_id, t, "link") for t in seen_links.values()]
+    ref_rows += [(page_id, t, "tag") for t in seen_tags.values()]
+    if ref_rows:
+        await db.executemany(
+            "INSERT INTO refs (source_id, target_name, kind) VALUES (?, ?, ?)",
+            ref_rows,
         )
-    for target in seen_tags.values():
-        await db.execute(
-            "INSERT INTO refs (source_id, target_name, kind) VALUES (?, ?, 'tag')",
-            (page_id, target),
-        )
-    for key, value in sig["properties"].items():
-        await db.execute(
+
+    prop_rows = [(page_id, k, v) for k, v in sig["properties"].items()]
+    if prop_rows:
+        await db.executemany(
             "INSERT INTO properties (page_id, key, value) VALUES (?, ?, ?)",
-            (page_id, key, value),
+            prop_rows,
         )
 
 

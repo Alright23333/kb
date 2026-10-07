@@ -23,6 +23,18 @@ _ALLOWED_NETS = [
     ipaddress.ip_network(c.strip()) for c in _ALLOWED_CIDRS.split(",") if c.strip()
 ]
 
+# Peers allowed to set X-Forwarded-For. Only these can speak for another IP.
+# - loopback: nginx on the host, or bare-metal uvicorn behind a local proxy
+# - 172.16.0.0/12: Docker bridge gateways (host -> container port mapping)
+# A request arriving directly from any other address has its XFF ignored,
+# so a client cannot spoof the header to bypass the whitelist.
+_TRUSTED_PROXY_CIDRS = os.environ.get(
+    "KB_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,172.16.0.0/12"
+)
+_TRUSTED_PROXY_NETS = [
+    ipaddress.ip_network(c.strip()) for c in _TRUSTED_PROXY_CIDRS.split(",") if c.strip()
+]
+
 FORBIDDEN_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -48,20 +60,31 @@ FORBIDDEN_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def _client_ip(request: Request) -> str:
-    """Real client IP: X-Forwarded-For (behind nginx) or direct peer."""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else ""
-
-
-def _is_allowed(ip: str) -> bool:
+def _in_nets(ip: str, nets: list) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    return any(addr in net for net in _ALLOWED_NETS)
+    return any(addr in net for net in nets)
+
+
+def _client_ip(request: Request) -> str:
+    """Real client IP.
+
+    X-Forwarded-For is honored ONLY when the direct peer is a trusted proxy
+    (localhost / Docker bridge). Otherwise the header is ignored and the peer
+    address is used, so a direct client cannot spoof the whitelist.
+    """
+    peer = request.client.host if request.client else ""
+    if _in_nets(peer, _TRUSTED_PROXY_NETS):
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+    return peer
+
+
+def _is_allowed(ip: str) -> bool:
+    return _in_nets(ip, _ALLOWED_NETS)
 
 
 @app.middleware("http")

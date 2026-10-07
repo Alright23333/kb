@@ -1584,7 +1584,7 @@ async function handleImportFiles(files) {
     fd.append('file', f);
     fd.append('conflict', strategy);
     try {
-      const resp = await fetch('/api/import', { method: 'POST', body: fd });
+      const resp = await fetch(`${API}/import`, { method: 'POST', body: fd });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         showToast(`导入失败: ${err.detail || resp.status}`);
@@ -1806,8 +1806,8 @@ function loadTags(tags) {
 
 async function ensureAllNames() {
   if (allNames === null) {
-    const resp = await fetch(`${API}/pages/names`);
-    allNames = new Set((await resp.json()).map(n => n.toLowerCase()));
+    const names = await cachedFetch('names', `${API}/pages/names`);
+    allNames = new Set(names.map(n => n.toLowerCase()));
   }
 }
 
