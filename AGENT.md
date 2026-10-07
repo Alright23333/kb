@@ -43,7 +43,8 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - Frappe Gantt 0.6.1（甘特图渲染，CDN）
 - 全局事件委托处理所有点击（`[data-page]`、`[data-tag]`、`[data-nav]`）
 - `navigate(target, ...args)` 是唯一路由入口
-- 主题：CSS 变量 `[data-theme="dark"/"light"]`，localStorage 持久化
+- 主题：**token 驱动** —— 所有颜色走 CSS 变量（`--bg/--card/--fg/--muted/--border/--hover/--accent/--accent-dim/--accent-hover/--tag/--tag-bg/--p1..--p4/--on-accent/--on-priority/--overdue/--danger/--bar-progress`），`[data-theme="dark"/"light"]` 给值，localStorage 持久化
+- 自定义 CSS（`data/custom.css`）**只覆盖变量**，注入 `<style id="custom-css">` 追加到 `<head>` 末尾。不要在 JS 里逐元素写 inline style —— 那样后渲染的卡片会漏、切主题会残留
 - 日记编辑器复用页面编辑器，`currentSaveMode` 区分保存目标
 - 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图
 
@@ -178,9 +179,9 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。
 
-### 19. IP 白名单信任 X-Forwarded-For
+### 19. IP 白名单只信任可信代理的 X-Forwarded-For
 
-`ip_whitelist` 中间件优先读 XFF 第一跳作为真实 IP。这要求应用只能从受信代理（nginx/Tailscale）访问——如果应用端口直接暴露且攻击者可伪造 XFF，白名单可被绕过。生产环境确保端口不直接对公网开放。中间件在 CORS 之后注册（最外层），被拦截请求不会到达 API。
+`ip_whitelist` 中间件仅在**直连 peer 属于 `KB_TRUSTED_PROXIES`**（默认 loopback + `172.16.0.0/12`，即 nginx 本机与 Docker 网桥）时才采信 XFF 第一跳，否则一律用 peer 地址。这样即使端口被直接访问，伪造 XFF 也无法绕过白名单。容器端口另绑 `127.0.0.1`（见 docker-compose.yml）做纵深防御。中间件在 CORS 之后注册（最外层），被拦截请求不会到达 API。
 
 ### 20. 移动端适配的 CSS/JS 分离
 
@@ -190,6 +191,19 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 - **新增面板响应式**：所有固定宽度面板（palette、version、settings、link-preview）都需要在 media query 中加移动样式
 - **不要修改桌面行为**：桌面端 sidebar 仍是 narrow 模式，不要改成 drawer
 - **触摸事件不替代鼠标事件**：触摸事件和鼠标事件是并存的，都要支持
+
+### 21. 主题必须走 CSS 变量，不要在 JS 里写 inline style
+
+所有颜色都写成 `var(--token)`，token 定义在 `:root` / `[data-theme=...]`。自定义 CSS（`data/custom.css`）**只覆盖变量**，注入的 `<style id="custom-css">` 追加到 `<head>` 末尾（同等特异性下后者胜出）。
+
+**反面教材**（已废弃的 `applyCustomCSS()`）：遍历元素写 `el.style.backgroundColor`。后果：
+- 调用时不在 DOM 里的卡片（列表重渲染、命令面板、版本面板）拿不到样式 → 回退内置灰色
+- inline style 不会随主题切换清除 → 深浅色残留
+- 每次调用都 `addEventListener('mouseenter')` → 监听器堆积
+- 调色板硬编码在 JS 里，与 custom.css 重复
+
+新增可主题化的颜色时：在 `:root` 加 token → 组件里用 `var(--token)` → **不要**写死 hex。另外不要用
+`@media (prefers-color-scheme)` 定义主题变量：`initTheme()` 已经把系统偏好解析成 `data-theme`，媒体查询块的`:root:not([data-theme])`特异性 (0,2,0) 会静默压过用户的 `[data-theme="light"]` 覆盖。
 
 ## 修改流程
 

@@ -18,8 +18,34 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.css">
 <script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
 <style>
+/* ── Theme token contract ──────────────────────────────────────
+   Every color in the app reads from these variables. Themes and
+   custom.css override TOKENS, never individual elements, so any UI
+   created later still picks up the change (no inline-style patching).
+
+   Override per theme from data/custom.css:
+     [data-theme="dark"]  { --card: #16161e; }
+     [data-theme="light"] { --card: #f0f0f0; }
+   ─────────────────────────────────────────────────────────────── */
 :root {
   --accent: #4a9eff;
+  --accent-dim: #2d5a8e;
+  --accent-hover: #3a8eef;
+  /* Text/icon placed on top of --accent and the priority colors */
+  --on-accent: #ffffff;
+  --on-priority: #ffffff;
+  --p3-fg: #333333;              /* dark text on the yellow p3 chip */
+  /* Tags (default to the accent, override freely) */
+  --tag: var(--accent);
+  --tag-bg: var(--accent-dim);
+  /* Priority scale (shared by chips, dots and Gantt bars) */
+  --p1: #e74c3c;
+  --p2: #e67e22;
+  --p3: #f1c40f;
+  --p4: #2ecc71;
+  --overdue: #e74c3c;
+  --danger: #e74c3c;
+  --bar-progress: rgba(255, 255, 255, 0.25);   /* overlay on Gantt bars */
 }
 [data-theme="dark"] {
   --bg: #1a1a1a;
@@ -38,17 +64,6 @@
   --border: #e0e0e0;
   --card: #f5f5f5;
   --hover: #eeeeee;
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #ffffff;
-    --fg: #1a1a1a;
-    --muted: #888;
-    --accent-dim: #e8f0fb;
-    --border: #e0e0e0;
-    --card: #f5f5f5;
-    --hover: #eeeeee;
-  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -455,7 +470,7 @@ body {
   font-size: 13px;
   margin-left: auto;
 }
-#save-btn:hover { background: #3a8eef; }
+#save-btn:hover { background: var(--accent-hover); }
 #sidebar-settings {
   padding: 8px;
   border-top: 1px solid var(--border);
@@ -523,11 +538,11 @@ body {
 #gantt-view-modes button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 /* Frappe Gantt theme */
 .gantt .bar { fill: var(--accent) !important; }
-.gantt .bar.p1 { fill: #e74c3c !important; }
-.gantt .bar.p2 { fill: #e67e22 !important; }
-.gantt .bar.p3 { fill: #f1c40f !important; }
-.gantt .bar.p4 { fill: #2ecc71 !important; }
-.gantt .bar-label { fill: #fff !important; font-size: 11px !important; }
+.gantt .bar.p1 { fill: var(--p1) !important; }
+.gantt .bar.p2 { fill: var(--p2) !important; }
+.gantt .bar.p3 { fill: var(--p3) !important; }
+.gantt .bar.p4 { fill: var(--p4) !important; }
+.gantt .bar-label { fill: var(--on-priority) !important; font-size: 11px !important; font-weight: 500; }
 .gantt .grid-header { fill: var(--card) !important; stroke: var(--border) !important; }
 .gantt .grid-row { fill: var(--bg) !important; }
 .gantt .grid-row:nth-child(even) { fill: var(--card) !important; opacity: 0.3; }
@@ -549,24 +564,11 @@ body {
 }
 #todo-tabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 #todo-content { flex: 1; overflow: auto; }
-/* Frappe Gantt theme */
+/* Frappe Gantt layout extras (colors come from the tokens above) */
 #gantt-area { min-height: 200px; }
-.gantt .bar-label { fill: #fff !important; font-size: 11px !important; font-weight: 500; }
-.gantt .grid-header { fill: var(--card) !important; }
-.gantt .grid-row { fill: var(--bg) !important; }
-.gantt .grid-row:nth-child(even) { fill: var(--card) !important; opacity: 0.4; }
-.gantt .row-line { stroke: var(--border) !important; }
-.gantt .today-highlight { fill: var(--accent) !important; opacity: 0.12 !important; }
-.gantt .arrow { stroke: var(--muted) !important; }
-.gantt .tick { stroke: var(--border) !important; }
 .gantt .bar-wrapper:hover .bar { filter: brightness(1.15); }
-.gantt .bar-progress { fill: rgba(255,255,255,0.25) !important; }
-.gantt .bar-label { fill: rgba(255,255,255,0.9) !important; }
+.gantt .bar-progress { fill: var(--bar-progress) !important; }
 .gantt .lower-text, .gantt .upper-text { fill: var(--muted) !important; font-size: 11px !important; }
-[data-theme="light"] .gantt .bar-label { fill: #333 !important; }
-[data-theme="light"] .gantt .grid-header { fill: #f0f0f0 !important; }
-[data-theme="light"] .gantt .grid-row { fill: #fff !important; }
-[data-theme="light"] .gantt .grid-row:nth-child(even) { fill: #f7f7f7 !important; opacity: 1; }
 .todo-list-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--card); border-radius: 6px; margin-bottom: 6px; }
 .todo-list-item.task-done { opacity: 0.45; }
 .todo-list-item.task-done .task-title { text-decoration: line-through; }
@@ -579,7 +581,7 @@ body {
   transition: all 0.15s;
 }
 .todo-stat:hover { border-color: var(--accent); color: var(--fg); }
-.todo-stat.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.todo-stat.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .todo-sort {
   margin-left: auto;
   background: var(--card); border: 1px solid var(--border); color: var(--fg);
@@ -593,16 +595,16 @@ body {
 }
 .todo-quickadd:focus { border-color: var(--accent); border-style: solid; }
 .todo-quickadd::placeholder { color: var(--muted); }
-.todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
-.todo-list-item .priority.p1 { background: #e74c3c; }
-.todo-list-item .priority.p2 { background: #e67e22; }
-.todo-list-item .priority.p3 { background: #f1c40f; color: #333; }
-.todo-list-item .priority.p4 { background: #2ecc71; }
+.todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--on-priority); flex-shrink: 0; }
+.todo-list-item .priority.p1 { background: var(--p1); }
+.todo-list-item .priority.p2 { background: var(--p2); }
+.todo-list-item .priority.p3 { background: var(--p3); color: var(--p3-fg); }
+.todo-list-item .priority.p4 { background: var(--p4); }
 .todo-list-item .task-info { flex: 1; min-width: 0; }
 .todo-list-item .task-title { font-weight: 500; font-size: 14px; }
 .todo-list-item .task-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .todo-list-item .task-due { font-size: 12px; color: var(--muted); flex-shrink: 0; }
-.todo-list-item .task-due.overdue { color: #e74c3c; }
+.todo-list-item .task-due.overdue { color: var(--overdue); }
 /* Slash menu */
 #slash-menu {
   position: absolute;
@@ -697,14 +699,14 @@ body {
   margin-bottom: 16px;
 }
 .tag-chip {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--tag-bg);
+  color: var(--tag);
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 12px;
   cursor: pointer;
 }
-.tag-chip:hover { background: var(--accent); color: var(--bg); }
+.tag-chip:hover { background: var(--tag); color: var(--bg); }
 /* Backlinks */
 #backlinks {
   margin-top: 40px;
@@ -783,7 +785,7 @@ body {
   display: none;
   z-index: 1000;
 }
-#toast.error { border-color: #e74c3c; }
+#toast.error { border-color: var(--danger); }
 /* Graph */
 .graph-container {
   width: 100%;
@@ -933,7 +935,7 @@ body {
   }
   #editor.preview-active #mobile-preview-tab {
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
 
   /* FAB save button */
@@ -944,7 +946,7 @@ body {
     right: 20px;
     z-index: 400;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     border: none;
     border-radius: 28px;
     padding: 14px 24px;
@@ -955,7 +957,7 @@ body {
     align-items: center;
     gap: 6px;
   }
-  #fab-save:active { background: #3a8eef; }
+  #fab-save:active { background: var(--accent-hover); }
 
   /* Command palette: full width */
   #palette {
@@ -1209,12 +1211,13 @@ body {
     <h3>⚙️ 设置</h3>
     <label>任务来源页面</label>
     <input type="text" id="setting-task-page" placeholder="例如: Tasks" value="Tasks">
-    <label>自定义 CSS <span style="font-weight:400;color:var(--muted);font-size:12px">（保存到 data/custom.css，实时预览）</span></label>
-    <textarea id="setting-custom-css" placeholder="例如: body { font-family: 'Georgia', serif; }" style="width:100%;height:120px;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px;border-radius:4px;font-family:monospace;font-size:12px;resize:vertical;box-sizing:border-box" oninput="previewCustomCSS(this.value)"></textarea>
+    <label>自定义 CSS <span style="font-weight:400;color:var(--muted);font-size:12px">（保存到 data/custom.css，实时预览 · 推荐用 CSS 变量覆盖）</span></label>
+    <textarea id="setting-custom-css" placeholder="/* 覆盖主题变量即可，两个主题各写一份 */\n[data-theme=\"dark\"]  { --card: #16161e; --accent: #7aa2f7; }\n[data-theme=\"light\"] { --card: #f0f0f0; --accent: #2e7de9; }" style="width:100%;height:120px;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px;border-radius:4px;font-family:monospace;font-size:12px;resize:vertical;box-sizing:border-box" oninput="previewCustomCSS(this.value)"></textarea>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+      <button onclick="insertCustomCSSTemplate('tokyo')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">Tokyo Night</button>
+      <button onclick="insertCustomCSSTemplate('accent')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">强调色</button>
       <button onclick="insertCustomCSSTemplate('font')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">字体</button>
       <button onclick="insertCustomCSSTemplate('spacing')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">间距</button>
-      <button onclick="insertCustomCSSTemplate('accent')" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">强调色</button>
       <button onclick="clearCustomCSS()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer">清空</button>
     </div>
     <label>任务重复语法说明</label>
@@ -2461,13 +2464,7 @@ function closeSettings() {
 // ── Custom CSS settings ───────────────────────────────────────
 
 function previewCustomCSS(css) {
-  let styleEl = document.getElementById('custom-css');
-  if (!styleEl) {
-    styleEl = document.createElement('style');
-    styleEl.id = 'custom-css';
-    document.head.appendChild(styleEl);
-  }
-  styleEl.textContent = css;
+  ensureCustomStyleEl().textContent = css;
 }
 
 async function saveCustomCSS() {
@@ -2486,15 +2483,44 @@ async function saveCustomCSS() {
 }
 
 const CUSTOM_CSS_TEMPLATES = {
-  font: `/* 衬线字体 */
-body { font-family: 'Georgia', 'Noto Serif SC', serif; }
-#editor input, #page-name { font-family: inherit; }`,
+  tokyo: `/* Tokyo Night（深色）+ 浅色配套 */
+[data-theme="dark"] {
+  --bg: #1a1b26;  --card: #16161e;  --hover: #1f2335;
+  --fg: #c0caf5;  --muted: #565f89;  --border: #292e42;
+  --accent: #7aa2f7;  --accent-dim: #2b3a5c;  --accent-hover: #89b4fa;
+  --tag: #bb9af7;  --tag-bg: rgba(187, 154, 247, 0.14);
+  --p1: #ff757f;  --p2: #ff9e64;  --p3: #e0af68;  --p4: #9ece6a;
+  --p3-fg: #1a1b26;  --overdue: #ff757f;  --danger: #ff757f;
+}
+[data-theme="light"] {
+  --bg: #e1e2e7;  --card: #ffffff;  --hover: #d9dae3;
+  --fg: #3760bf;  --muted: #848cb5;  --border: #c4c8da;
+  --accent: #2e7de9;  --accent-dim: #d3e0fb;  --accent-hover: #1e66d0;
+  --tag: #9854f1;  --tag-bg: rgba(152, 84, 241, 0.12);
+}
+
+/* 标题配色（仅预览/阅读区）*/
+[data-theme="dark"] #page-view h1,
+[data-theme="dark"] #preview-pane h1 { color: #ff757f; }
+[data-theme="dark"] #page-view h2,
+[data-theme="dark"] #preview-pane h2 { color: #e0af68; }
+[data-theme="dark"] #page-view h3,
+[data-theme="dark"] #preview-pane h3 { color: #9ece6a; }`,
+
+  font: `/* 字体 */
+:root {
+  --font-body: 'Georgia', 'Noto Serif SC', serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+body { font-family: var(--font-body); }`,
+
   spacing: `/* 宽松行距 */
-#preview-pane, #page-view { line-height: 1.8; }
-.todo-list-item { padding: 14px 12px; }`,
-  accent: `/* 自定义强调色 */
-:root, [data-theme="dark"] { --accent: #7aa2f7; }
-[data-theme="light"] { --accent: #3b6ea5; }`,
+:root { --line-height: 1.85; }
+#preview-pane, #page-view { line-height: var(--line-height); }`,
+
+  accent: `/* 自定义强调色（两个主题各一份）*/
+[data-theme="dark"]  { --accent: #7aa2f7; --accent-dim: #2b3a5c; }
+[data-theme="light"] { --accent: #3b6ea5; --accent-dim: #e8f0fb; }`,
 };
 
 function insertCustomCSSTemplate(name) {
@@ -3456,13 +3482,10 @@ function setTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('kb-theme', theme);
   themeToggle.innerHTML = theme === 'dark' ? '🌙' : '☀️';
-  // Sync CodeMirror theme
+  // Sync CodeMirror theme. Custom CSS only overrides tokens, so it applies
+  // to both themes automatically — nothing to re-inject here.
   if (cm) {
     cm.setOption('theme', theme === 'dark' ? 'dracula' : 'default');
-  }
-  // Re-apply custom CSS after theme change
-  if (typeof applyCustomCSS === 'function') {
-    setTimeout(applyCustomCSS, 50);
   }
 }
 
@@ -3910,91 +3933,30 @@ document.addEventListener('keydown', (e) => {
 const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
 
-// Inject user-defined custom CSS (data/custom.css)
-function applyCustomCSS() {
-  const root = document.documentElement;
-  const isDark = root.getAttribute('data-theme') === 'dark';
-  if (!isDark) return; // Only apply Tokyo Night in dark mode for now
+// ── Custom CSS (data/custom.css) ─────────────────────────────────
+// Injected as a <style> tag appended to <head>, i.e. AFTER the built-in
+// stylesheet. Because every color in the app is a CSS variable, overriding
+// tokens here is enough — no per-element JS patching, so UI rendered later
+// and both themes stay correct automatically.
 
-  const bg = '#1a1b26', card = '#16161e', fg = '#c0caf5', muted = '#565f89', accent = '#7aa2f7', border = '#292e42';
-  const cardHover = '#292e42', cardActive = '#1f2335';
-  const tagColor = '#bb9af7', overdueColor = '#ff757f';
-  const prioColors = { p1: '#ff757f', p2: '#ff9e64', p3: '#e0af68', p4: '#9ece6a' };
-
-  document.body.style.backgroundColor = bg;
-  document.body.style.color = fg;
-  const sidebar = document.getElementById('sidebar');
-  if (sidebar) sidebar.style.backgroundColor = card;
-  const header = document.getElementById('header');
-  if (header) header.style.backgroundColor = card;
-
-  // Cards with hover effect
-  document.querySelectorAll('.page-list-item, .todo-list-item, .pal-item, .ref-item, .vp-item').forEach(el => {
-    el.style.backgroundColor = card;
-    el.style.borderColor = border;
-    el.style.color = fg;
-    el.addEventListener('mouseenter', () => { el.style.backgroundColor = cardHover; });
-    el.addEventListener('mouseleave', () => { el.style.backgroundColor = card; });
-  });
-
-  // Text colors
-  document.querySelectorAll('.title, .task-title, .ref-title').forEach(el => { el.style.color = fg; });
-  document.querySelectorAll('.meta, .task-meta, .ref-meta, .pal-hint').forEach(el => { el.style.color = muted; });
-
-  // Links
-  document.querySelectorAll('a').forEach(el => { el.style.color = accent; });
-
-  // Buttons
-  document.querySelectorAll('button, .btn-imp, .todo-stat').forEach(el => {
-    el.style.backgroundColor = card;
-    el.style.borderColor = border;
-    el.style.color = fg;
-  });
-
-  // Inputs
-  document.querySelectorAll('input, textarea').forEach(el => {
-    el.style.backgroundColor = bg;
-    el.style.borderColor = border;
-    el.style.color = fg;
-  });
-
-  // Priority colors
-  document.querySelectorAll('.priority').forEach(el => {
-    for (const [cls, color] of Object.entries(prioColors)) {
-      if (el.classList.contains(cls)) {
-        el.style.backgroundColor = color;
-        el.style.color = '#fff';
-        break;
-      }
-    }
-  });
-
-  // Tag colors
-  document.querySelectorAll('.tag').forEach(el => {
-    el.style.color = tagColor;
-    el.style.backgroundColor = 'rgba(187, 154, 247, 0.12)';
-  });
-
-  // Overdue
-  document.querySelectorAll('.task-due.overdue').forEach(el => { el.style.color = overdueColor; });
+function ensureCustomStyleEl() {
+  let el = document.getElementById('custom-css');
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'custom-css';
+    document.head.appendChild(el);   // last in <head> => wins on ties
+  }
+  return el;
 }
 
-(async function loadCustomCSS() {
+async function reloadCustomCSS() {
   try {
     const resp = await fetch(`${API}/custom.css`, { cache: 'no-store' });
-    if (resp.ok) {
-      const css = await resp.text();
-      let styleEl = document.getElementById('custom-css');
-      if (!styleEl) {
-        styleEl = document.createElement('style');
-        styleEl.id = 'custom-css';
-        document.head.appendChild(styleEl);
-      }
-      styleEl.textContent = css;
-      applyCustomCSS();
-    }
+    ensureCustomStyleEl().textContent = resp.ok ? await resp.text() : '';
   } catch (e) { /* ignore */ }
-})();
+}
+
+reloadCustomCSS();
 
 // Route from initial URL (deep link / refresh / shared link)
 navigateFromUrl();

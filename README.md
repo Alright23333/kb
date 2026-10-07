@@ -108,6 +108,15 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 
 - **收窄模式**：`◀` 收窄为 56px 图标栏（保留图标 + tooltip），`▶` 展开
 - **深浅主题**：`🌙/☀️` 切换，CSS 变量驱动，跟随系统偏好，localStorage 持久化
+- **自定义 CSS**：设置面板编辑 `data/custom.css`，实时预览。主题是 **token 驱动** 的——所有颜色走 CSS 变量，自定义样式只需覆盖变量即可
+
+  ```css
+  /* 两个主题各写一份 */
+  [data-theme="dark"]  { --card: #16161e; --accent: #7aa2f7; }
+  [data-theme="light"] { --card: #f0f0f0; --accent: #2e7de9; }
+  ```
+
+  可覆盖的 token：`--bg` `--card` `--hover` `--fg` `--muted` `--border` `--accent` `--accent-dim` `--accent-hover` `--tag` `--tag-bg` `--p1`~`--p4` `--p3-fg` `--on-accent` `--on-priority` `--overdue` `--danger`。因为组件全部读 `var()`，动态生成的卡片和两个主题都会自动生效，无需写 `!important` 逐元素打补丁。
 - **命令面板 `Ctrl+K`**：
   - 混合搜索：页面名模糊匹配 + 标签 + 操作，FTS 内容匹配兑底
   - 前缀指令：`>` 只搜操作、`#` 只搜标签、`+ 页面名` 快速创建
