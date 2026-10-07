@@ -34,11 +34,16 @@ Tools:
 """
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 
 from fastmcp import FastMCP
 from search import build_search_query
+
+# MCP stdio uses stdout for the protocol — logging must go to stderr, which is
+# what the logging module does by default.
+log = logging.getLogger("kb.mcp")
 
 DB_PATH = os.environ.get("KB_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "kb.db"))
 DB_PATH = os.path.expanduser(DB_PATH)
@@ -110,8 +115,9 @@ def search(query: str, limit: int = 10) -> str:
                     "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
                     (fts_expr, limit),
                 ).fetchall()
-            except Exception:
-                pass
+            except sqlite3.OperationalError as e:
+                # Malformed MATCH → fall back to LIKE below, but do not hide it.
+                log.warning("FTS match failed for %r: %s — falling back to LIKE", fts_expr, e)
 
         # LIKE fallback for short segments
         if not rows and like_patterns:

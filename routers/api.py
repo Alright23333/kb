@@ -7,7 +7,9 @@ name is a date (YYYY-MM-DD).
 import aiosqlite
 import io
 import json
+import logging
 import os
+import sqlite3
 import zipfile
 from typing import Optional
 
@@ -20,6 +22,8 @@ from parse import parse as parse_content
 from search import build_search_query
 
 router = APIRouter()
+
+log = logging.getLogger("kb.api")
 
 
 # ── Pydantic models ──────────────────────────────────────────────
@@ -104,8 +108,11 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
             )
             if rows:
                 return [dict(r) for r in rows]
-        except Exception:
-            pass
+        except sqlite3.OperationalError as e:
+            # A malformed MATCH expression must not abort the search, but do
+            # leave a trace: swallowing this silently once hid a broken query
+            # for a long time. Still falls through to the LIKE fallback below.
+            log.warning("FTS match failed for %r: %s — falling back to LIKE", fts_expr, e)
 
     # LIKE fallback (short CJK segments or pure ASCII <3 chars)
     if like_patterns:

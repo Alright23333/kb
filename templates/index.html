@@ -1500,11 +1500,14 @@ function navigate(target, ...args) {
 }
 
 async function loadAndEdit(name) {
+  const token = ++viewToken;   // claim this navigation before the await
   try {
     const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
+    if (token !== viewToken) return;
     if (!resp.ok) { showToast('页面不存在: ' + name, 'error'); navigate('home'); return; }
     editPage(await resp.json());
   } catch (e) {
+    if (token !== viewToken) return;
     showToast('加载失败: ' + e.message, 'error');
   }
 }
@@ -1512,12 +1515,13 @@ async function loadAndEdit(name) {
 // ── Home ───────────────────────────────────────────────────────
 
 async function showHome() {
-  hideAll();
+  const token = hideAll();
   document.getElementById('home-view').style.display = 'block';
   const [pages, tags] = await Promise.all([
     cachedFetch('homePages', `${API}/pages?limit=50`),
     cachedFetch('tags', `${API}/tags`),
   ]);
+  if (token !== viewToken) return;   // a newer view took over while we waited
 
   let html = '<h2 style="margin-bottom:16px">最近页面</h2>';
   if (pages.length === 0) {
@@ -1537,7 +1541,7 @@ async function showHome() {
 // ── All Pages ─────────────────────────────────────────────────
 
 async function showAllPages() {
-  hideAll();
+  const token = hideAll();
   const view = document.getElementById('home-view');
   view.style.display = 'block';
   view.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
@@ -1548,6 +1552,7 @@ async function showAllPages() {
   } catch (e) {
     pages = [];
   }
+  if (token !== viewToken) return;
 
   // Fast sort: pre-compute lowercase names, use simple comparison
   pages.sort((a, b) => {
@@ -1856,17 +1861,19 @@ async function ensureAllNames() {
 }
 
 async function loadPage(name) {
-  hideAll();
+  const token = hideAll();
   currentName = null;
   trackRecent(name);
   let page;
   try {
     page = await cachedFetch(`page:${name}`, `${API}/pages/${encodeURIComponent(name)}`);
   } catch (e) {
+    if (token !== viewToken) return;
     showToast('页面不存在: ' + name, 'error');
     navigate('home');
     return;
   }
+  if (token !== viewToken) return;   // a newer page/view won; discard this result
 
   document.getElementById('page-view').style.display = 'block';
   document.getElementById('page-name-display').textContent = page.name;
@@ -2059,6 +2066,7 @@ function newPage() {
   currentSaveMode = 'page';
   pushRoute('new');
   document.getElementById('editor').style.display = 'block';
+  updateFABVisibility();
   document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = '';
   if (!cm) initCM(document.getElementById('cm-editor'));
@@ -2075,6 +2083,7 @@ function editPage(page) {
   currentSaveMode = 'page';
   pushRoute('edit', page.name);
   document.getElementById('editor').style.display = 'block';
+  updateFABVisibility();
   document.getElementById('editor-header').innerHTML = originalHeaderHTML;
   document.getElementById('page-name').value = page.name;
   trackRecent(page.name);
@@ -2379,7 +2388,7 @@ function renderJournalHeader(date, exists) {
 }
 
 async function showJournal(date) {
-  hideAll();
+  const token = hideAll();
   currentSaveMode = 'journal';
 
   if (!date) {
@@ -2401,9 +2410,11 @@ async function showJournal(date) {
   } catch (e) {
     // No page for this date yet — saveJournal() creates it on first save.
   }
+  if (token !== viewToken) return;
 
   // Reuse the editor view, but swap the page-name input for a date picker.
   document.getElementById('editor').style.display = 'block';
+  updateFABVisibility();
   renderJournalHeader(date, exists);
 
   if (!cm) initCM(document.getElementById('cm-editor'));
@@ -2454,9 +2465,10 @@ async function saveJournal() {
 // ── Tag pages ──────────────────────────────────────────────────
 
 async function showTagPages(tag) {
-  hideAll();
+  const token = hideAll();
   document.getElementById('home-view').style.display = 'block';
   const pages = await cachedFetch(`tag:${tag}`, `${API}/tags/${encodeURIComponent(tag)}/pages`);
+  if (token !== viewToken) return;
 
   let html = `<h2 style="margin-bottom:16px">#${escapeHtml(tag)}</h2>`;
   if (pages.length === 0) {
@@ -2481,10 +2493,11 @@ async function doSearch() {
   const match = q.match(/^\[\[(.+)\]\]$/);
   if (match) { navigate('page', match[1]); return; }
 
-  hideAll();
+  const token = hideAll();
   document.getElementById('home-view').style.display = 'block';
   const resp = await fetch(`${API}/pages?search=${encodeURIComponent(q)}&limit=100`);
   const pages = await resp.json();
+  if (token !== viewToken) return;
 
   // Sort: exact name > starts with > contains name > content match
   const ql = q.toLowerCase();
@@ -2786,6 +2799,10 @@ async function toggleTaskDone(task) {
   }
 }
 
+// Separate guard for the TODO body: switching list/gantt or refreshing after a
+// write can overlap, and the slower response must not paint the wrong view.
+let todoToken = 0;
+
 async function showTodo() {
   hideAll();
   document.getElementById('todo-view').style.display = 'block';
@@ -2793,10 +2810,12 @@ async function showTodo() {
 }
 
 async function renderTodo(view) {
+  const token = ++todoToken;
   const content = document.getElementById('todo-content');
   content.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
   try {
     const page = await cachedFetch(`page:${getTaskPage()}`, `${API}/pages/${encodeURIComponent(getTaskPage())}`);
+    if (token !== todoToken) return;
     todoSourceContent = page.content;
     const tasks = parseTasks(page.content);
     if (tasks.length === 0) {
@@ -3191,10 +3210,11 @@ function updateGraphNode(node) {
 }
 
 async function showGraph() {
-  hideAll();
+  const token = hideAll();
   document.getElementById('content').classList.add('graph-active');
   document.getElementById('graph-view').style.display = 'flex';
   const data = await cachedFetch('graph', `${API}/graph`);
+  if (token !== viewToken) return;
   document.getElementById('graph-stats').textContent = `${data.nodes.length} 节点 · ${data.edges.length} 边`;
 
   // Circular layout (deterministic)
@@ -3410,13 +3430,21 @@ async function showGraph() {
 
 // ── Helpers ────────────────────────────────────────────────────
 
+// Bumped on every view change. Async loaders capture it before awaiting and
+// drop their result if a newer view has started, so a slow response can never
+// repaint a page the user has already left.
+let viewToken = 0;
+
 function hideAll() {
+  const token = ++viewToken;
   document.getElementById('content').classList.remove('graph-active');
   document.getElementById('home-view').style.display = 'none';
   document.getElementById('todo-view').style.display = 'none';
   document.getElementById('graph-view').style.display = 'none';
   document.getElementById('page-view').style.display = 'none';
   document.getElementById('editor').style.display = 'none';
+  updateFABVisibility();
+  return token;
 }
 
 function formatDate(s) {
@@ -3515,20 +3543,15 @@ window.toggleMobilePreview = function() {
   }
 };
 
-// FAB save visibility
-const fabSave = document.getElementById('fab-save');
+// FAB save visibility. Self-contained element lookup so it is safe to call
+// from any view function regardless of script order.
 function updateFABVisibility() {
-  if (!fabSave) return;
+  const fab = document.getElementById('fab-save');
+  if (!fab) return;
   const editorEl = document.getElementById('editor');
   const editorVisible = editorEl && editorEl.style.display !== 'none';
-  fabSave.style.display = (isMobile() && editorVisible) ? 'flex' : 'none';
+  fab.style.display = (isMobile() && editorVisible) ? 'flex' : 'none';
 }
-const _origHideAll = hideAll;
-window.hideAll = function() { _origHideAll(); updateFABVisibility(); };
-const _origNewPage = newPage;
-window.newPage = function() { _origNewPage(); updateFABVisibility(); };
-const _origEditPage = editPage;
-window.editPage = function(name) { _origEditPage(name); updateFABVisibility(); };
 
 // Breakpoint change handler
 let wasMobile = isMobile();

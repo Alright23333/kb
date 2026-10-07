@@ -236,6 +236,58 @@ CodeMirror 的 `extraKeys` 只在编辑器有焦点时触发。用户常在页�
 
 主脚本开头有一个守卫：依赖缺失时渲染错误页并 `throw`，不要再出现静默白屏。
 
+### 26. 异步视图加载必须防竞态
+
+视图切换都是 `async + await fetch`。若不加守卫，慢请求会覆盖后点的页面（已实测复现：先点 A 后点 B，A 的响应后到就把 B 盖掉）。
+
+机制：`hideAll()` 递增 `viewToken` 并**返回**它；各加载器捕获后，在每个 `await` 之后校验：
+
+```js
+async function loadPage(name) {
+  const token = hideAll();          // 递增并返回新令牌
+  page = await cachedFetch(...);
+  if (token !== viewToken) return;  // 已有更新的视图，丢弃本次结果
+  ...渲染...
+}
+```
+
+已覆盖：`showHome` / `showAllPages` / `loadPage` / `loadAndEdit` /
+`showJournal` / `showTagPages` / `doSearch` / `showGraph`。
+`renderTodo` 因 tab 切换也会重叠，用独立的 `todoToken`。
+
+新增异步视图时照抄这个模式，否则会重新引入这个 bug。
+
+### 27. 不要用 monkey-patch 包装函数（会吞返回值）
+
+移动端适配曾这样给 `hideAll` 挂 FAB 刷新：
+
+```js
+// ❌ 反面教材
+const _origHideAll = hideAll;
+window.hideAll = function() { _origHideAll(); updateFABVisibility(); };
+```
+
+`_origHideAll()` 的返回值被丢掉，于是 `hideAll()` 永远返回 `undefined`，
+而 `const token = hideAll()` 就全是 `undefined` —— 上一条的防线因此全部失效，
+且**不报任何错**（表现为页面永远不渲染）。
+
+**正确做法**：直接在函数体内显式调用 `updateFABVisibility()`（函数声明会提升，
+定义在后面也能调），不要包装。新增类似“副作用”时同理，
+写进目标函数而不是套壳。
+
+### 28. 不要静默吞异常
+
+`except Exception: pass` 曾用在 FTS 查询上（查询写错时无从发现）。
+正确做法：捕窄异常类型 + 记日志 + 明确降级：
+
+```python
+except sqlite3.OperationalError as e:
+    log.warning("FTS match failed for %r: %s — falling back to LIKE", fts_expr, e)
+```
+
+注意：MCP 走 stdio，**stdout 是协议通道**，日志一律用 `logging`（默认 stderr），
+绝不能用 `print`。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改
