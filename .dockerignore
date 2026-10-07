@@ -1,0 +1,47 @@
+# Keep the build context small and, more importantly, keep user data and
+# history out of the image. data/ is a bind-mounted volume at runtime, but
+# `COPY . .` would otherwise bake the live kb.db (and .git) into the image —
+# whoever gets the image would get the notes.
+
+# Version control / CI
+.git
+.gitignore
+.github
+
+# User data: mounted at runtime, never build it in
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.bak
+*.bak-*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+venv/
+env/
+ENV/
+.Python
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Repo/dev only
+.pi/
+AGENT.md
+KB.md
+docker-compose*.yml
+Dockerfile
+.dockerignore
+*.log

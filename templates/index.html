@@ -4,19 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KB</title>
-<!-- CodeMirror 5 (CDN 6.65.7 is actually 5.65.7) -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/dracula.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/markdown/markdown.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/closebrackets.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/matchbrackets.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/selection/active-line.min.js"></script>
-<!-- markdown-it -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.2/markdown-it.min.js"></script>
-<!-- Frappe Gantt -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.css">
-<script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
+<!--
+  Front-end libraries are vendored under static/vendor/ and served by this
+  app (CodeMirror 5.65.7, markdown-it 13.0.2, Frappe Gantt 0.6.1).
+  No CDN: a client that cannot reach the public internet must still get a
+  working UI instead of a blank page.
+
+  The deployment base prefix ('', '/kb', …) has to be known before these
+  asset URLs are parsed, so this small bootstrap resolves it and
+  document.write()s the tags. The app later reads window.__KB_BASE__
+  instead of re-deriving it, so the two can never disagree.
+-->
+<script>
+(function () {
+  var p = location.pathname;
+  var m = p.match(/^(.*?)(?:\/(page|all|graph|todo|journal|tag|edit|new)(?:\/|$))/);
+  var base = m ? (m[1] || '') : (p === '/' || p === '' ? '' : p.replace(/\/+$/, ''));
+  window.__KB_BASE__ = base;
+  var v = base + '/static/vendor/';
+  document.write(
+    '<link rel="stylesheet" href="' + v + 'codemirror/codemirror.min.css">' +
+    '<link rel="stylesheet" href="' + v + 'codemirror/dracula.min.css">' +
+    '<link rel="stylesheet" href="' + v + 'frappe-gantt/frappe-gantt.css">' +
+    '<script src="' + v + 'codemirror/codemirror.min.js"><\/script>' +
+    '<script src="' + v + 'codemirror/markdown.min.js"><\/script>' +
+    '<script src="' + v + 'codemirror/closebrackets.min.js"><\/script>' +
+    '<script src="' + v + 'codemirror/matchbrackets.min.js"><\/script>' +
+    '<script src="' + v + 'codemirror/active-line.min.js"><\/script>' +
+    '<script src="' + v + 'markdown-it.min.js"><\/script>' +
+    '<script src="' + v + 'frappe-gantt/frappe-gantt.min.js"><\/script>'
+  );
+})();
+</script>
 <style>
 /* ── Theme token contract ──────────────────────────────────────
    Every color in the app reads from these variables. Themes and
@@ -1265,11 +1284,26 @@ body {
 <button id="fab-save" onclick="savePage()" style="display:none">💾 保存</button>
 
 <script>
+// Fail loudly (with an explanation) instead of a blank page when a vendored
+// asset is missing — a single 404 used to abort this whole script silently.
+if (typeof window.markdownit !== 'function' || typeof window.CodeMirror !== 'function') {
+  document.documentElement.innerHTML =
+    '<body style="margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1a1b26;color:#c0caf5;display:flex;align-items:center;justify-content:center;height:100vh">' +
+    '<div style="text-align:center;max-width:420px;padding:24px">' +
+    '<h1 style="font-size:20px;margin:0 0 12px">⚠️ KB 前端资源加载失败</h1>' +
+    '<p style="color:#565f89;font-size:14px;line-height:1.7">依赖库未能加载，可能原因：静态文件缺失、反向代理未透传 <code>/static/</code>。请刷新重试。</p>' +
+    '</div></body>';
+  throw new Error('KB: vendored assets failed to load');
+}
+
 // ── URL routing: base detection + route helpers ─────────────
 // Supports subdomain (base='') and path-prefix (base='/kb') deployments.
 // nginx must pass prefix through WITHOUT stripping:
 //   location /kb/ { proxy_pass http://kb:8080; }  // no trailing slash
 function detectBase() {
+  // The <head> bootstrap resolved this before any asset URL was parsed;
+  // prefer it so both can never disagree.
+  if (typeof window.__KB_BASE__ === 'string') return window.__KB_BASE__;
   const p = location.pathname;
   const m = p.match(/^(.*?)(?:\/(page|all|graph|todo|journal|tag|edit|new)(?:\/|$))/);
   if (m) return m[1] || '';

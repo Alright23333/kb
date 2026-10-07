@@ -1,0 +1,10 @@
+# Runtime dependencies for the KB app (main:app) and the MCP server.
+# Install with:  pip install -r requirements.txt
+# Verified with the versions in brackets; the floors are the minimum known-good.
+
+fastapi>=0.110          # 0.141.1
+uvicorn>=0.27           # 0.49.0
+aiosqlite>=0.19         # 0.22.1
+python-multipart>=0.0.9 # 0.0.32  — multipart form parsing for POST /api/import
+fastmcp>=2.0            # 4.0.10  — MCP server (stdio), optional if you skip MCP
+jieba>=0.42             # 0.42.1  — CJK segmentation for search (optional)

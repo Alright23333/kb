@@ -398,9 +398,29 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 | 层 | 技术 |
 |----|------|
 | 后端 | Python 3.11+, FastAPI, aiosqlite |
-| 前端 | Vanilla JS (ES2020+), CodeMirror 5, markdown-it 13, Frappe Gantt |
+| 前端 | Vanilla JS (ES2020+), CodeMirror 5.65.7, markdown-it 13.0.2, Frappe Gantt 0.6.1 |
 | 数据库 | SQLite 3.35+ (WAL mode, FTS5 trigram) |
 | 服务器 | Uvicorn (ASGI) |
+
+### 前端依赖已 vendored（无 CDN）
+
+所有前端库都在 `static/vendor/` 下，由本应用自己提供，**不请求任何外部 CDN**：
+
+```
+static/vendor/
+  codemirror/   codemirror.min.{js,css} dracula.min.css markdown.min.js
+                closebrackets matchbrackets active-line
+  markdown-it.min.js
+  frappe-gantt/ frappe-gantt.min.{js,css}
+```
+
+原因：CDN 一旦不可达（离线 / 内网 / 墙），`<script>` 会报 `window.markdownit is not a function` 并**中断整个内联脚本**，页面直接白屏且无任何提示。现在客户端网络受限也能正常使用。
+
+`templates/index.html` 头部有一段 bootstrap，先用 `document.write` 注入带部署前缀的资源标签（`{'<prefix>'}/static/vendor/...`），并把结果存入 `window.__KB_BASE__` 供主脚本复用，避免前端重复推导前缀。
+
+后端 `main.py` 有一段中间件把 `/<prefix>/static/...` 重写为 `/static/...`，所以子域名与路径前缀两种部署都能拿到资源，**无需额外的 nginx location**。
+
+> 升级依赖：从 CDN 下载新版本覆盖 `static/vendor/` 下同名文件即可。
 
 ## 路线图
 

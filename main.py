@@ -113,6 +113,25 @@ app.include_router(api_router, prefix="/api")
 # Static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
+
+
+# ── Static assets under a deployment prefix ─────────────────────
+# nginx passes the prefix through untouched (proxy_pass without a trailing
+# slash), so /kb/static/vendor/x.js arrives verbatim while StaticFiles only
+# knows about /static. Rewrite the path before routing so the vendored assets
+# resolve under both subdomain and path-prefix deployments, with no extra
+# nginx location block and no duplicated file-serving logic.
+@app.middleware("http")
+async def strip_static_prefix(request: Request, call_next):
+    path = request.scope.get("path", "")
+    idx = path.find("/static/")
+    if idx > 0:  # >0 means there is a prefix; /static/... is already correct
+        trimmed = path[idx:]
+        request.scope["path"] = trimmed
+        request.scope["raw_path"] = trimmed.encode("utf-8")
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 

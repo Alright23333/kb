@@ -38,7 +38,7 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 ### `templates/index.html` — 前端
 
-- CodeMirror 5（不是 6，CDN 6.65.7 实际是 5.65.7）
+- CodeMirror 5（不是 6，CDN 6.65.7 实际是 5.65.7），连同 markdown-it / Frappe Gantt 都已 vendored 到 `static/vendor/`，不再走 CDN
 - markdown-it 自定义 `wikilink` 内联规则：`[[target]]` → `<a data-page="target">`
 - Frappe Gantt 0.6.1（甘特图渲染，CDN）
 - 全局事件委托处理所有点击（`[data-page]`、`[data-tag]`、`[data-nav]`）
@@ -224,6 +224,17 @@ const arr = Array.isArray(args) ? args : (args == null ? [] : [args]);
 ### 24. Ctrl/Cmd-S 要绑在 document 而非 CodeMirror
 
 CodeMirror 的 `extraKeys` 只在编辑器有焦点时触发。用户常在页面名输入框里按 Ctrl-S，此时会静默无反应。统一绑在 `document` 的 keydown 上，并加 `editor.style.display === 'block'` 守卫，不要再在 `extraKeys` 里重复绑（会双写）。
+
+### 25. 前端依赖必须自托管（vendor），不能依赖 CDN
+
+所有库在 `static/vendor/`，由应用自己提供。**不要改回 CDN**：
+
+- CDN 不可达时（离线/内网/墙）`<script>` 加载失败，`window.markdownit is not a function` 会在 `let md = window.markdownit({...})` 处**中断整个内联脚本**，页面白屏且无任何提示
+- 依赖是**浏览器**加载的，服务器能访问 CDN 不代表客户端能
+
+前缀处理：`templates/index.html` 头部的 bootstrap 用 `document.write` 注入带前缀的资源 URL，并把结果写入 `window.__KB_BASE__`；`detectBase()` 优先读它。后端 `main.py` 的 `strip_static_prefix` 中间件把 `/<prefix>/static/...` 重写为 `/static/...`，所以两种部署都不用改 nginx。
+
+主脚本开头有一个守卫：依赖缺失时渲染错误页并 `throw`，不要再出现静默白屏。
 
 ## 修改流程
 
