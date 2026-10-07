@@ -288,6 +288,34 @@ except sqlite3.OperationalError as e:
 注意：MCP 走 stdio，**stdout 是协议通道**，日志一律用 `logging`（默认 stderr），
 绝不能用 `print`。
 
+### 29. 容器 uid 必须与 data/ 属主一致
+
+Dockerfile 用 `USER ${KB_UID}:${KB_GID}`（默认 1000）降权。uid 不匹配时写入会失败，
+所以 `main.py` 启动时用 `_assert_data_dir_writable()` 自检并**报错退出**，
+提示正确命令：
+
+```bash
+KB_UID=$(id -u) KB_GID=$(id -g) docker compose up -d --build
+```
+
+不要用 `useradd` 创建命名用户再 `USER name` —— 直接用数字 uid:gid 更简单，
+且不依赖基础镜像里是否有 `useradd`。
+
+### 30. sw.js / manifest 必须放在应用根路径
+
+Service Worker 的**作用域由其自身 URL 推导**，manifest 的 `start_url` /
+`scope` / 图标路径也都是**相对 manifest URL**解析。若放在 `/static/` 下：
+SW 作用域会变成 `/static/`（控制不到应用），manifest 的 `start_url` 也会指错。
+
+所以 `main.py` 的 SPA catch-all 里特判这两个文件名，在**任意前缀**下从应用根
+提供（`/sw.js`、`/kb/sw.js`）。`_is_app_root_file()` 会排除
+`<已知路由>/sw.js`（如 `/page/sw.js`），避免真的有页面叫这个名字时被劫持。
+
+manifest 里的路径全部用相对形式（`start_url: "."`、图标 `static/icons/...`），
+这样 `/` 和 `/kb/` 共用同一份文件，不需要服务端注入前缀。
+
+改了外壳内容记得递增 `static/sw.js` 的 `VERSION`。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改

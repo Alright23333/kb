@@ -1,6 +1,13 @@
 services:
   kb:
-    build: .
+    build:
+      context: .
+      # The container user must own the bind-mounted data directory, otherwise
+      # it cannot write kb.db / custom.css. Set these to your host user:
+      #   KB_UID=$(id -u) KB_GID=$(id -g) docker compose up -d --build
+      args:
+        KB_UID: ${KB_UID:-1000}
+        KB_GID: ${KB_GID:-1000}
     container_name: kb
     ports:
       # Loopback only: nginx proxies from the host. Prevents direct external

@@ -23,6 +23,10 @@
   window.__KB_BASE__ = base;
   var v = base + '/static/vendor/';
   document.write(
+    '<link rel="manifest" href="' + base + '/manifest.webmanifest">' +
+    '<link rel="icon" type="image/png" href="' + base + '/static/icons/icon-192.png">' +
+    '<link rel="apple-touch-icon" href="' + base + '/static/icons/icon-192.png">' +
+    '<meta name="theme-color" content="#1a1b26">' +
     '<link rel="stylesheet" href="' + v + 'codemirror/codemirror.min.css">' +
     '<link rel="stylesheet" href="' + v + 'codemirror/dracula.min.css">' +
     '<link rel="stylesheet" href="' + v + 'frappe-gantt/frappe-gantt.css">' +
@@ -805,6 +809,23 @@ body {
   z-index: 1000;
 }
 #toast.error { border-color: var(--danger); }
+
+/* Offline banner (service worker serves the shell, live data does not) */
+#offline-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 3000;
+  padding: 8px 18px;
+  border-radius: 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
 /* Graph */
 .graph-container {
   width: 100%;
@@ -4032,6 +4053,45 @@ document.addEventListener('keydown', (e) => {
 // Fix logo href for path-prefix deployments
 const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
+
+// ── Offline awareness ───────────────────────────────────────────
+// The service worker keeps the app shell available offline, but live data
+// (pages, search, tags) does not. Say so instead of showing an empty UI or
+// leaking one unhandled rejection per view.
+function updateOfflineBanner() {
+  let el = document.getElementById('offline-banner');
+  if (navigator.onLine) {
+    if (el) el.remove();
+    return;
+  }
+  if (el) return;
+  el = document.createElement('div');
+  el.id = 'offline-banner';
+  el.textContent = '📴 离线模式 · 仅显示已缓存内容';
+  document.body.appendChild(el);
+}
+window.addEventListener('online', updateOfflineBanner);
+window.addEventListener('offline', updateOfflineBanner);
+updateOfflineBanner();
+
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = String((e.reason && (e.reason.message || e.reason)) || '');
+  if (!navigator.onLine || /failed to fetch|networkerror|load failed/i.test(msg)) {
+    updateOfflineBanner();
+    e.preventDefault();
+  }
+});
+
+// Register the service worker for offline use. All assets are local, so the
+// shell is fully cacheable. Failures are non-fatal (private mode, no SW
+// support, http on a non-localhost origin).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register(BASE + '/sw.js', { scope: BASE + '/' })
+      .catch(() => { /* PWA is optional */ });
+  });
+}
 
 // Save with Ctrl/Cmd-S from anywhere while the editor is open. Registered on
 // the document (not CodeMirror's keymap) so it also fires when focus is in the

@@ -308,10 +308,14 @@ python3 -m uvicorn main:app --host 0.0.0.0 --port 8080
 ```yaml
 services:
   kb:
-    build: .
+    build:
+      context: .
+      args:
+        KB_UID: ${KB_UID:-1000}
+        KB_GID: ${KB_GID:-1000}
     container_name: kb
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -319,16 +323,25 @@ services:
       - KB_DB_PATH=/app/data/kb.db
       - KB_IP_WHITELIST=1
       - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48
+      - KB_TRUSTED_PROXIES=127.0.0.0/8,::1/128,172.16.0.0/12
 ```
 
 ```bash
-docker compose up -d        # 启动
-docker compose up -d --build  # 更新后重建
+# 容器以非 root 运行，uid 必须与 data/ 属主一致，否则写不进 kb.db
+KB_UID=$(id -u) KB_GID=$(id -g) docker compose up -d --build
+
 docker compose logs -f        # 查看日志
-docker logs kb --tail 20     # 查看容器日志
+docker logs kb --tail 20      # 查看容器日志
 ```
 
 数据库 `./data/kb.db` 挂载到宿主机，重建容器数据不丢。
+
+> 容器使用 `USER ${KB_UID}:${KB_GID}` 降权运行（Dockerfile）。uid 不匹配时，
+> 启动自检会直接报错退出并提示正确命令，不会等到首次保存才报
+> “attempt to write a readonly database”。
+>
+> 端口绑 `127.0.0.1` 而非 `0.0.0.0`：nginx 从本机反代，避免直接暴露后被
+> 伪造 `X-Forwarded-For` 绕过 IP 白名单。
 
 ### nginx 反向代理
 
@@ -422,6 +435,33 @@ static/vendor/
 
 > 升级依赖：从 CDN 下载新版本覆盖 `static/vendor/` 下同名文件即可。
 
+### PWA（可安装 + 离线可用）
+
+依赖全部本地化后，离线只差一层缓存：
+
+| 文件 | 作用 |
+|------|------|
+| `static/manifest.webmanifest` | 应用清单（名称/图标/独立窗口） |
+| `static/sw.js` | Service Worker，预缓存应用外壳 |
+| `static/icons/icon-{192,512}.png` + `icon-maskable-512.png` | 图标 |
+
+**缓存策略**：
+
+| 请求 | 策略 | 理由 |
+|------|------|------|
+| `/api/*` | **不介入** | 数据必须实时，缓存一条旧笔记比请求失败更糟 |
+| 页面导航 | 网络优先 → 缓存的 `index.html` 兜底 | 在线拿最新，离线仍能打开 |
+| `/static/*` | 缓存优先 | vendored 资源除非改版本号否则不变 |
+
+离线时页面底部会出现横幅提示“仅显示已缓存内容”，不会静默空白。
+
+> `sw.js` 和 `manifest.webmanifest` 由 `main.py` 在**应用根路径**提供（不是 `/static/`）：
+> Service Worker 的作用域由其自身 URL 推导，manifest 的 `start_url` / `scope` /
+> 图标路径也都是相对 manifest 解析。放在根路径后，`/` 与 `/kb/` 两种部署都
+> 无需改 nginx、也无需 `Service-Worker-Allowed` 响应头。
+>
+> 改动了外壳内容后需 **递增 `sw.js` 里的 `VERSION`**，否则客户端继续用旧 HTML。
+
 ## 路线图
 
 ### 已完成
@@ -449,6 +489,9 @@ static/vendor/
 - [x] 视图数据缓存（60s TTL + 写失效，切换秒开）
 - [x] TODO 交互化（勾选完成 + 循环滚动 + 统计筛选 + 快速添加）
 - [x] FTS 搜索优化（jieba 分词 + OR 组合查询 + LIKE 降级，改善 CJK 短查询）
+- [x] 前端依赖自托管（vendor，零 CDN 依赖）
+- [x] PWA（可安装 + Service Worker 离线外壳 + 离线提示）
+- [x] 容器降权运行（非 root，uid 可通过 build args 对齐）
 
 ### 待办
 
@@ -458,7 +501,7 @@ static/vendor/
 |------|------|--------|
 | ~~无认证~~：IP 白名单已实现（Tailscale + 本机放行） | 安全 | ✅ |
 | ~~移动端适配~~：触摸事件 + 响应式布局（抽屉侧边栏 + 编辑/预览切换 + FAB 保存 + 触摸图谱） | 移动 | ✅ |
-| **PWA**：离线访问 + 添加到主屏幕 | 离线 | 中 |
+| ~~PWA~~：离线访问 + 添加到主屏幕（已实现，依赖全本地化） | 离线 | ✅ |
 
 #### 功能增强
 

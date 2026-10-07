@@ -4,9 +4,9 @@ import os
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from database import init_db
+from database import init_db, DB_PATH
 from routers.api import router as api_router
 
 app = FastAPI(title="Knowledge Base", version="0.1.0")
@@ -135,8 +135,51 @@ async def strip_static_prefix(request: Request, call_next):
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+# Route words that can occupy the first path segment — a request like
+# /page/sw.js names a page, not the service worker.
+_SPA_ROUTE_WORDS = {
+    "api", "static", "page", "all", "graph", "todo", "journal", "tag", "edit", "new",
+}
+
+
+def _is_app_root_file(full_path: str, filename: str) -> bool:
+    """True for '<filename>' or '<base>/<filename>' where <base> is the
+    deployment prefix (e.g. /kb). Excludes '<known-route>/<filename>' so a
+    page genuinely named e.g. 'sw.js' stays reachable."""
+    if full_path == filename:
+        return True
+    parts = full_path.split("/")
+    return (len(parts) == 2 and parts[1] == filename
+            and parts[0] not in _SPA_ROUTE_WORDS)
+
+
+def _assert_data_dir_writable() -> None:
+    """Fail fast with an actionable message instead of a cryptic SQLite error.
+
+    The container runs as a non-root uid (see Dockerfile USER) that must own
+    the bind-mounted data directory. A mismatch otherwise shows up later as
+    "attempt to write a readonly database" on the first save.
+    """
+    d = os.path.dirname(DB_PATH) or "."
+    os.makedirs(d, exist_ok=True)
+    probe = os.path.join(d, ".kb-write-probe")
+    try:
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+    except OSError as e:
+        raise RuntimeError(
+            f"数据目录不可写: {d} ({e})\n"
+            f"  当前进程以 uid={os.getuid()} gid={os.getgid()} 运行，"
+            f"需与挂载目录属主一致。\n"
+            f"  容器部署请指定构建参数，例如：\n"
+            f"    KB_UID=$(id -u) KB_GID=$(id -g) docker compose up -d --build"
+        ) from e
+
+
 @app.on_event("startup")
 async def startup():
+    _assert_data_dir_writable()
     await init_db()
 
 
@@ -152,6 +195,23 @@ async def spa_catch_all(full_path: str):
     """
     if full_path.startswith("api/"):
         raise HTTPException(404, "Not found")
+
+    # PWA assets must sit at the app root: a service worker's scope comes from
+    # its own URL, and the manifest's start_url/scope resolve relative to the
+    # manifest. nginx passes the deployment prefix through, so serve them for
+    # any prefix here.
+    if _is_app_root_file(full_path, "sw.js"):
+        return FileResponse(
+            os.path.join(static_dir, "sw.js"),
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
+    if _is_app_root_file(full_path, "manifest.webmanifest"):
+        return FileResponse(
+            os.path.join(static_dir, "manifest.webmanifest"),
+            media_type="application/manifest+json",
+        )
+
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     with open(template_path, "r") as f:
         return HTMLResponse(f.read(), headers={"Cache-Control": "no-cache"})
