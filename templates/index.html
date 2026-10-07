@@ -1319,7 +1319,14 @@ let suppressPush = false;
 
 function pushRoute(target, args = []) {
   if (suppressPush) return;
-  history.pushState({ target, args }, '', routeToUrl(target, args));
+  // Callers pass either a single value (navigate('page', name)) or an array.
+  // routeToUrl() indexes args[0], so normalise here — otherwise a string
+  // would be treated as a char array and the URL truncates to its first
+  // character (e.g. /page/Ideas -> /page/I), breaking refresh and sharing.
+  const arr = Array.isArray(args) ? args
+            : (args === undefined || args === null) ? []
+            : [args];
+  history.pushState({ target, args: arr }, '', routeToUrl(target, arr));
 }
 
 function navigateFromUrl() {
@@ -1878,8 +1885,6 @@ function initCM(textareaEl, opts) {
     autoCloseBrackets: false,
     styleActiveLine: true,
     extraKeys: {
-      'Ctrl-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
-      'Cmd-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
       'Enter': (cm) => {
         // If ref/tag autocomplete is open, select the active item
         const refMenu = document.getElementById('ref-autocomplete');
@@ -2329,6 +2334,16 @@ function insertActiveRefOrTag() {
 // ── Journal ────────────────────────────────────────────────────
 // A journal entry is just a page whose name is a date (YYYY-MM-DD).
 
+function renderJournalHeader(date, exists) {
+  const hide = exists ? '' : 'display:none';
+  document.getElementById('editor-header').innerHTML =
+    '<input type="date" id="journal-date-input" value="' + date + '" ' +
+      'onchange="navigate(\'journal\', this.value)" ' +
+      'style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px">' +
+    '<button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="' + hide + '">🕘 历史</button>' +
+    '<button id="delete-btn" onclick="deleteCurrentPage()" title="删除日记（可在回收站恢复）" style="' + hide + '">🗑️</button>';
+}
+
 async function showJournal(date) {
   hideAll();
   currentSaveMode = 'journal';
@@ -2339,19 +2354,23 @@ async function showJournal(date) {
     date = new Date(today - off * 60000).toISOString().split('T')[0];
   }
   journalDate = date;
+  // Journal entries are ordinary pages named by date, so the generic
+  // history/delete helpers can target them through currentName.
+  currentName = date;
 
   let content = '';
+  let exists = false;
   try {
     const data = await cachedFetch(`page:${date}`, `${API}/pages/${encodeURIComponent(date)}`);
     content = data.content;
+    exists = true;
   } catch (e) {
-    // New journal entry: empty content is fine
+    // No page for this date yet — saveJournal() creates it on first save.
   }
 
-  // Use the editor view with a date picker in the header
+  // Reuse the editor view, but swap the page-name input for a date picker.
   document.getElementById('editor').style.display = 'block';
-  document.getElementById('editor-header').innerHTML =
-    '<input type="date" id="journal-date-input" value="' + date + '" onchange="journalDate=this.value" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px">';
+  renderJournalHeader(date, exists);
 
   if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue(content);
@@ -2362,20 +2381,38 @@ async function showJournal(date) {
 }
 
 async function saveJournal() {
-  const date = journalDate || document.getElementById('journal-date-input').value;
+  const input = document.getElementById('journal-date-input');
+  const date = journalDate || (input && input.value);
+  if (!date) { showToast('请先选择日期', 'error'); return; }
   const content = cm.getValue();
 
-  const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`, {
+  // The entry may not exist yet, and PUT /api/pages/{name} is 404 for a
+  // missing page — update first, then create. (This is why the shared
+  // editor needed its own save path: savePage() picks POST/PUT from
+  // currentName, which the journal does not have.)
+  let resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: date, content }),
+    body: JSON.stringify({ content }),
   });
+  if (resp.status === 404) {
+    resp = await fetch(`${API}/pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: date, content }),
+    });
+  }
 
   if (resp.ok) {
     invalidateCache();
     showToast('日记已保存');
+    // The page exists now — reveal history/delete for it.
+    ['history-btn', 'delete-btn'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.style.display = '';
+    });
   } else {
-    const err = await resp.json();
+    const err = await resp.json().catch(() => ({}));
     showToast(err.detail || '保存失败', 'error');
   }
 }
@@ -3697,7 +3734,7 @@ const paletteActions = [
   { icon: '📦', label: '导出 zip', hint: '备份', run: () => exportPages('zip') },
   { icon: '📦', label: '导出 JSON', hint: '备份', run: () => exportPages('json') },
   // Contextual: only when editing a page
-  { icon: '💾', label: '保存页面', ctx: 'editing', run: () => savePage() },
+  { icon: '💾', label: '保存页面', ctx: 'editing', run: () => currentSaveMode === 'journal' ? saveJournal() : savePage() },
   { icon: '🕘', label: '版本历史', ctx: 'editing', run: () => showVersionHistory() },
   { icon: '🗑', label: '删除页面', ctx: 'editing', run: () => deleteCurrentPage() },
 ];
@@ -3749,11 +3786,15 @@ async function handlePaletteInput() {
 
   if (prefix === '>') {
     // Actions only
-    const editing = document.getElementById('editor').style.display === 'block' && currentSaveMode === 'page';
+    const inEditor = document.getElementById('editor').style.display === 'block';
+    const journal = currentSaveMode === 'journal';
     for (const a of paletteActions) {
-      if (a.ctx === 'editing' && !editing) continue;
-      if (!query || fuzzyScore(query, a.label) > 0) {
-        items.push({ icon: a.icon, label: a.label, hint: a.hint || '', section: '操作', run: a.run });
+      if (a.ctx === 'editing' && !inEditor) continue;
+      const label = journal && a.label === '保存页面' ? '保存日记'
+                  : journal && a.label === '删除页面' ? '删除日记'
+                  : a.label;
+      if (!query || fuzzyScore(query, label) > 0) {
+        items.push({ icon: a.icon, label, hint: a.hint || '', section: '操作', run: a.run });
       }
     }
     palItems = items;
@@ -3808,11 +3849,13 @@ async function handlePaletteInput() {
     } catch (e) { /* ignore */ }
 
     // Actions (limit 3)
-    const editing = document.getElementById('editor').style.display === 'block' && currentSaveMode === 'page';
+    const inEditor = document.getElementById('editor').style.display === 'block';
+    const journal = currentSaveMode === 'journal';
     for (const a of paletteActions) {
-      if (a.ctx === 'editing' && !editing) continue;
-      if (fuzzyScore(q, a.label) > 0) {
-        items.push({ icon: a.icon, label: a.label, hint: a.hint || '', section: '操作', run: a.run });
+      if (a.ctx === 'editing' && !inEditor) continue;
+      const label = journal && a.label === '保存页面' ? '保存日记' : a.label;
+      if (fuzzyScore(q, label) > 0) {
+        items.push({ icon: a.icon, label, hint: a.hint || '', section: '操作', run: a.run });
       }
     }
 
@@ -3932,6 +3975,17 @@ document.addEventListener('keydown', (e) => {
 // Fix logo href for path-prefix deployments
 const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
+
+// Save with Ctrl/Cmd-S from anywhere while the editor is open. Registered on
+// the document (not CodeMirror's keymap) so it also fires when focus is in the
+// page-name input or the preview — otherwise the shortcut silently does nothing.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+  if (document.getElementById('editor').style.display !== 'block') return;
+  e.preventDefault();
+  if (currentSaveMode === 'journal') saveJournal();
+  else savePage();
+});
 
 // ── Custom CSS (data/custom.css) ─────────────────────────────────
 // Injected as a <style> tag appended to <head>, i.e. AFTER the built-in

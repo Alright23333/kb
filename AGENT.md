@@ -205,6 +205,26 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 新增可主题化的颜色时：在 `:root` 加 token → 组件里用 `var(--token)` → **不要**写死 hex。另外不要用
 `@media (prefers-color-scheme)` 定义主题变量：`initTheme()` 已经把系统偏好解析成 `data-theme`，媒体查询块的`:root:not([data-theme])`特异性 (0,2,0) 会静默压过用户的 `[data-theme="light"]` 覆盖。
 
+### 22. 日记保存必须 PUT 失败后 POST
+
+日记是“以日期为名的页面”，可能尚不存在。`PUT /api/pages/{name}` 对不存在的页面返回 404，所以 `saveJournal()` 必须先 PUT、`resp.status === 404` 时回退 POST `/api/pages`。页面编辑器（`savePage()`）靠 `currentName` 区分 POST/PUT，日记没有这个名字，不能直接复用那条路径。
+
+另：`showJournal()` 要设 `currentName = date`，这样历史的 `deleteCurrentPage()` / `showVersionHistory()`（它们回退到 `currentName`）能直接作用于日记。
+
+### 23. pushRoute 的参数必须是数组
+
+`routeToUrl()` 用 `args[0]` 取参，所以 `pushRoute()` 内部要把单值包装成数组：
+
+```js
+const arr = Array.isArray(args) ? args : (args == null ? [] : [args]);
+```
+
+否则 `navigate('page', 'Ideas')` 会把字符串当字符数组，URL 被截成 `/page/I`，刷新/分享全 404。`navigate`、`editPage` 都传单值。
+
+### 24. Ctrl/Cmd-S 要绑在 document 而非 CodeMirror
+
+CodeMirror 的 `extraKeys` 只在编辑器有焦点时触发。用户常在页面名输入框里按 Ctrl-S，此时会静默无反应。统一绑在 `document` 的 keydown 上，并加 `editor.style.display === 'block'` 守卫，不要再在 `extraKeys` 里重复绑（会双写）。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改
