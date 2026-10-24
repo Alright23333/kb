@@ -208,6 +208,12 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 - 编辑预览走 300ms 防抖（updatePreview._mmd），别改成同步渲染——v9 init 是重同步操作。
 - 语法错误的块由 v9 就地渲染错误图，不要用 try/catch 替换成静默失败。
 
+### 22. markdown-it 规则注册顺序 + 嵌入引用机制
+
+- `md.inline.ruler.before(名字, ...)` 在**名字对应的规则不存在时直接 throw**，会杀死整个 `<script>`（症状：首载白屏但函数手动调用正常——函数声明提升仍在）。新增规则注册时必须放在被引用规则**注册语句之后**（`kbembed` 的注册在 wikilink 之后，靠 `before('wikilink')` 插到它前面——先定义 `kbEmbedRule` 函数再注册，就是这个原因）。
+- 嵌入引用 `![[页面]]`：inline 规则只输出 `.kb-embed` 占位 div，内容由 `fillEmbeds(root, depth)` 异步拉取填充（`cachedFetch`），depth ≥ 2 显示"层级上限"防循环；缺失页占位 `.kb-embed-create` 走全局 `data-create` 委托（newPage + 预填名字）。
+- 首页看板：`showHome` 先试 `getDashboardPage()`（localStorage `kb-dashboard-page`，空 = 禁用），存在则渲染 + `fillEmbeds` + `renderMermaidBlocks`。看板就是普通页面，没有专用 API。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改

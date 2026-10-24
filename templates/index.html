@@ -402,6 +402,24 @@ code {
 }
 /* Unrendered source inside hover-preview cards stays compact */
 .lp-body .mermaid { margin: 8px 0; }
+/* Embed transclusion (![[page]]) — dashboard and inline use */
+.kb-embed {
+  margin: 14px 0;
+  padding: 14px 18px;
+  border-left: 3px solid var(--accent);
+  background: var(--card);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  font-size: 14px;
+}
+.kb-embed > :first-child { margin-top: 0; }
+.kb-embed > :last-child { margin-bottom: 0; }
+.kb-embed .kb-embed { border-left-color: var(--border); }  /* deeper level recedes */
+.kb-embed-max, .kb-embed-loading { color: var(--muted); font-size: 12.5px; }
+.kb-embed-missing { border-left-color: var(--muted); background: transparent; }
+.kb-embed-create { cursor: pointer; color: var(--muted); font-size: 13px; }
+.kb-embed-create:hover { color: var(--accent); }
+.dashboard-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.dashboard { margin-bottom: var(--sp-5); }
 #backlinks { margin-top: var(--sp-7); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
 #backlinks h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: var(--sp-2); }
 .backlink-item { padding: 10px 4px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
@@ -1236,6 +1254,8 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     <h3>⚙️ 设置</h3>
     <label>任务来源页面 <span style="font-weight:400;color:var(--muted);font-size:12px">（多个用逗号分隔，任务视图可切换）</span></label>
     <input type="text" id="setting-task-page" placeholder="例如: Tasks, 工作, 树莓" value="Tasks">
+    <label>首页看板页面 <span style="font-weight:400;color:var(--muted);font-size:12px">（首页顶部渲染该页内容，支持 ![[嵌入]] 与 mermaid；清空禁用）</span></label>
+    <input type="text" id="setting-dashboard-page" placeholder="默认: KB-看板">
     <label>自定义 CSS <span style="font-weight:400;color:var(--muted);font-size:12px">（保存到 data/custom.css，实时预览）</span></label>
     <textarea id="setting-custom-css" placeholder="例如: body { font-family: 'Georgia', serif; }" oninput="previewCustomCSS(this.value)"></textarea>
     <div class="tpl-row">
@@ -1398,6 +1418,25 @@ const defaultLinkRender = md.renderer.rules.link_open || function(tokens, idx, o
 };
 
 // Custom wiki-link inline rule: [[target]] or [[target|alias]]
+// Embed transclusion: ![[target]] renders the target page's content in place.
+// Emits a placeholder div; content is fetched and filled asynchronously by
+// fillEmbeds() (depth-limited to break reference cycles).
+// NOTE: registered after the wikilink rule exists, but placed before it so
+// `![[x]]` is matched here first (otherwise wikilink swallows the `[[x]]` part).
+function kbEmbedRule(state, silent) {
+  const start = state.pos;
+  if (state.src.slice(start, start + 3) !== '![[') return false;
+  const end = state.src.indexOf(']]', start + 3);
+  if (end === -1) return false;
+  if (!silent) {
+    const name = state.src.slice(start + 3, end).split('|')[0].trim();
+    const token = state.push('kb_embed', '', 0);
+    token.meta = { name };
+  }
+  state.pos = end + 2;
+  return true;
+}
+
 md.inline.ruler.before('link', 'wikilink', function(state, silent) {
   const start = state.pos;
   if (state.src.slice(start, start + 2) !== '[[') return false;
@@ -1446,6 +1485,13 @@ md.renderer.rules.fence = function(tokens, idx, options, env, self) {
   return defaultFence(tokens, idx, options, env, self);
 };
 
+// kbembed rule registration: 'wikilink' must already exist when this runs —
+// ruler.before() throws on unknown names and kills the whole script.
+md.inline.ruler.before('wikilink', 'kbembed', kbEmbedRule);
+md.renderer.rules.kb_embed = function(tokens, idx) {
+  return `<div class="kb-embed" data-embed="${escapeHtml(tokens[idx].meta.name)}"></div>\n`;
+};
+
 // ── Global click delegation (data-page / data-tag) ──────────────
 
 document.addEventListener('click', (e) => {
@@ -1453,6 +1499,14 @@ document.addEventListener('click', (e) => {
   if (pageEl) { e.preventDefault(); navigate('page', pageEl.dataset.page); return; }
   const tagEl = e.target.closest('[data-tag]');
   if (tagEl) { navigate('tag', tagEl.dataset.tag); return; }
+  const createEl = e.target.closest('[data-create]');
+  if (createEl) {
+    e.preventDefault();
+    newPage();
+    document.getElementById('page-name').value = createEl.dataset.create;
+    if (cm) cm.focus();
+    return;
+  }
   const navEl = e.target.closest('[data-nav]');
   if (navEl) { navigate(navEl.dataset.nav); }
 });
@@ -1516,16 +1570,35 @@ async function showHome() {
     cachedFetch('tags', `${API}/tags`),
   ]);
 
-  let html;
-  if (pages.length === 0) {
-    html = '<div class="empty-hint">还没有页面。<br>点击右上角「+ 新页面」写下第一篇，或按 Ctrl+K 打开命令面板。</div>';
+  // Dashboard: a designated page rendered on top of the home view.
+  let dash = null;
+  if (getDashboardPage()) {
+    try {
+      dash = await cachedFetch(`page:${getDashboardPage()}`, `${API}/pages/${encodeURIComponent(getDashboardPage())}`);
+    } catch (e) { /* dashboard disabled or missing — fall through */ }
+  }
+
+  let html = '';
+  if (dash) {
+    html += `<div class="list-col dashboard">
+      <div class="dashboard-toolbar">
+        <button class="btn-imp" onclick="editDashboard()">✏️ 编辑看板</button>
+      </div>
+      <div id="dashboard-content">${renderContent(dash.content)}</div>
+    </div>`;
+  }
+
+  if (pages.length === 0 && !dash) {
+    html += '<div class="empty-hint">还没有页面。<br>点击右上角「+ 新页面」写下第一篇，或按 Ctrl+K 打开命令面板。</div>';
   } else {
-    html = '<div class="list-col">';
-    let lastGroup = '';
+    html += '<div class="list-col">';
+    if (dash) html += '<div class="time-group">最近页面</div>';
+    let lastGroup = dash ? 'skip-first' : '';
     for (const p of pages) {
       const g = timeGroupKey(p.updated_at);
       if (g !== lastGroup) {
-        html += `<div class="time-group">${g}</div>`;
+        if (!dash || lastGroup !== 'skip-first') html += `<div class="time-group">${g}</div>`;
+        else html += ''; // first group header already emitted above
         lastGroup = g;
       }
       html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}">
@@ -1536,6 +1609,30 @@ async function showHome() {
   }
   document.getElementById('home-view').innerHTML = html;
   loadTags(tags);
+
+  if (dash) {
+    const dc = document.getElementById('dashboard-content');
+    fillEmbeds(dc);
+    markUnresolved(dc);
+    renderMermaidBlocks(dc);
+  }
+}
+
+function getDashboardPage() {
+  const v = localStorage.getItem('kb-dashboard-page');
+  return v === '' ? null : (v || 'KB-看板');
+}
+
+async function editDashboard() {
+  const name = getDashboardPage();
+  if (!name) return;
+  try {
+    const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
+    if (resp.ok) { editPage(await resp.json()); return; }
+  } catch (e) { /* fall through to create */ }
+  newPage();
+  document.getElementById('page-name').value = name;
+  if (cm) cm.focus();
 }
 
 // ── All Pages ─────────────────────────────────────────────────
@@ -1897,9 +1994,9 @@ async function loadPage(name) {
   document.getElementById('backlinks').innerHTML = backlinksHtml;
 }
 
-async function markUnresolved() {
+async function markUnresolved(root) {
   await ensureAllNames();
-  document.querySelectorAll('#page-content a.wikilink[data-page]').forEach(a => {
+  (root || document).querySelectorAll('a.wikilink[data-page]').forEach(a => {
     if (!allNames.has(a.dataset.page.toLowerCase())) {
       a.classList.add('unresolved');
     }
@@ -2506,6 +2603,7 @@ function openSettings() {
   document.getElementById('settings-panel').classList.add('open');
   const saved = localStorage.getItem('kb-task-page') || 'Tasks';
   document.getElementById('setting-task-page').value = saved;
+  document.getElementById('setting-dashboard-page').value = localStorage.getItem('kb-dashboard-page') ?? 'KB-看板';
   loadCustomCSSForSettings();
 }
 function closeSettings() {
@@ -2581,6 +2679,7 @@ function saveSettings() {
   if (current && !getTaskPages().some(p => p.toLowerCase() === current.toLowerCase())) {
     localStorage.removeItem('kb-task-page-current');
   }
+  localStorage.setItem('kb-dashboard-page', document.getElementById('setting-dashboard-page').value.trim());
   saveCustomCSS();
   closeSettings();
   showTodo();
@@ -3541,6 +3640,34 @@ async function renderMermaidBlocks(root) {
   try {
     mermaid.init(undefined, blocks); // v9: syntax errors render in-place per node
   } catch (e) { /* a fully broken block keeps its source text */ }
+}
+
+// ── Embed transclusion (![[page]]) ──────────────────────────────
+// Placeholder divs from the kb_embed renderer get filled here, async,
+// depth-limited (level >= 2 refuses to nest further → breaks cycles).
+
+async function fillEmbeds(root, depth = 0) {
+  const els = (root || document).querySelectorAll('.kb-embed:not([data-filled])');
+  for (const el of els) {
+    const name = el.dataset.embed;
+    el.dataset.filled = '1';
+    if (!name) { el.textContent = '(空嵌入)'; continue; }
+    if (depth >= 2) {
+      el.classList.add('kb-embed-max');
+      el.textContent = `↪ 嵌入层级已达上限（${name}）`;
+      continue;
+    }
+    el.innerHTML = '<div class="kb-embed-loading">加载嵌入…</div>';
+    try {
+      const page = await cachedFetch(`page:${name}`, `${API}/pages/${encodeURIComponent(name)}`);
+      el.innerHTML = renderContent(page.content);
+      await fillEmbeds(el, depth + 1);
+      await markUnresolved(el);
+    } catch (e) {
+      el.classList.add('kb-embed-missing');
+      el.innerHTML = `<span class="kb-embed-create" data-create="${escapeHtml(name)}">📄 ${escapeHtml(name)} 不存在 — 点击创建</span>`;
+    }
+  }
 }
 
 function relativeDate(s) {
