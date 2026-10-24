@@ -200,6 +200,14 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 - **不要修改桌面行为**：桌面端 sidebar 仍是 narrow 模式，不要改成 drawer
 - **触摸事件不替代鼠标事件**：触摸事件和鼠标事件是并存的，都要支持
 
+### 21. mermaid 是懒加载 + 幂等重渲染，v9 别升 v10+
+
+- mermaid 9.4.3（UMD/cdnjs）首次遇到 `.mermaid` 块才加载（`ensureMermaidLoaded`）。**不要升级 v10/v11**：v10+ 只发 ESM 构建，内嵌浏览器加载不了远程 ESM（实测动态 import 超时），除非先把 ESM bundle 自托管到 static/。
+- `renderMermaidBlocks(root)` 是幂等的：原文存在 `dataset.src`，重渲染前必须 `textContent = src` 重置 + **`removeAttribute('data-processed')`**（v9 init 跳过已处理节点，漏了这步主题切换后图表会变成纯文本）。
+- 主题切换（setTheme）会 `initMermaidTheme()` 重新注入 CSS 变量并全量重渲染；新增主题变量只在 `initMermaidTheme` 里改。
+- 编辑预览走 300ms 防抖（updatePreview._mmd），别改成同步渲染——v9 init 是重同步操作。
+- 语法错误的块由 v9 就地渲染错误图，不要用 try/catch 替换成静默失败。
+
 ## 修改流程
 
 1. **读相关文件**：改哪层读哪层，不要凭记忆改

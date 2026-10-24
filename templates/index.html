@@ -376,6 +376,32 @@ code {
 #page-content th, #page-content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 #page-content th { background: var(--card); font-weight: 600; }
 #page-content img { max-width: 100%; border-radius: var(--r-sm); }
+/* Mermaid diagrams: base style is a code block; replaced by centered SVG after render */
+.mermaid {
+  margin: 16px 0;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+.mermaid svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.mermaid-error { border-color: var(--overdue); }
+.mermaid-error::before {
+  content: '⚠ mermaid 语法错误，已保留原码';
+  display: block;
+  color: var(--overdue);
+  font-family: inherit;
+  white-space: normal;
+  margin-bottom: 8px;
+}
+/* Unrendered source inside hover-preview cards stays compact */
+.lp-body .mermaid { margin: 8px 0; }
 #backlinks { margin-top: var(--sp-7); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
 #backlinks h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: var(--sp-2); }
 .backlink-item { padding: 10px 4px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
@@ -1142,6 +1168,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
           <button data-mode="Day" onclick="setGanttMode('Day')">日</button>
           <button data-mode="Week" onclick="setGanttMode('Week')">周</button>
           <button data-mode="Month" class="active" onclick="setGanttMode('Month')">月</button>
+          <button onclick="copyTasksAsMermaidGantt()" title="把当前任务页复制为 mermaid 甘特代码块，粘贴到任意页面即可渲染">📋 复制代码</button>
           <input type="date" id="gantt-date-from" onchange="updateGanttRange()" title="开始日期">
           <span style="color:var(--muted)">—</span>
           <input type="date" id="gantt-date-to" onchange="updateGanttRange()" title="结束日期">
@@ -1403,6 +1430,20 @@ md.renderer.rules.link_open = function(tokens, idx, options, env, self) {
     tokens[idx].attrSet('class', 'wikilink');
   }
   return defaultLinkRender(tokens, idx, options, env, self);
+};
+
+// mermaid fence: emit .mermaid div with escaped source; the actual render
+// happens on demand in renderMermaidBlocks() (library lazy-loaded from CDN).
+const defaultFence = md.renderer.rules.fence || function(tokens, idx, options, env, self) {
+  return self.renderToken(tokens, idx, options);
+};
+md.renderer.rules.fence = function(tokens, idx, options, env, self) {
+  const token = tokens[idx];
+  const lang = (token.info || '').trim().split(/\s+/)[0];
+  if (lang === 'mermaid') {
+    return `<div class="mermaid">${escapeHtml(token.content)}</div>\n`;
+  }
+  return defaultFence(tokens, idx, options, env, self);
 };
 
 // ── Global click delegation (data-page / data-tag) ──────────────
@@ -1840,6 +1881,7 @@ async function loadPage(name) {
 
   document.getElementById('page-content').innerHTML = renderContent(page.content);
   await markUnresolved();
+  renderMermaidBlocks(document.getElementById('page-content'));
 
   let backlinksHtml = '';
   if (page.backlinks.length > 0) {
@@ -2010,6 +2052,9 @@ function initCM(textareaEl, opts) {
 function updatePreview() {
   if (!cm) return;
   document.getElementById('preview-pane').innerHTML = renderContent(cm.getValue());
+  // mermaid renders are expensive — debounce while typing
+  clearTimeout(updatePreview._mmd);
+  updatePreview._mmd = setTimeout(() => renderMermaidBlocks(document.getElementById('preview-pane')), 300);
 }
 
 function renderContent(content) {
@@ -2114,6 +2159,7 @@ const slashCommands = [
   { name: '粗体', key: 'bold', action: (cm) => insertBlock(cm, '**', '**') },
   { name: '斜体', key: 'italic', action: (cm) => insertBlock(cm, '*', '*') },
   { name: '链接', key: 'link', action: (cm) => insertBlock(cm, '[', '](url)') },
+  { name: '图表 (mermaid)', key: 'diagram', action: (cm) => insertBlock(cm, '```mermaid\ngraph TD\n    A[开始] --> B{判断}\n    B -->|是| C[结束]\n    B -->|否| A\n', '\n```') },
   { name: '分隔线', key: 'hr', action: (cm) => insertPrefix(cm, '\n---\n') },
 ];
 
@@ -3066,6 +3112,25 @@ function setGanttMode(mode) {
   }
 }
 
+// Export the current task page as a mermaid gantt code block (one-way flow:
+// tasks → text; pasting it into a page makes it ordinary, editable markdown).
+async function copyTasksAsMermaidGantt() {
+  if (!allGanttTasks.length) { showToast('当前没有任务'); return; }
+  const lines = ['gantt', '  dateFormat YYYY-MM-DD', '  axisFormat %m-%d', '  section 任务'];
+  for (const t of allGanttTasks) {
+    const name = t.title.replace(/:/g, '：').replace(/,/g, '，');
+    const tags = [t.doneDate ? 'done' : null, t.priority].filter(Boolean).join(', ');
+    lines.push(`  ${name} :${tags}, ${t.startDate}, ${t.dueDate || t.startDate}`);
+  }
+  const code = '```mermaid\n' + lines.join('\n') + '\n```';
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('已复制 mermaid 甘特代码块，粘贴到任意页面即可渲染');
+  } catch (e) {
+    showToast('复制失败: ' + e.message, 'error');
+  }
+}
+
 
 // ── Graph ──────────────────────────────────────────────────────
 
@@ -3410,6 +3475,74 @@ function formatDate(s) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// ── Mermaid (lazy-loaded, theme-aware, error-degrades to source) ──
+
+let mmdSeq = 0;
+
+function ensureMermaidLoaded() {
+  if (window.mermaid) return Promise.resolve();
+  if (ensureMermaidLoaded._p) return ensureMermaidLoaded._p;
+  // v9 UMD via plain <script> (same mechanism as CodeMirror/markdown-it on
+  // cdnjs). v10+ ships ESM-only, which this embedded browser cannot load
+  // remotely — do not "upgrade" without hosting the ESM bundle locally.
+  ensureMermaidLoaded._p = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.3/mermaid.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => { ensureMermaidLoaded._p = null; reject(new Error('mermaid CDN 加载失败')); };
+    document.head.appendChild(s);
+  });
+  return ensureMermaidLoaded._p;
+}
+
+function initMermaidTheme() {
+  if (!window.mermaid) return;
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n) => cs.getPropertyValue(n).trim();
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      background: 'transparent',
+      mainBkg: v('--card'),
+      primaryColor: v('--card'),
+      primaryBorderColor: v('--accent'),
+      primaryTextColor: v('--fg'),
+      textColor: v('--fg'),
+      lineColor: v('--muted'),
+      secondaryColor: v('--tag-dim'),
+      secondaryBorderColor: v('--tag'),
+      secondaryTextColor: v('--fg'),
+      tertiaryColor: v('--hover'),
+      tertiaryBorderColor: v('--border'),
+      tertiaryTextColor: v('--fg'),
+      fontSize: '14px',
+    },
+  });
+}
+
+async function renderMermaidBlocks(root) {
+  const blocks = (root || document).querySelectorAll('.mermaid');
+  if (!blocks.length) return;
+  try {
+    await ensureMermaidLoaded();
+  } catch (e) {
+    return; // CDN unavailable: blocks keep their escaped source (code-block look)
+  }
+  initMermaidTheme();
+  for (const b of blocks) {
+    const src = b.dataset.src !== undefined ? b.dataset.src : b.textContent;
+    b.dataset.src = src;
+    b.classList.remove('mermaid-error');
+    b.removeAttribute('data-processed'); // v9 init() skips nodes it already processed
+    b.textContent = src; // reset before run: rerenders must start from raw source
+  }
+  try {
+    mermaid.init(undefined, blocks); // v9: syntax errors render in-place per node
+  } catch (e) { /* a fully broken block keeps its source text */ }
+}
+
 function relativeDate(s) {
   if (!s) return '';
   const d = new Date(s.replace(' ', 'T'));
@@ -3572,6 +3705,11 @@ function setTheme(theme) {
   // Sync CodeMirror theme
   if (cm) {
     cm.setOption('theme', theme === 'dark' ? 'dracula' : 'default');
+  }
+  // Re-render mermaid diagrams with the new palette (only if loaded)
+  if (window.mermaid) {
+    initMermaidTheme();
+    renderMermaidBlocks(document);
   }
 }
 

@@ -3,7 +3,7 @@
 一个自托管的双链笔记系统，SQLite 后端 + FastAPI REST API + 原生 JS 单页 Web UI。
 设计目标：**人能用，AI 也能用**——多设备通过 Tailscale 访问，FastAPI 让 AI agent 直接读写知识库。
 
-功能亮点：双链 `[[wikilinks]]`、标签、全文搜索、实时预览编辑器、引用补全、知识图谱、任务管理（甘特图/列表）、深浅主题。
+功能亮点：双链 `[[wikilinks]]`、标签、全文搜索、实时预览编辑器、引用补全、知识图谱、任务管理（甘特图/列表）、mermaid 图表、深浅主题。
 
 ## 设计原则
 
@@ -184,6 +184,15 @@ p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w done:2024-01-1
 | `rec:Nd` / `rec:Nw` | 通用：N 天/周 |
 
 `done:日期` 标记任务完成；循环任务勾选时不加 done 而是滚动 due 到下周期。
+
+### Mermaid 图表
+
+- 笔记中写 ` ```mermaid ` 代码块即渲染成图（flowchart / sequence / pie / gantt / class / state 等），Markdown 是唯一权威源，无中间产物
+- **按需加载**：mermaid 9.4.3（UMD，cdnjs）首次遇到图表块才加载；CDN 不可用时降级显示原码
+- **主题联动**：图表配色注入 KB 设计 token（accent/tag/p1-p4/卡片底色），深浅切换即时重渲染
+- **编辑预览**：实时预览中同步渲染（300ms 防抖）；语法错误时显示 mermaid 错误图，不影响页面其余部分
+- **斜杠命令** `/图表`：插入 graph 骨架模板
+- **任务导出**：任务视图甘特 tab 一键"复制代码"——当前任务页转 mermaid gantt 代码块，粘贴到任意页面即成活图（数据流单向：任务 → 文本，不产生会过时的生成页）
 
 ### 知识图谱
 
@@ -402,7 +411,7 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 | 层 | 技术 |
 |----|------|
 | 后端 | Python 3.11+, FastAPI, aiosqlite |
-| 前端 | Vanilla JS (ES2020+), CodeMirror 5, markdown-it 13, Frappe Gantt |
+| 前端 | Vanilla JS (ES2020+), CodeMirror 5, markdown-it 13, Frappe Gantt, Mermaid 9 |
 | 数据库 | SQLite 3.35+ (WAL mode, FTS5 trigram) |
 | 服务器 | Uvicorn (ASGI) |
 
