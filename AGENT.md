@@ -46,9 +46,12 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - Frappe Gantt 0.6.1（甘特图渲染，CDN）
 - 全局事件委托处理所有点击（`[data-page]`、`[data-tag]`、`[data-nav]`）
 - `navigate(target, ...args)` 是唯一路由入口
-- 主题：CSS 变量 `[data-theme="dark"/"light"]`，localStorage 持久化
+- 主题：CSS 变量 `[data-theme="dark"/"light"]`（Tokyo Night 色板 + 语义色 --tag/--overdue/--p1..p4），localStorage 持久化。**不要用 JS 内联样式改颜色**（已删过一次 applyCustomCSS hack，那是主题切换bug的根源），一律走 CSS 变量
+- 设计系统：token 分层在 `:root`（间距/圆角/阴影/缓动）与 `[data-theme]`（颜色）；新增样式优先用 `var(--sp-*)`/`var(--r-*)` 等既有 token，不要写内联 style
+- 移动端编辑顶栏折叠：MutationObserver 监听 `#editor` 显隐切换 `#header.compact`（CSS 在 media query 内）
+- 侧边栏窄栏切换有 width 0.2s 过渡；移动端是 transform 动画，两套 transition 在不同规则里，别合并
 - 日记编辑器复用页面编辑器，`currentSaveMode` 区分保存目标
-- 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图
+- 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图；任务条颜色从 CSS 变量读取（`ganttPriorityColor`），甘特网格/文字主题化规则在 `/* Frappe Gantt */` 注释块
 
 ### `import_logseq.py` — Logseq 导入
 
@@ -182,7 +185,7 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 ### 18. 甘特图幻影条与 colorGanttBars 索引对齐
 
-循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。
+循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。任务条颜色经 `ganttPriorityColor()` 从 CSS 变量 `--p1..--p4` 读取（改优先级色只改变量，两处调用者——列表圆点 CSS 和甘特条 JS——同时生效）。
 
 ### 19. IP 白名单信任 X-Forwarded-For
 
