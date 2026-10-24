@@ -107,7 +107,7 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 ### 导航与侧边栏
 
 - **收窄模式**：`◀` 收窄为 56px 图标栏（保留图标 + tooltip），`▶` 展开
-- **深浅主题**：`🌙/☀️` 切换，CSS 变量驱动，跟随系统偏好，localStorage 持久化
+- **深浅主题**：`🌙/☀️` 切换，CSS 变量驱动（暗色 = Tokyo Night 色板，全部在 `[data-theme]` 变量层，无 JS 内联样式），跟随系统偏好，localStorage 持久化
 - **命令面板 `Ctrl+K`**：
   - 混合搜索：页面名模糊匹配 + 标签 + 操作，FTS 内容匹配兑底
   - 前缀指令：`>` 只搜操作、`#` 只搜标签、`+ 页面名` 快速创建

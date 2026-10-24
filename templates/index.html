@@ -19,40 +19,65 @@
 <script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
 <style>
 :root {
-  --accent: #4a9eff;
+  --accent: #7aa2f7;
 }
 [data-theme="dark"] {
-  --bg: #1a1a1a;
-  --fg: #e8e8e8;
-  --muted: #888;
-  --accent-dim: #2d5a8e;
-  --border: #333;
-  --card: #222;
-  --hover: #2a2a2a;
+  /* Tokyo Night */
+  --bg: #1a1b26;
+  --fg: #c0caf5;
+  --muted: #565f89;
+  --accent: #7aa2f7;
+  --accent-dim: rgba(122, 162, 247, 0.15);
+  --border: #292e42;
+  --card: #16161e;
+  --hover: #292e42;
+  --tag: #bb9af7;
+  --tag-dim: rgba(187, 154, 247, 0.12);
+  --overdue: #ff757f;
+  --p1: #ff757f;
+  --p2: #ff9e64;
+  --p3: #e0af68;
+  --p4: #9ece6a;
 }
 [data-theme="light"] {
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #888;
+  --bg: #f6f7f9;
+  --fg: #24292f;
+  --muted: #6e7781;
+  --accent: #3b6ea5;
   --accent-dim: #e8f0fb;
-  --border: #e0e0e0;
-  --card: #f5f5f5;
-  --hover: #eeeeee;
+  --border: #e2e6ea;
+  --card: #ffffff;
+  --hover: #eef0f3;
+  --tag: #8250df;
+  --tag-dim: rgba(130, 80, 223, 0.08);
+  --overdue: #cf222e;
+  --p1: #d73a49;
+  --p2: #e67e22;
+  --p3: #d4a72c;
+  --p4: #2da44e;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #ffffff;
-    --fg: #1a1a1a;
-    --muted: #888;
+    --bg: #f6f7f9;
+    --fg: #24292f;
+    --muted: #6e7781;
+    --accent: #3b6ea5;
     --accent-dim: #e8f0fb;
-    --border: #e0e0e0;
-    --card: #f5f5f5;
-    --hover: #eeeeee;
+    --border: #e2e6ea;
+    --card: #ffffff;
+    --hover: #eef0f3;
+    --tag: #8250df;
+    --tag-dim: rgba(130, 80, 223, 0.08);
+    --overdue: #cf222e;
+    --p1: #d73a49;
+    --p2: #e67e22;
+    --p3: #d4a72c;
+    --p4: #2da44e;
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif;
   background: var(--bg);
   color: var(--fg);
   display: flex;
@@ -568,6 +593,13 @@ body {
 }
 #todo-page-switch:focus { outline: none; border-color: var(--accent); }
 #todo-content { flex: 1; overflow: auto; }
+/* CodeMirror: harmonize with page palette (body prefix outranks CDN theme CSS) */
+.CodeMirror { font-family: inherit; background: var(--bg); color: var(--fg); }
+body .cm-s-dracula.CodeMirror { background: var(--bg); color: var(--fg); }
+body .cm-s-dracula .CodeMirror-gutters { background: var(--bg); border-right: 1px solid var(--border); }
+body .cm-s-dracula .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+body .cm-s-dracula .CodeMirror-selected { background: var(--accent-dim) !important; }
+body .cm-s-dracula .CodeMirror-activeline-background { background: var(--card); }
 /* Frappe Gantt theme */
 #gantt-area { min-height: 200px; }
 .gantt .bar-label { fill: #fff !important; font-size: 11px !important; font-weight: 500; }
@@ -613,15 +645,15 @@ body {
 .todo-quickadd:focus { border-color: var(--accent); border-style: solid; }
 .todo-quickadd::placeholder { color: var(--muted); }
 .todo-list-item .priority { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
-.todo-list-item .priority.p1 { background: #e74c3c; }
-.todo-list-item .priority.p2 { background: #e67e22; }
-.todo-list-item .priority.p3 { background: #f1c40f; color: #333; }
-.todo-list-item .priority.p4 { background: #2ecc71; }
+.todo-list-item .priority.p1 { background: var(--p1); }
+.todo-list-item .priority.p2 { background: var(--p2); }
+.todo-list-item .priority.p3 { background: var(--p3); color: #1a1b26; }
+.todo-list-item .priority.p4 { background: var(--p4); color: #1a1b26; }
 .todo-list-item .task-info { flex: 1; min-width: 0; }
 .todo-list-item .task-title { font-weight: 500; font-size: 14px; }
 .todo-list-item .task-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .todo-list-item .task-due { font-size: 12px; color: var(--muted); flex-shrink: 0; }
-.todo-list-item .task-due.overdue { color: #e74c3c; }
+.todo-list-item .task-due.overdue { color: var(--overdue); }
 /* Slash menu */
 #slash-menu {
   position: absolute;
@@ -664,6 +696,12 @@ body {
 #page-content {
   line-height: 1.8;
   font-size: 15px;
+}
+/* Reading column: comfortable line length for CJK prose */
+#page-view > * {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
 }
 #page-content h1, #page-content h2, #page-content h3 { margin: 24px 0 12px; }
 #page-content h1 { font-size: 24px; }
@@ -716,8 +754,8 @@ body {
   margin-bottom: 16px;
 }
 .tag-chip {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--tag-dim);
+  color: var(--tag);
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 12px;
@@ -732,13 +770,11 @@ body {
 }
 #backlinks h3 { font-size: 14px; color: var(--muted); margin-bottom: 12px; }
 .backlink-item {
-  padding: 8px 12px;
-  background: var(--card);
-  border-radius: 4px;
-  margin-bottom: 6px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
-.backlink-item:hover { background: var(--hover); }
+.backlink-item:last-child { border-bottom: none; }
 .backlink-item .snippet {
   color: var(--fg);
   opacity: 0.75;
@@ -754,10 +790,8 @@ body {
 .backlink-item .meta { color: var(--muted); font-size: 12px; }
 /* Page list */
 .page-list-item {
-  padding: 12px 16px;
-  background: var(--card);
-  border-radius: 6px;
-  margin-bottom: 8px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
 .page-list-item:hover { background: var(--hover); }
@@ -3549,10 +3583,6 @@ function setTheme(theme) {
   if (cm) {
     cm.setOption('theme', theme === 'dark' ? 'dracula' : 'default');
   }
-  // Re-apply custom CSS after theme change
-  if (typeof applyCustomCSS === 'function') {
-    setTimeout(applyCustomCSS, 50);
-  }
 }
 
 themeToggle.addEventListener('click', () => {
@@ -4010,74 +4040,6 @@ const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
 
 // Inject user-defined custom CSS (data/custom.css)
-function applyCustomCSS() {
-  const root = document.documentElement;
-  const isDark = root.getAttribute('data-theme') === 'dark';
-  if (!isDark) return; // Only apply Tokyo Night in dark mode for now
-
-  const bg = '#1a1b26', card = '#16161e', fg = '#c0caf5', muted = '#565f89', accent = '#7aa2f7', border = '#292e42';
-  const cardHover = '#292e42', cardActive = '#1f2335';
-  const tagColor = '#bb9af7', overdueColor = '#ff757f';
-  const prioColors = { p1: '#ff757f', p2: '#ff9e64', p3: '#e0af68', p4: '#9ece6a' };
-
-  document.body.style.backgroundColor = bg;
-  document.body.style.color = fg;
-  const sidebar = document.getElementById('sidebar');
-  if (sidebar) sidebar.style.backgroundColor = card;
-  const header = document.getElementById('header');
-  if (header) header.style.backgroundColor = card;
-
-  // Cards with hover effect
-  document.querySelectorAll('.page-list-item, .todo-list-item, .pal-item, .ref-item, .vp-item').forEach(el => {
-    el.style.backgroundColor = card;
-    el.style.borderColor = border;
-    el.style.color = fg;
-    el.addEventListener('mouseenter', () => { el.style.backgroundColor = cardHover; });
-    el.addEventListener('mouseleave', () => { el.style.backgroundColor = card; });
-  });
-
-  // Text colors
-  document.querySelectorAll('.title, .task-title, .ref-title').forEach(el => { el.style.color = fg; });
-  document.querySelectorAll('.meta, .task-meta, .ref-meta, .pal-hint').forEach(el => { el.style.color = muted; });
-
-  // Links
-  document.querySelectorAll('a').forEach(el => { el.style.color = accent; });
-
-  // Buttons
-  document.querySelectorAll('button, .btn-imp, .todo-stat').forEach(el => {
-    el.style.backgroundColor = card;
-    el.style.borderColor = border;
-    el.style.color = fg;
-  });
-
-  // Inputs
-  document.querySelectorAll('input, textarea').forEach(el => {
-    el.style.backgroundColor = bg;
-    el.style.borderColor = border;
-    el.style.color = fg;
-  });
-
-  // Priority colors
-  document.querySelectorAll('.priority').forEach(el => {
-    for (const [cls, color] of Object.entries(prioColors)) {
-      if (el.classList.contains(cls)) {
-        el.style.backgroundColor = color;
-        el.style.color = '#fff';
-        break;
-      }
-    }
-  });
-
-  // Tag colors
-  document.querySelectorAll('.tag').forEach(el => {
-    el.style.color = tagColor;
-    el.style.backgroundColor = 'rgba(187, 154, 247, 0.12)';
-  });
-
-  // Overdue
-  document.querySelectorAll('.task-due.overdue').forEach(el => { el.style.color = overdueColor; });
-}
-
 (async function loadCustomCSS() {
   try {
     const resp = await fetch(`${API}/custom.css`, { cache: 'no-store' });
@@ -4090,7 +4052,6 @@ function applyCustomCSS() {
         document.head.appendChild(styleEl);
       }
       styleEl.textContent = css;
-      applyCustomCSS();
     }
   } catch (e) { /* ignore */ }
 })();
