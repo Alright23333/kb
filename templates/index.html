@@ -134,7 +134,7 @@ code {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-#search-input { flex: 1; max-width: 560px; }
+#search-input { flex: 1; max-width: 720px; }
 .hbtn {
   border: 1px solid var(--border);
   background: var(--card);
@@ -174,6 +174,7 @@ code {
   background: var(--bg);
   border-right: 1px solid var(--border);
   overflow: hidden;
+  transition: width 0.2s var(--ease);
 }
 #sidebar-header {
   padding: 16px 16px 14px;
@@ -187,6 +188,7 @@ code {
 #sidebar-header a { color: var(--fg); text-decoration: none; }
 #sidebar-toggle {
   margin-left: auto;
+  flex-shrink: 0;
   border: 1px solid var(--border);
   color: var(--muted);
   padding: 2px 7px;
@@ -1096,8 +1098,8 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 <!-- Sidebar -->
 <div id="sidebar">
   <div id="sidebar-header">
-    <button id="sidebar-toggle" title="收起侧边栏">◀</button>
     <a href="/" class="nav-text">📚 KB</a>
+    <button id="sidebar-toggle" title="收起侧边栏">◀</button>
   </div>
   <div id="nav">
     <a class="nav-item" data-nav="home" title="首页"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
