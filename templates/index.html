@@ -728,6 +728,17 @@ body {
   cursor: pointer;
 }
 .backlink-item:hover { background: var(--hover); }
+.backlink-item .snippet {
+  color: var(--fg);
+  opacity: 0.75;
+  font-size: 13px;
+  margin: 2px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 .backlink-item .title { font-weight: 500; font-size: 14px; }
 .backlink-item .meta { color: var(--muted); font-size: 12px; }
 /* Page list */
@@ -1849,6 +1860,7 @@ async function loadPage(name) {
     for (const b of page.backlinks) {
       backlinksHtml += `<div class="backlink-item" data-page="${escapeHtml(b.name)}">
         <div class="title">${escapeHtml(b.name)}</div>
+        ${b.snippet ? `<div class="snippet">${escapeHtml(b.snippet)}</div>` : ''}
         <div class="meta">${formatDate(b.updated_at)}</div>
       </div>`;
     }

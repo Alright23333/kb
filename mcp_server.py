@@ -390,7 +390,8 @@ def get_tags() -> str:
 
 @mcp.tool
 def get_backlinks(name: str) -> str:
-    """Get all pages that link to the given page.
+    """Get all pages that link to the given page, with the quoting line
+    from each source page's content.
 
     Args:
         name: Target page name (case-insensitive)
@@ -398,7 +399,7 @@ def get_backlinks(name: str) -> str:
     conn = _db()
     try:
         rows = conn.execute(
-            "SELECT p.name, p.updated_at FROM refs r "
+            "SELECT p.name, p.updated_at, p.content FROM refs r "
             "JOIN pages p ON p.id = r.source_id "
             "WHERE r.kind='link' AND r.target_name=? COLLATE NOCASE "
             "ORDER BY p.updated_at DESC",
@@ -406,7 +407,15 @@ def get_backlinks(name: str) -> str:
         ).fetchall()
         if not rows:
             return f"No backlinks to '{name}'"
-        return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in rows)
+        from parse import find_link_lines
+        lines = []
+        for r in rows:
+            snippet = (find_link_lines(r["content"], name, max_lines=1) or [""])[0]
+            if snippet:
+                lines.append(f"- {r['name']} (updated {r['updated_at']}): {snippet}")
+            else:
+                lines.append(f"- {r['name']} (updated {r['updated_at']})")
+        return "\n".join(lines)
     finally:
         conn.close()
 

@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_db, DB_PATH
-from parse import parse as parse_content
+from parse import parse as parse_content, find_link_lines
 from search import build_search_query, rerank_by_name
 
 router = APIRouter()
@@ -396,17 +396,24 @@ async def get_page(name: str):
         )
         page["links"] = [l["target_name"] for l in links]
 
-        backlinks = await _fetchall(
+        backlink_rows = await _fetchall(
             db,
             """
-            SELECT p.name, p.updated_at FROM refs r
+            SELECT p.name, p.updated_at, p.content FROM refs r
             JOIN pages p ON p.id = r.source_id
             WHERE r.kind = 'link' AND r.target_name = ? COLLATE NOCASE
             ORDER BY p.updated_at DESC
             """,
             (name,),
         )
-        page["backlinks"] = [dict(b) for b in backlinks]
+        page["backlinks"] = [
+            {
+                "name": b["name"],
+                "updated_at": b["updated_at"],
+                "snippet": (find_link_lines(b["content"], name, max_lines=1) or [""])[0],
+            }
+            for b in backlink_rows
+        ]
 
         props = await _fetchall(
             db, "SELECT key, value FROM properties WHERE page_id = ?", (page["id"],)

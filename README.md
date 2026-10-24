@@ -146,6 +146,7 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 
 - **所有页面**：字母排序，实时筛选，DocumentFragment 批量渲染
 - 页面详情：反向链接、标签、属性
+- **反向链接预览**：每条反链显示源页面中引用本页的原文行（`parse.py` 的 `find_link_lines`，大小写不敏感、含别名形式，截 200 字符，前端两行截断）
 
 ### 任务管理（TODO）
 
@@ -218,7 +219,7 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 |--------|------|------|-------------|
 | `GET` | `/api/pages` | — | 列表（`?tag=`、`?search=`、`?limit=`、`?offset=`） |
 | `GET` | `/api/pages/names` | — | 所有页面名 |
-| `GET` | `/api/pages/{name}` | — | 详情 + tags + links + backlinks + properties |
+| `GET` | `/api/pages/{name}` | — | 详情 + tags + links + backlinks（含引用原文行 snippet） + properties |
 | `POST` | `/api/pages` | `{name, content}` | 创建 |
 | `PUT` | `/api/pages/{name}` | `{name?, content?}` | 更新（改名时重写引用） |
 | `PATCH` | `/api/pages/{name}/rename` | `{name}` | 原子改名（含 refs 冲突预处理） |

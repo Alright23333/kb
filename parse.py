@@ -62,6 +62,25 @@ def extract_properties(content: str) -> dict[str, str | None]:
     return props
 
 
+def find_link_lines(content: str, target: str, max_lines: int = 3) -> list[str]:
+    """Return up to `max_lines` lines that reference `target` via [[wikilink]].
+
+    Case-insensitive; alias form ([[target|alias]]) counts. Used to show
+    the quoting line in backlink previews.
+    """
+    needle = target.casefold()
+    out: list[str] = []
+    for line in content.splitlines():
+        for m in WIKILINK_RE.finditer(line):
+            link_target = m.group(1).split("|", 1)[0].strip()
+            if link_target.casefold() == needle:
+                out.append(line.strip()[:200])
+                break
+        if len(out) >= max_lines:
+            break
+    return out
+
+
 def parse(content: str) -> dict:
     """Parse content and return all structural signals at once."""
     return {
