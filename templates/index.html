@@ -556,6 +556,17 @@ body {
   font-size: 13px;
 }
 #todo-tabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+#todo-page-switch {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  max-width: 200px;
+}
+#todo-page-switch:focus { outline: none; border-color: var(--accent); }
 #todo-content { flex: 1; overflow: auto; }
 /* Frappe Gantt theme */
 #gantt-area { min-height: 200px; }
@@ -1152,6 +1163,7 @@ body {
     <div id="todo-view">
       <div id="todo-header">
         <h2 style="margin:0">📋 任务</h2>
+        <select id="todo-page-switch" onchange="switchTaskPage(this.value)" title="切换任务来源页面"></select>
         <div id="todo-tabs">
           <button id="tab-list" class="active" onclick="switchTodoTab('list')">列表</button>
           <button id="tab-gantt" onclick="switchTodoTab('gantt')">甘特图</button>
@@ -1226,8 +1238,8 @@ body {
 <div id="settings-panel">
   <div class="panel">
     <h3>⚙️ 设置</h3>
-    <label>任务来源页面</label>
-    <input type="text" id="setting-task-page" placeholder="例如: Tasks" value="Tasks">
+    <label>任务来源页面 <span style="font-weight:400;color:var(--muted);font-size:12px">（多个用逗号分隔，任务视图可切换）</span></label>
+    <input type="text" id="setting-task-page" placeholder="例如: Tasks, 工作, 树莓" value="Tasks">
     <label>自定义 CSS <span style="font-weight:400;color:var(--muted);font-size:12px">（保存到 data/custom.css，实时预览）</span></label>
     <textarea id="setting-custom-css" placeholder="例如: body { font-family: 'Georgia', serif; }" style="width:100%;height:120px;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px;border-radius:4px;font-family:monospace;font-size:12px;resize:vertical;box-sizing:border-box" oninput="previewCustomCSS(this.value)"></textarea>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
@@ -2543,6 +2555,11 @@ async function loadCustomCSSForSettings() {
 function saveSettings() {
   const page = document.getElementById('setting-task-page').value.trim() || 'Tasks';
   localStorage.setItem('kb-task-page', page);
+  // 当前选中页不在新列表里时回退到第一项
+  const current = localStorage.getItem('kb-task-page-current');
+  if (current && !getTaskPages().some(p => p.toLowerCase() === current.toLowerCase())) {
+    localStorage.removeItem('kb-task-page-current');
+  }
   saveCustomCSS();
   closeSettings();
   showTodo();
@@ -2554,8 +2571,30 @@ document.getElementById('settings-panel').addEventListener('click', (e) => {
 
 // ── TODO ───────────────────────────────────────────────────────
 
+function getTaskPages() {
+  const raw = localStorage.getItem('kb-task-page') || 'Tasks';
+  const pages = raw.split(/[,，;；]/).map(s => s.trim()).filter(Boolean);
+  return pages.length ? pages : ['Tasks'];
+}
+
 function getTaskPage() {
-  return localStorage.getItem('kb-task-page') || 'Tasks';
+  const pages = getTaskPages();
+  const current = localStorage.getItem('kb-task-page-current');
+  return current && pages.some(p => p.toLowerCase() === current.toLowerCase()) ? current : pages[0];
+}
+
+function switchTaskPage(name) {
+  localStorage.setItem('kb-task-page-current', name);
+  renderTodo(todoCurrentView);
+}
+
+function populateTodoPageSwitch() {
+  const sel = document.getElementById('todo-page-switch');
+  const pages = getTaskPages();
+  const current = getTaskPage();
+  sel.innerHTML = pages.map(p =>
+    `<option value="${escapeHtml(p)}"${p.toLowerCase() === current.toLowerCase() ? ' selected' : ''}>📄 ${escapeHtml(p)}</option>`
+  ).join('');
 }
 
 function parseTaskLine(line) {
@@ -2712,6 +2751,7 @@ async function toggleTaskDone(task) {
 async function showTodo() {
   hideAll();
   document.getElementById('todo-view').style.display = 'block';
+  populateTodoPageSwitch();
   renderTodo(document.getElementById('tab-gantt').classList.contains('active') ? 'gantt' : 'list');
 }
 
@@ -2735,7 +2775,7 @@ async function renderTodo(view) {
     }
   } catch (e) {
     if (String(e.message).includes('404')) {
-      content.innerHTML = `<div style="padding:20px;color:var(--muted)">页面 "${escapeHtml(getTaskPage())}" 不存在。请在设置中指定任务来源页面。</div>`;
+      content.innerHTML = `<div style="padding:20px;color:var(--muted)">页面 "${escapeHtml(getTaskPage())}" 不存在。请在设置中指定任务来源页面（多个用逗号分隔）。</div>`;
     } else {
       content.innerHTML = `<div style="padding:20px;color:#e74c3c">错误: ${escapeHtml(e.message)}</div>`;
     }
