@@ -193,7 +193,7 @@ p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w done:2024-01-1
 
 ```python
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
-TAG_RE = re.compile(r"(?<!#)#(?!\+)([^\s#\[\]()]+)")
+TAG_RE = re.compile(r"(?<![\w#])#(?!\+)([\w-]+)")
 PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 ```
 
@@ -201,6 +201,11 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 - `extract_tags()` → `set[str]`
 - `extract_properties()` → `dict[str, str|None]`
 - `parse()` → `{"links", "tags", "properties"}`
+
+标签解析规则(2026-10-24 收紧):
+- `#` 前必须是词边界——`foo#bar`、URL 锚点(`a#frag`)、`##` 标题都不再误判
+- 标签字符集限定 `[\w-]`(词字符含汉字 + 连字符)——全角/半角标点(`（）`、`,`、`。` 等)终止标签,不再被带进标签名
+- **跳过代码块(``` 围栏)与行内代码**——代码里的 `#注释`、`#include` 不登记为标签
 
 大小写去重：`casefold()` 字典归并，防止 `[[Foo]]` + `[[foo]]` 触发 UNIQUE 约束。
 

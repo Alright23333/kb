@@ -146,6 +146,7 @@ body {
 #tags-section {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
   border-top: 1px solid var(--border);
 }
@@ -158,10 +159,17 @@ body {
 .tag-item {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
   padding: 4px 12px;
   font-size: 13px;
   cursor: pointer;
   border-radius: 4px;
+}
+.tag-item span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .tag-item:hover { background: var(--hover); }
 .tag-item .count {
@@ -2257,7 +2265,7 @@ let autocompleteMode = null;   // 'ref' | 'tag'
 let tagCache = null;           // [{name, count}]
 
 // Trigger pattern: # not preceded by another # (heading) or word char
-const TAG_TRIGGER_RE = /(^|[^#\w])#([^\s#\[\]()]*)$/;
+const TAG_TRIGGER_RE = /(^|[^#\w])#([\w-]*)$/;
 
 async function showTagAutocomplete(query, cursor) {
   autocompleteMode = 'tag';

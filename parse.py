@@ -2,7 +2,7 @@
 
 Extracts the structural signals from raw markdown:
 - `[[wiki links]]` -> links (with optional `|alias`)
-- `#tags`          -> tags (excluding headings, [[..]] internals, URLs)
+- `#tags`          -> tags (excluding headings, [[..]] internals, code, URLs)
 - `key:: value`    -> properties (line-leading, optional list bullet)
 
 All functions are pure (no I/O) so both the API layer and the importer
@@ -13,9 +13,15 @@ import re
 # [[target]] or [[target|alias]]
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
-# A tag: '#' immediately followed by non-space/non-bracket chars.
-# Excludes headings ("# ", "## " via lookbehind) and org markers ("#+BEGIN_...").
-TAG_RE = re.compile(r"(?<!#)#(?!\+)([^\s#\[\]()]+)")
+# A tag: '#' at a word boundary, followed by word chars (incl. CJK via \w)
+# or hyphens only. Excludes headings ("# ", "## " via lookbehind), org
+# markers ("#+BEGIN_..."), URL anchors ("a#frag") and mid-word hashes
+# ("foo#bar"). Punctuation (half/full-width brackets, commas...) terminates
+# the tag instead of being captured into it.
+TAG_RE = re.compile(r"(?<![\w#])#(?!\+)([\w-]+)")
+
+# Fenced code blocks (``` / ~~~) and inline code are never parsed for tags.
+CODE_RE = re.compile(r"(?s)(```.*?```|~~~.*?~~~|`[^`\n]*`)")
 
 # Property line: optional list bullet, then `key:: value`.
 PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
@@ -34,10 +40,14 @@ def extract_links(content: str) -> set[str]:
 
 
 def extract_tags(content: str) -> set[str]:
-    """Return the set of tags from `#tag`, ignoring [[..]] internals and headings."""
-    # Strip wiki-link brackets so a tag inside [[#x]] is not double-counted.
-    stripped = WIKILINK_RE.sub(" ", content)
-    return {m.group(1) for m in TAG_RE.finditer(stripped)}
+    """Return the set of tags from `#tag`, ignoring [[..]] internals, headings,
+    and anything inside code blocks or inline code."""
+    # Strip code first, then wiki-link brackets so a tag inside [[#x]]
+    # is not double-counted.
+    stripped = CODE_RE.sub(" ", content)
+    stripped = WIKILINK_RE.sub(" ", stripped)
+    tags = {m.group(1).rstrip("-") for m in TAG_RE.finditer(stripped)}
+    return {t for t in tags if t}
 
 
 def extract_properties(content: str) -> dict[str, str | None]:
