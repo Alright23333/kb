@@ -956,8 +956,12 @@ body {
     padding: 12px 16px;
     min-width: 0;
   }
-  #editor.preview-active #editor-pane { display: none; }
-  #editor.preview-active #preview-pane { display: block; }
+  /* preview-active: keep footer (with the toggle button) visible;
+     editor-pane becomes transparent wrapper via display:contents */
+  #editor.preview-active #editor-pane { display: contents; }
+  #editor.preview-active #editor-header,
+  #editor.preview-active .CodeMirror { display: none; }
+  #editor.preview-active #preview-pane { display: block; order: -1; }
 
   /* Editor footer: add preview toggle tab */
   #editor-footer {
@@ -3485,10 +3489,19 @@ document.addEventListener('click', (e) => {
 });
 
 // Mobile preview toggle
+window.resetMobilePreview = function() {
+  const editor = document.getElementById('editor');
+  editor.classList.remove('preview-active');
+  const btn = document.getElementById('mobile-preview-tab');
+  if (btn) btn.textContent = '预览';
+};
 window.toggleMobilePreview = function() {
   const editor = document.getElementById('editor');
   editor.classList.toggle('preview-active');
-  if (editor.classList.contains('preview-active') && cm) {
+  const active = editor.classList.contains('preview-active');
+  const btn = document.getElementById('mobile-preview-tab');
+  if (btn) btn.textContent = active ? '编辑' : '预览';
+  if (active && cm) {
     updatePreview();
     setTimeout(() => { if (cm) cm.refresh(); }, 50);
   }
@@ -3503,7 +3516,7 @@ function updateFABVisibility() {
   fabSave.style.display = (isMobile() && editorVisible) ? 'flex' : 'none';
 }
 const _origHideAll = hideAll;
-window.hideAll = function() { _origHideAll(); updateFABVisibility(); };
+window.hideAll = function() { _origHideAll(); resetMobilePreview(); updateFABVisibility(); };
 const _origNewPage = newPage;
 window.newPage = function() { _origNewPage(); updateFABVisibility(); };
 const _origEditPage = editPage;
@@ -3517,7 +3530,7 @@ window.addEventListener('resize', () => {
     if (!nowMobile) {
       sidebar.classList.remove('open');
       if (sidebarScrim) sidebarScrim.classList.remove('open');
-      document.getElementById('editor').classList.remove('preview-active');
+      resetMobilePreview();
     }
     wasMobile = nowMobile;
     if (cm) cm.refresh();
