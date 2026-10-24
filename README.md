@@ -20,7 +20,7 @@ kb/
 ├── database.py          # SQLite schema、连接池、FTS/版本触发器
 ├── routers/api.py       # REST API 端点
 ├── parse.py             # Markdown 解析：[[links]]、#tags、key:: value
-├── mcp_server.py        # MCP Server（stdio，13 个工具，供 AI agent 使用）
+├── mcp_server.py        # MCP Server（stdio，15 个工具，供 AI agent 使用）
 ├── export.py            # 导出 CLI（markdown / json / zip）
 ├── import_logseq.py     # 从 Logseq 文件版导入
 ├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt）
@@ -138,6 +138,7 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
   - "记笔记的方法" → `"记笔记的方法" OR "记笔记"`（"方法" 走 LIKE 降级）
   - jieba 未安装时自动降级为原有行为
 - 搜索结果按**名称相关度排序**：精确匹配 > 开头匹配 > 包含匹配 > 内容匹配
+  （重排逻辑在 `search.py` 的 `rerank_by_name`，REST API 与 MCP search 共用）
 - 匹配部分**高亮标记**
 - `<3` 字符走 LIKE 兜底
 
@@ -256,21 +257,23 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 
 ## MCP Server（AI Agent 接入）
 
-`mcp_server.py` 通过 stdio transport 暴露 13 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
+`mcp_server.py` 通过 stdio transport 暴露 15 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
-| 读 | `search(query)` | FTS 全文搜索（jieba 分词增强 CJK） |
-| 读 | `get_page(name)` | 页面详情（内容+tags+links+backlinks） |
+| 读 | `search(query)` | FTS 全文搜索（jieba 分词 + 名称相关度重排） |
+| 读 | `get_page(name)` | JSON 返回：`content` 独立字段 + tags/links/backlinks/properties，可安全回喂 `update_page` |
 | 读 | `list_pages()` | 所有页面名 |
 | 读 | `get_recent_pages(limit)` | 最近更新页面 |
 | 读 | `get_tags()` | 所有标签 + 计数 |
 | 读 | `get_pages_by_tag(tag)` | 按标签查页面 |
 | 读 | `get_backlinks(name)` | 反向链接 |
 | 写 | `create_page(name, content)` | 创建页面 |
-| 写 | `update_page(name, content)` | 更新页面 |
+| 写 | `update_page(name, content)` | 更新页面（整页覆盖） |
 | 写 | `rename_page(old, new)` | 原子改名 + 重写入链 |
 | 写 | `delete_page(name)` | 删除（版本快照保留，可恢复） |
+| 行级 | `append_to_page(name, content)` | 追加写入页尾（自动补换行，避免全文覆盖） |
+| 行级 | `delete_lines(name, start, end)` | 按行号区间删除（1-based 含端点，返回被删行供核对） |
 | 保险 | `get_page_versions(name)` | 版本历史（已删除页面也可查） |
 | 保险 | `restore_page_version(name, id)` | 恢复旧版本 |
 
@@ -417,7 +420,7 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 - [x] 重命名事务（`PATCH /rename` + refs 冲突预处理）
 - [x] 导入/导出（zip + JSON + CLI）
 - [x] 页面历史（自动快照 + 恢复 + 回收站）
-- [x] MCP Server（13 个工具：读/写/版本恢复闭环）
+- [x] MCP Server（15 个工具：读/写/行级修改/版本恢复闭环）
 - [x] 命令面板 `Ctrl+K`（混合搜索 + 前缀指令 + 快速捕获）
 - [x] hover 链接预览（内容卡片 + 一键创建缺失页）
 - [x] `#` 标签补全（与 `[[` 补全同交互）

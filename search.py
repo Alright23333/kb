@@ -95,3 +95,52 @@ def build_search_query(query: str) -> tuple[str | None, list[str]]:
 
     fts_expr = " OR ".join(fts_terms) if fts_terms else None
     return fts_expr, like_patterns
+
+
+def _rank_terms(query: str) -> list[str]:
+    """Terms used for name-relevance ranking: full query + space-split words
+    + jieba segments (CJK), deduped, preserving order."""
+    q = query.strip()
+    if not q:
+        return []
+    terms = [q]
+    terms.extend(w for w in q.split() if w)
+    if _HAS_JIEBA and _has_cjk(q) and len(q) > 3:
+        for seg in jieba.cut(q, cut_all=False):
+            seg = seg.strip()
+            if seg and seg not in _STOPWORDS:
+                terms.append(seg)
+    seen = set()
+    out = []
+    for t in terms:
+        k = t.casefold()
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def rerank_by_name(rows: list[dict], query: str, name_key: str = "name") -> list[dict]:
+    """Re-rank search results so name-related pages come first.
+
+    Tiers: exact name match > name starts with term > name contains term >
+    content-only match. A row's tier is its best tier across all rank terms.
+    Stable sort: within a tier the original order (FTS rank / recency) is kept.
+    """
+    terms = _rank_terms(query)
+    if not terms or not rows:
+        return rows
+
+    def tier(row: dict) -> int:
+        name = str(row.get(name_key, "")).casefold()
+        best = 3
+        for t in terms:
+            if name == t:
+                return 0
+            if best > 1 and name.startswith(t):
+                best = 1
+            elif best > 2 and t in name:
+                best = 2
+        return best
+
+    return sorted(rows, key=tier)

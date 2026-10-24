@@ -18,10 +18,12 @@ Claude Desktop config (claude_desktop_config.json):
 }
 
 Tools:
-  search(query)           → FTS search
-  get_page(name)          → full page + tags + links + backlinks
+  search(query)           → FTS search (name-relevance re-ranked)
+  get_page(name)          → JSON: content in separate field + tags/links/backlinks/props
   create_page(name, content) → create new page
-  update_page(name, content) → update existing page
+  update_page(name, content) → update existing page (full overwrite)
+  append_to_page(name, content) → append text to page end (no rewrite)
+  delete_lines(name, start, end) → delete lines by 1-based range
   delete_page(name)       → delete page (restorable via versions)
   rename_page(old, new)   → rename + rewrite inbound links (atomic)
   list_pages()            → all page names
@@ -38,7 +40,7 @@ import os
 import sqlite3
 
 from fastmcp import FastMCP
-from search import build_search_query
+from search import build_search_query, rerank_by_name
 
 DB_PATH = os.environ.get("KB_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "kb.db"))
 DB_PATH = os.path.expanduser(DB_PATH)
@@ -92,6 +94,9 @@ def _sync_refs(conn: sqlite3.Connection, page_id: int, content: str) -> None:
 def search(query: str, limit: int = 10) -> str:
     """Full-text search across all pages. Returns matching page names with dates.
 
+    Results are re-ranked so pages whose name matches the query come first
+    (exact > starts-with > contains > content-only).
+
     Args:
         query: Search query (supports CJK with jieba segmentation)
         limit: Max results (default 10)
@@ -141,14 +146,19 @@ def search(query: str, limit: int = 10) -> str:
 
         if not rows:
             return f"No results for '{query}'"
-        return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in rows)
+        ranked = rerank_by_name([dict(r) for r in rows], query)
+        return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in ranked)
     finally:
         conn.close()
 
 
 @mcp.tool
 def get_page(name: str) -> str:
-    """Get a page's full content, tags, links, backlinks, and properties.
+    """Get a page as JSON with content in a separate field, plus
+    tags, links, backlinks, and properties.
+
+    The `content` field is the raw markdown — feed it back to update_page
+    as-is. Metadata is returned in separate fields, NOT mixed into content.
 
     Args:
         name: Page name (case-insensitive)
@@ -181,17 +191,16 @@ def get_page(name: str) -> str:
             (row["id"],),
         ).fetchall()}
 
-        parts = [f"# {row['name']}", ""]
-        if props:
-            parts.append("Properties: " + json.dumps(props, ensure_ascii=False))
-        if tags:
-            parts.append(f"Tags: {', '.join('#' + t for t in tags)}")
-        if links:
-            parts.append(f"Links to: {', '.join(links)}")
-        if backlinks:
-            parts.append(f"Backlinks from: {', '.join(b['name'] for b in backlinks)}")
-        parts.append(f"\n---\n{row['content']}")
-        return "\n".join(parts)
+        return json.dumps({
+            "name": row["name"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "tags": tags,
+            "links": links,
+            "backlinks": backlinks,
+            "properties": props,
+            "content": row["content"],
+        }, ensure_ascii=False, indent=2)
     finally:
         conn.close()
 
@@ -254,6 +263,95 @@ def update_page(name: str, content: str) -> str:
         _sync_refs(conn, page_id, content)
         conn.commit()
         return f"Updated page '{name}'"
+    except Exception as e:
+        conn.rollback()
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def append_to_page(name: str, content: str) -> str:
+    """Append text to the end of a page without rewriting existing content.
+
+    Use this for journal-style or checklist-style updates instead of
+    update_page, to avoid accidentally clobbering the rest of the page.
+    A newline separator is inserted automatically if needed.
+
+    Args:
+        name: Page name (case-insensitive)
+        content: Text to append (supports [[links]], #tags)
+    """
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT id, content FROM pages WHERE name=? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if not row:
+            return f"Error: Page '{name}' not found"
+
+        current = row["content"] or ""
+        if current and not current.endswith("\n"):
+            current += "\n"
+        new_content = current + content
+
+        conn.execute(
+            "UPDATE pages SET content=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (new_content, row["id"]),
+        )
+        _sync_refs(conn, row["id"], new_content)
+        conn.commit()
+        return (
+            f"Appended {len(content)} chars to '{name}' "
+            f"(page now {len(new_content.splitlines())} lines)"
+        )
+    except Exception as e:
+        conn.rollback()
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def delete_lines(name: str, start_line: int, end_line: int) -> str:
+    """Delete a range of lines from a page by line number (1-based, inclusive).
+
+    Line numbers refer to the page's CURRENT content — call get_page first
+    if the page may have changed. Returns the deleted lines so you can verify.
+
+    Args:
+        name: Page name (case-insensitive)
+        start_line: First line to delete (1-based)
+        end_line: Last line to delete (inclusive)
+    """
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT id, content FROM pages WHERE name=? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if not row:
+            return f"Error: Page '{name}' not found"
+        if start_line < 1 or end_line < start_line:
+            return f"Error: invalid range {start_line}-{end_line}"
+
+        lines = row["content"].split("\n")
+        if start_line > len(lines):
+            return f"Error: start_line {start_line} beyond page ({len(lines)} lines)"
+        end = min(end_line, len(lines))
+
+        deleted = lines[start_line - 1 : end]
+        new_content = "\n".join(lines[: start_line - 1] + lines[end:])
+
+        conn.execute(
+            "UPDATE pages SET content=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (new_content, row["id"]),
+        )
+        _sync_refs(conn, row["id"], new_content)
+        conn.commit()
+        preview = "\n".join(deleted[:20])
+        if len(deleted) > 20:
+            preview += f"\n... ({len(deleted) - 20} more)"
+        return f"Deleted {len(deleted)} line(s) from '{name}':\n{preview}"
     except Exception as e:
         conn.rollback()
         return f"Error: {e}"

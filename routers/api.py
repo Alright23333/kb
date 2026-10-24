@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from database import get_db, DB_PATH
 from parse import parse as parse_content
-from search import build_search_query
+from search import build_search_query, rerank_by_name
 
 router = APIRouter()
 
@@ -104,7 +104,7 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
                 (fts_expr, limit, offset),
             )
             if rows:
-                return [dict(r) for r in rows]
+                return rerank_by_name([dict(r) for r in rows], q)
         except Exception:
             pass
 
@@ -126,7 +126,7 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
             """,
             tuple(params),
         )
-        return [dict(r) for r in rows]
+        return rerank_by_name([dict(r) for r in rows], q)
 
     # Final fallback: raw query LIKE (for very short input)
     like = f"%{q}%"
@@ -139,7 +139,7 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
         """,
         (like, like, limit, offset),
     )
-    return [dict(r) for r in rows]
+    return rerank_by_name([dict(r) for r in rows], q)
 
 
 async def _rename_page(db: aiosqlite.Connection, page_id: int, old_name: str, new_name: str) -> None:

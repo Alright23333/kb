@@ -58,7 +58,9 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 ### `mcp_server.py` — MCP Server（stdio）
 
-- 13 个工具（读/写/版本恢复），直连 SQLite 不走 FastAPI
+- 15 个工具（读/写/行级修改/版本恢复），直连 SQLite 不走 FastAPI
+- `get_page` 返回 JSON，`content` 为独立字段——元信息不再混入正文，返回值可安全喂回 `update_page`
+- 行级修改用 `append_to_page`（追加）与 `delete_lines`（1-based 行号区间删除），减少全文覆盖风险
 - `_sync_refs()` 与 api.py 的 `_sync()` 逻辑对等，改解析逻辑时两边同步改
 - 注意陷阱 #12：环境变量白名单问题
 
@@ -77,6 +79,7 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 ### `search.py` — 搜索查询构建
 
 - `build_search_query(query)` → `(fts_expr, like_patterns)` 元组
+- `rerank_by_name(rows, query)` → 名称相关度重排（精确 > 前缀 > 包含 > 内容），api.py 与 mcp_server.py 共用
 - jieba 可选依赖：`try/except import`，无 jieba 时降级为原始查询
 - api.py (`_search`) 和 mcp_server.py (`search`) 都调用此函数
 - 修改搜索逻辑时只改此函数，两处调用者自动生效
