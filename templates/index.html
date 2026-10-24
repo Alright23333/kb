@@ -929,6 +929,22 @@ body {
   #editor-layout {
     flex-direction: column;
   }
+  /* Editing: top bar collapses to hamburger only (class toggled by editor visibility) */
+  #header.compact {
+    padding: 8px 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+  #header.compact #search-input,
+  #header.compact #search-btn,
+  #header.compact #new-btn,
+  #header.compact #theme-toggle { display: none; }
+  #header.compact #hamburger { padding: 8px 14px; }
+  /* Editor header/footer: tighter spacing, hint text off */
+  #editor-header { padding: 8px 12px; gap: 6px; }
+  #page-name { min-width: 0; }
+  #history-btn { padding: 6px 8px; font-size: 12px; }
+  #editor-footer span:first-child { display: none; }
   #editor-pane {
     width: 100% !important;
     flex: 1;
@@ -3540,6 +3556,16 @@ themeToggle.addEventListener('click', () => {
     const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
     setTheme(prefersLight ? 'light' : 'dark');
   }
+})();
+
+// ── Editor header compact mode ───────────────────────────────
+// While editing, collapse the top bar to just the hamburger (mobile CSS
+// scopes the actual styling; the class is harmless on desktop).
+(function initHeaderCompact() {
+  const editor = document.getElementById('editor');
+  const header = document.getElementById('header');
+  const apply = () => header.classList.toggle('compact', editor.style.display === 'block');
+  new MutationObserver(apply).observe(editor, { attributes: true, attributeFilter: ['style'] });
 })();
 
 // ── Link Hover Preview ───────────────────────────────────────
