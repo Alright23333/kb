@@ -441,6 +441,17 @@ code {
   white-space: nowrap;
 }
 .draft-btn:hover { border-color: var(--accent); }
+/* Keyboard navigation highlight (j/k) */
+.knav-active {
+  background: var(--hover);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* Health report (orphans / broken links) inside all-pages */
+.health-item { padding: 9px 4px; border-bottom: 1px solid var(--border-soft); }
+.health-item .row { display: flex; align-items: baseline; gap: 10px; }
+.health-item .src { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.health-item .src a { color: var(--accent); text-decoration: none; }
+.health-item .src a:hover { text-decoration: underline; }
 #backlinks { margin-top: var(--sp-7); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
 #backlinks h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: var(--sp-2); }
 .backlink-item { padding: 10px 4px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
@@ -1537,6 +1548,42 @@ document.addEventListener('click', (e) => {
   if (navEl) { navigate(navEl.dataset.nav); }
 });
 
+// ── Keyboard list navigation (j/k + Enter, desktop only) ────────
+let knavIdx = -1;
+
+function knavItems() {
+  return [...document.querySelectorAll('#home-view .page-list-item, #page-view .backlink-item')]
+    .filter(el => el.offsetParent !== null); // skip items in hidden views
+}
+
+function knavClear() {
+  document.querySelectorAll('.knav-active').forEach(el => el.classList.remove('knav-active'));
+  knavIdx = -1;
+}
+
+function knavMove(dir) {
+  const items = knavItems();
+  if (!items.length) return;
+  const next = Math.min(items.length - 1, Math.max(0, knavIdx + dir));
+  knavClear(); // resets knavIdx to -1 — restore after
+  knavIdx = next;
+  items[knavIdx].classList.add('knav-active');
+  items[knavIdx].scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (isMobile() || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) return;
+  if (document.querySelector('.CodeMirror-focused')) return;
+  if (e.key === 'j') { e.preventDefault(); knavMove(1); }
+  else if (e.key === 'k') { e.preventDefault(); knavMove(-1); }
+  else if (e.key === 'Enter') {
+    const active = knavItems().find(el => el.classList.contains('knav-active'));
+    if (active && active.dataset.page) { e.preventDefault(); navigate('page', active.dataset.page); }
+  } else if (e.key === 'Escape') knavClear();
+});
+
 // ── Navigation ─────────────────────────────────────────────────
 
 function navigate(target, ...args) {
@@ -1711,6 +1758,15 @@ async function showAllPages() {
   frag.appendChild(list);
 
   // Trash section (collapsed by default)
+  const health = document.createElement('div');
+  health.className = 'list-col';
+  health.innerHTML = `
+    <button class="trash-toggle" onclick="toggleHealth()">🩺 体检 <span class="hint" id="health-toggle-hint">（点击展开）</span><span class="hint" id="health-summary" style="margin-left:auto"></span></button>
+    <div id="health-box" style="display:none">
+      <div id="health-list"></div>
+    </div>`;
+  frag.appendChild(health);
+
   const trash = document.createElement('div');
   trash.className = 'list-col';
   trash.innerHTML = `
@@ -1722,6 +1778,15 @@ async function showAllPages() {
 
   view.innerHTML = '';
   view.appendChild(frag);
+
+  // Prefetch the health summary so the fold header shows numbers without expanding
+  computeHealth().then(h => {
+    const s2 = document.getElementById('health-summary');
+    if (!s2) return;
+    s2.textContent = (h.orphans.length || h.broken.length)
+      ? `${h.orphans.length} 孤立 · ${h.broken.length} 断链`
+      : '✓ 无问题';
+  }).catch(() => {});
 }
 
 function filterAllPages() {
@@ -1940,6 +2005,87 @@ async function loadTrash() {
   }
 }
 
+async function computeHealth() {
+  const [graph, allPages] = await Promise.all([
+    cachedFetch('graph', `${API}/graph`),
+    cachedFetch('allPages', `${API}/pages?limit=500`),
+  ]);
+  const nodeSet = new Set(graph.nodes.map(n => n.name.toLowerCase()));
+  const updatedMap = {};
+  for (const p of allPages) updatedMap[p.name.toLowerCase()] = p.updated_at;
+  const inbound = {};
+  for (const e of graph.edges) {
+    if (e.source.toLowerCase() === e.target.toLowerCase()) continue; // self-links don't rescue an orphan
+    inbound[e.target.toLowerCase()] = (inbound[e.target.toLowerCase()] || 0) + 1;
+  }
+  const orphans = graph.nodes
+    .filter(n => !inbound[n.name.toLowerCase()])
+    .map(n => ({ name: n.name, updated_at: updatedMap[n.name.toLowerCase()] || '' }))
+    .sort((a, b) => (a.updated_at < b.updated_at ? -1 : 1)); // stalest islands first
+  const brokenMap = {};
+  for (const e of graph.edges) {
+    if (nodeSet.has(e.target.toLowerCase())) continue;
+    const k = e.target.toLowerCase();
+    (brokenMap[k] = brokenMap[k] || { target: e.target, sources: [] }).sources.push(e.source);
+  }
+  const broken = Object.values(brokenMap).sort((a, b) => b.sources.length - a.sources.length);
+  return { orphans, broken };
+}
+
+async function toggleHealth() {
+  const box = document.getElementById('health-box');
+  const hint = document.getElementById('health-toggle-hint');
+  if (!box) return;
+  if (box.style.display === 'none') {
+    box.style.display = '';
+    if (hint) hint.textContent = '（点击收起）';
+    await loadHealth();
+  } else {
+    box.style.display = 'none';
+    if (hint) hint.textContent = '（点击展开）';
+  }
+}
+
+async function loadHealth() {
+  const list = document.getElementById('health-list');
+  if (!list) return;
+  list.innerHTML = '<div class="empty-hint">体检中…</div>';
+  let h;
+  try {
+    h = await computeHealth();
+  } catch (e) {
+    list.innerHTML = `<div class="empty-hint">体检失败: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  let html = `<div class="time-group">🪺 孤立页（${h.orphans.length}）—— 没有任何页面链接到它们</div>`;
+  if (!h.orphans.length) {
+    html += '<div class="health-item src">无 —— 没有孤岛</div>';
+  } else {
+    for (const o of h.orphans) {
+      html += `<div class="page-list-item" data-page="${escapeHtml(o.name)}">
+        <div class="row"><span class="title">${escapeHtml(o.name)}</span><span class="meta">${o.updated_at ? relativeDate(o.updated_at) : ''}</span></div>
+      </div>`;
+    }
+  }
+  html += `<div class="time-group">🔗 断链（${h.broken.length}）—— 指向不存在的页面</div>`;
+  if (!h.broken.length) {
+    html += '<div class="health-item src">无 —— 所有链接都有落点</div>';
+  } else {
+    for (const b of h.broken) {
+      const srcs = [...new Set(b.sources)].map(src =>
+        `<a href="#" data-page="${escapeHtml(src)}">${escapeHtml(src)}</a>`).join('、');
+      html += `<div class="health-item">
+        <div class="row">
+          <span class="title">${escapeHtml(b.target)}</span>
+          <button class="restore-btn" data-create="${escapeHtml(b.target)}">创建此页</button>
+        </div>
+        <div class="src">被引用 ${b.sources.length} 次 ← ${srcs}</div>
+      </div>`;
+    }
+  }
+  list.innerHTML = html;
+}
+
 async function restoreFromTrash(name, versionId) {
   if (!confirm(`恢复页面「${name}」？`)) return;
   try {
@@ -2050,6 +2196,10 @@ function initCM(textareaEl, opts) {
     extraKeys: {
       'Ctrl-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
       'Cmd-S': () => currentSaveMode === 'journal' ? saveJournal() : savePage(),
+      'Ctrl-B': (cm) => wrapSelection(cm, '**', '**'),
+      'Cmd-B': (cm) => wrapSelection(cm, '**', '**'),
+      'Ctrl-I': (cm) => wrapSelection(cm, '*', '*'),
+      'Cmd-I': (cm) => wrapSelection(cm, '*', '*'),
       'Enter': (cm) => {
         // If ref/tag autocomplete is open, select the active item
         const refMenu = document.getElementById('ref-autocomplete');
@@ -2171,6 +2321,18 @@ function initCM(textareaEl, opts) {
     document.removeEventListener('mouseup', onMouseUp);
     cm.refresh();
   }
+}
+
+function wrapSelection(cm, before, after) {
+  const sel = cm.getSelection();
+  if (sel) {
+    cm.replaceSelection(before + sel + after);
+  } else {
+    const cur = cm.getCursor();
+    cm.replaceRange(before + after, cur);
+    cm.setCursor({ line: cur.line, ch: cur.ch + before.length });
+  }
+  cm.focus();
 }
 
 function updatePreview() {
