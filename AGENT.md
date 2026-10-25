@@ -125,7 +125,7 @@ CDN 上 `6.65.7` 实际是 `5.65.7`。v6 是完全不同的 ESM 架构，不要�
 ### 5. 日记是页面
 
 日记不是独立表，是 `name = YYYY-MM-DD` 的页面。不要为日记建单独的表或 API。
-日记编辑器复用页面编辑器的 CodeMirror 实例，通过 `currentSaveMode = 'journal' | 'page'` 区分保存目标。`showJournal()` 会替换 `#editor-header` 为日期选择器，`newPage()`/`editPage()` 必须用 `originalHeaderHTML` 恢复。
+日记编辑器复用页面编辑器的 CodeMirror 实例，通过 `currentSaveMode = 'journal' | 'page'` 区分保存目标。`showJournal()` 会替换 `#editor-header` 为日期选择器，`newPage()`/`editPage()` 必须用 `originalHeaderHTML` 恢复。日记保存是「PUT 404 → POST 创建」两级（每天首篇日记页面不存在，纯 PUT 必失败）；日期选择器切换走 `journalSwitchDate()`（存草稿 + 重载内容），**不要**改回只赋值 `journalDate`——那会把 A 日未保存内容写进 B 日。
 
 ### 6. refs 写入不完整
 

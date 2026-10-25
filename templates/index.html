@@ -2866,7 +2866,7 @@ async function showJournal(date) {
   // Use the editor view with a date picker in the header
   document.getElementById('editor').style.display = 'block';
   document.getElementById('editor-header').innerHTML =
-    '<input type="date" id="journal-date-input" value="' + date + '" onchange="journalDate=this.value" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px">';
+    '<input type="date" id="journal-date-input" value="' + date + '" onchange="journalSwitchDate(this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:4px;font-size:14px">';
 
   if (!cm) initCM(document.getElementById('cm-editor'));
   cm.setValue(content);
@@ -2882,11 +2882,19 @@ async function saveJournal() {
   const date = journalDate || document.getElementById('journal-date-input').value;
   const content = cm.getValue();
 
-  const resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`, {
+  // PUT 404s on missing pages — a fresh day's journal must be created via POST.
+  let resp = await fetch(`${API}/pages/${encodeURIComponent(date)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: date, content }),
+    body: JSON.stringify({ content }),
   });
+  if (resp.status === 404) {
+    resp = await fetch(`${API}/pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: date, content }),
+    });
+  }
 
   if (resp.ok) {
     invalidateCache();
@@ -2897,6 +2905,14 @@ async function saveJournal() {
     const err = await resp.json();
     showToast(err.detail || '保存失败', 'error');
   }
+}
+
+// Switching the journal date must reload that day's content — otherwise
+// saving would write the old day's text into the newly selected date.
+function journalSwitchDate(newDate) {
+  if (!newDate || newDate === journalDate) return;
+  draftSave();  // uncommitted edits stay recoverable via the draft bar
+  showJournal(newDate);
 }
 
 // ── Tag pages ──────────────────────────────────────────────────
