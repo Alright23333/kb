@@ -52,6 +52,7 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - 侧边栏窄栏切换有 width 0.2s 过渡；移动端是 transform 动画，两套 transition 在不同规则里，别合并
 - 日记编辑器复用页面编辑器，`currentSaveMode` 区分保存目标
 - 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图；任务条颜色从 CSS 变量读取（`ganttPriorityColor`），甘特网格/文字主题化规则在 `/* Frappe Gantt */` 注释块
+- 图谱力导向：`startForceLayout()`/`graphSimFrame()`（rAF + alpha 冷却，收敛即停）；拖动中的节点置 `_fixed=true`（tick 跳过其速度），松手 `graphReheat(0.35)`；参数（斥力/弹簧/向心）在 `graphForceTick` 顶部
 - 键盘导航（j/k/Enter）是全局 document keydown：必须过滤输入焦点、`.CodeMirror-focused`、`isComposing`（中文输入法）、移动端；`knavMove` 里 `knavClear()` 会把索引重置为 -1，先算好 next 再 clear 再用（曾因此 TypeError 按键全崩）
 - 体检报告（孤立页/断链）是「所有页面」视图里的折叠区（同回收站模式），`computeHealth()` 纯前端算自 /api/graph，别为它加后端 API
 

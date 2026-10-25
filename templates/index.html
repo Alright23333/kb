@@ -3640,6 +3640,112 @@ let graphNodeMap = {};
 let graphEdges = [];
 let graphDrag = null;
 
+// ── Force-directed layout (hand-rolled, no deps) ────────────────
+// Repulsion (all pairs, distance-capped) + spring on edges + weak
+// gravity toward the centroid, velocity damping, alpha cooling.
+// Dragging pins a node; releasing reheats the simulation.
+
+let graphSim = { alpha: 0, running: false, fitted: false };
+
+function graphForceTick(alpha) {
+  const nodes = graphNodes;
+  const n = nodes.length;
+  const REPULSION = 3200;
+  const SPRING_L = 90;
+  const SPRING_K = 0.06;
+  const GRAVITY = 0.015;
+
+  // centroid
+  let cx = 0, cy = 0;
+  for (const nd of nodes) { cx += nd.x; cy += nd.y; }
+  cx /= n; cy /= n;
+
+  // pairwise repulsion
+  for (let i = 0; i < n; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < n; j++) {
+      const b = nodes[j];
+      let dx = a.x - b.x, dy = a.y - b.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 > 62500) continue; // cap at 250px
+      d2 += 0.01;
+      const f = (REPULSION / d2) * alpha;
+      const d = Math.sqrt(d2);
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+  }
+  // springs along edges
+  for (const e of graphEdges) {
+    const a = graphNodeMap[e.source], b = graphNodeMap[e.target];
+    if (!a || !b || a === b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy + 0.01);
+    const f = (d - SPRING_L) * SPRING_K * alpha;
+    const fx = (dx / d) * f, fy = (dy / d) * f;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  }
+  // gravity + integrate
+  for (const nd of nodes) {
+    nd.vx += (cx - nd.x) * GRAVITY * alpha;
+    nd.vy += (cy - nd.y) * GRAVITY * alpha;
+    if (nd._fixed) { nd.vx = 0; nd.vy = 0; continue; }
+    nd.vx *= 0.85; nd.vy *= 0.85;
+    nd.x += nd.vx; nd.y += nd.vy;
+  }
+}
+
+function graphApplyAllPositions() {
+  for (const nd of graphNodes) {
+    const sel = `#graph-transform [data-name="${CSS.escape(nd.name)}"]`;
+    document.querySelectorAll(sel).forEach(el => {
+      if (el.tagName === 'circle') { el.setAttribute('cx', nd.x); el.setAttribute('cy', nd.y); }
+      else if (el.tagName === 'text') { el.setAttribute('x', nd.x + 10); el.setAttribute('y', nd.y + 4); }
+    });
+  }
+  for (const e of graphEdges) {
+    const s2 = graphNodeMap[e.source], t2 = graphNodeMap[e.target];
+    if (!s2 || !t2) continue;
+    const line = document.querySelector(`#graph-transform line[data-edge="${CSS.escape(e.source)}→${CSS.escape(e.target)}"]`);
+    if (line) {
+      line.setAttribute('x1', s2.x); line.setAttribute('y1', s2.y);
+      line.setAttribute('x2', t2.x); line.setAttribute('y2', t2.y);
+    }
+  }
+}
+
+function graphReheat(alpha) {
+  graphSim.alpha = Math.max(graphSim.alpha, alpha);
+  if (!graphSim.running) graphSimFrame();
+}
+
+function graphSimFrame() {
+  graphSim.running = true;
+  const step = () => {
+    if (!graphSim.running) return;
+    graphForceTick(graphSim.alpha);
+    graphForceTick(graphSim.alpha);
+    graphSim.alpha *= 0.985;
+    graphApplyAllPositions();
+    if (!graphSim.fitted && graphSim.alpha < 0.35) {
+      graphSim.fitted = true;
+      resetGraphView();
+    }
+    if (graphSim.alpha > 0.02) requestAnimationFrame(step);
+    else { graphSim.running = false; if (!graphSim.fitted) { graphSim.fitted = true; resetGraphView(); } }
+  };
+  requestAnimationFrame(step);
+}
+
+function startForceLayout() {
+  if (!graphNodes.length) return;
+  for (const nd of graphNodes) { nd.vx = 0; nd.vy = 0; nd._fixed = false; }
+  graphSim = { alpha: 1, running: false, fitted: false };
+  graphSimFrame();
+}
+
 function applyGraphTransform() {
   const g = document.getElementById('graph-transform');
   if (g) g.setAttribute('transform', `translate(${graphTransform.x},${graphTransform.y}) scale(${graphTransform.k})`);
@@ -3734,7 +3840,7 @@ async function showGraph() {
   }
   g.innerHTML = svg;
 
-  setTimeout(resetGraphView, 0);
+  startForceLayout();
 
   // Bind events once
   if (!showGraph._bound) {
@@ -3752,7 +3858,9 @@ async function showGraph() {
     svgEl.addEventListener('mousedown', (e) => {
       const circle = e.target.closest('circle[data-name]');
       if (circle) {
-        graphDrag = { node: graphNodeMap[circle.dataset.name], _startX: e.clientX, _startY: e.clientY, _moved: false };
+        const nd = graphNodeMap[circle.dataset.name];
+        if (nd) nd._fixed = true;
+        graphDrag = { node: nd, _startX: e.clientX, _startY: e.clientY, _moved: false };
       } else {
         graphDrag = { pan: true, _startX: e.clientX, _startY: e.clientY, _tx: graphTransform.x, _ty: graphTransform.y };
         svgEl.style.cursor = 'grabbing';
@@ -3780,6 +3888,10 @@ async function showGraph() {
     });
 
     document.addEventListener('mouseup', () => {
+      if (graphDrag && graphDrag.node) {
+        graphDrag.node._fixed = false;
+        graphReheat(0.35);
+      }
       graphDrag = null;
       svgEl.style.cursor = 'grab';
     });
@@ -3871,6 +3983,7 @@ async function showGraph() {
           }
         }
         if (hitNode) {
+          hitNode._fixed = true;
           singleTouchNode = hitNode;
           singleTouchStart = { x: touch.clientX, y: touch.clientY };
           singleTouchMoved = false;
@@ -3931,6 +4044,10 @@ async function showGraph() {
     svgEl.addEventListener('touchend', (e) => {
       if (singleTouchNode && !singleTouchMoved) {
         navigate('page', singleTouchNode.name);
+      }
+      if (singleTouchNode) {
+        singleTouchNode._fixed = false;
+        graphReheat(0.35);
       }
       singleTouchStart = null;
       singleTouchNode = null;
