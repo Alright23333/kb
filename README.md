@@ -3,7 +3,7 @@
 一个自托管的双链笔记系统，SQLite 后端 + FastAPI REST API + 原生 JS 单页 Web UI。
 设计目标：**人能用，AI 也能用**——多设备通过 Tailscale 访问，FastAPI 让 AI agent 直接读写知识库。
 
-功能亮点：双链 `[[wikilinks]]`、嵌入引用 `![[页面]]`、首页看板、标签、全文搜索、实时预览编辑器、引用补全、知识图谱、任务管理（甘特图/列表）、mermaid 图表、深浅主题。
+功能亮点：双链 `[[wikilinks]]`、嵌入引用 `![[页面]]`、首页看板、标签、全文搜索、实时预览编辑器、引用补全、知识图谱、任务管理（甘特图/列表）、mermaid 图表、知识库体检（孤立页/断链）、键盘流、草稿自动保存、每日自动备份、深浅主题。
 
 ## 设计原则
 
@@ -345,6 +345,8 @@ services:
       - KB_DB_PATH=/app/data/kb.db
       - KB_IP_WHITELIST=1
       - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48
+      # 自动备份（默认开启，data/backups/ 保留 30 份）
+      # - KB_BACKUP_KEEP=30
 ```
 
 ```bash
