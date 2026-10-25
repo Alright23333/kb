@@ -1,4 +1,5 @@
 """Main FastAPI application."""
+import asyncio
 import ipaddress
 import os
 
@@ -6,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from backup import backup_loop
 from database import init_db
 from routers.api import router as api_router
 
@@ -96,6 +98,7 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 @app.on_event("startup")
 async def startup():
     await init_db()
+    asyncio.create_task(backup_loop())
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)

@@ -62,7 +62,8 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 ### `mcp_server.py` — MCP Server（stdio）
 
-- 15 个工具（读/写/行级修改/版本恢复），直连 SQLite 不走 FastAPI
+- 17 个工具（读/写/行级修改/版本恢复），直连 SQLite 不走 FastAPI
+- `search` 返回体每条带内容摘要片段（`_snippet()`）；追加类工具走共用 `_append()` helper，改追加逻辑只动它
 - `get_page` 返回 JSON，`content` 为独立字段——元信息不再混入正文，返回值可安全喂回 `update_page`
 - 行级修改用 `append_to_page`（追加）与 `delete_lines`（1-based 行号区间删除），减少全文覆盖风险
 - `_sync_refs()` 与 api.py 的 `_sync()` 逻辑对等，改解析逻辑时两边同步改

@@ -18,26 +18,30 @@ Claude Desktop config (claude_desktop_config.json):
 }
 
 Tools:
-  search(query)           → FTS search (name-relevance re-ranked)
+  search(query)           → FTS search (name-relevance re-ranked, with content snippets)
   get_page(name)          → JSON: content in separate field + tags/links/backlinks/props
   create_page(name, content) → create new page
   update_page(name, content) → update existing page (full overwrite)
   append_to_page(name, content) → append text to page end (no rewrite)
+  append_to_journal(content, date?) → append to a journal page (default today)
   delete_lines(name, start, end) → delete lines by 1-based range
   delete_page(name)       → delete page (restorable via versions)
   rename_page(old, new)   → rename + rewrite inbound links (atomic)
   list_pages()            → all page names
   get_recent_pages(limit) → recently updated pages
+  recently_changed(since) → pages updated after a timestamp (incremental sync)
   get_tags()              → all tags with counts
   get_pages_by_tag(tag)   → pages having a tag
-  get_backlinks(name)     → pages linking to this page
+  get_backlinks(name)     → pages linking to this page (with quoting line)
   get_page_versions(name) → version history (works for deleted pages)
   restore_page_version(name, version_id) → restore old version
 """
 import asyncio
 import json
 import os
+import re
 import sqlite3
+from datetime import datetime
 
 from fastmcp import FastMCP
 from search import build_search_query, rerank_by_name
@@ -53,6 +57,43 @@ def _db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
+
+
+def _snippet(query: str, content: str, width: int = 90) -> str:
+    """First content fragment matching any query term, for search results."""
+    if not content:
+        return ""
+    q = query.strip()
+    terms = [q] + [t for t in re.split(r"\s+", q) if t]
+    hay = content.casefold()
+    for t in terms:
+        i = hay.find(t.casefold())
+        if i >= 0:
+            start = max(0, i - width)
+            end = min(len(content), i + len(t) + width)
+            frag = content[start:end].replace("\n", " ").strip()
+            return ("…" if start > 0 else "") + frag + ("…" if end < len(content) else "")
+    first = content.strip().replace("\n", " ")
+    return first[:120] + ("…" if len(first) > 120 else "")
+
+
+def _append(conn: sqlite3.Connection, name: str, content: str) -> str | None:
+    """Append content to an existing page. Returns the new content, or None."""
+    row = conn.execute(
+        "SELECT id, content FROM pages WHERE name=? COLLATE NOCASE", (name,)
+    ).fetchone()
+    if not row:
+        return None
+    current = row["content"] or ""
+    if current and not current.endswith("\n"):
+        current += "\n"
+    new_content = current + content
+    conn.execute(
+        "UPDATE pages SET content=?, updated_at=datetime('now','localtime') WHERE id=?",
+        (new_content, row["id"]),
+    )
+    _sync_refs(conn, row["id"], new_content)
+    return new_content
 
 
 def _sync_refs(conn: sqlite3.Connection, page_id: int, content: str) -> None:
@@ -110,7 +151,7 @@ def search(query: str, limit: int = 10) -> str:
         if fts_expr:
             try:
                 rows = conn.execute(
-                    "SELECT p.name, p.updated_at FROM pages_fts f "
+                    "SELECT p.name, p.updated_at, p.content FROM pages_fts f "
                     "JOIN pages p ON p.id = frowid "
                     "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
                     (fts_expr, limit),
@@ -128,7 +169,7 @@ def search(query: str, limit: int = 10) -> str:
                 params.extend([like, like])
             params.append(limit)
             rows = conn.execute(
-                f"SELECT name, updated_at FROM pages "
+                f"SELECT name, updated_at, content FROM pages "
                 f"WHERE {' OR '.join(conditions)} "
                 f"ORDER BY updated_at DESC LIMIT ?",
                 tuple(params),
@@ -138,7 +179,7 @@ def search(query: str, limit: int = 10) -> str:
         if not rows:
             like = f"%{query}%"
             rows = conn.execute(
-                "SELECT name, updated_at FROM pages "
+                "SELECT name, updated_at, content FROM pages "
                 "WHERE name LIKE ? OR content LIKE ? "
                 "ORDER BY updated_at DESC LIMIT ?",
                 (like, like, limit),
@@ -147,7 +188,10 @@ def search(query: str, limit: int = 10) -> str:
         if not rows:
             return f"No results for '{query}'"
         ranked = rerank_by_name([dict(r) for r in rows], query)
-        return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in ranked)
+        return "\n".join(
+            f"- {r['name']} (updated {r['updated_at']})\n  > {_snippet(query, r.get('content', ''))}"
+            for r in ranked
+        )
     finally:
         conn.close()
 
@@ -284,22 +328,9 @@ def append_to_page(name: str, content: str) -> str:
     """
     conn = _db()
     try:
-        row = conn.execute(
-            "SELECT id, content FROM pages WHERE name=? COLLATE NOCASE", (name,)
-        ).fetchone()
-        if not row:
+        new_content = _append(conn, name, content)
+        if new_content is None:
             return f"Error: Page '{name}' not found"
-
-        current = row["content"] or ""
-        if current and not current.endswith("\n"):
-            current += "\n"
-        new_content = current + content
-
-        conn.execute(
-            "UPDATE pages SET content=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (new_content, row["id"]),
-        )
-        _sync_refs(conn, row["id"], new_content)
         conn.commit()
         return (
             f"Appended {len(content)} chars to '{name}' "
@@ -308,6 +339,66 @@ def append_to_page(name: str, content: str) -> str:
     except Exception as e:
         conn.rollback()
         return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def append_to_journal(content: str, date: str | None = None) -> str:
+    """Append to a journal page (page name = date, YYYY-MM-DD), creating
+    it if it doesn't exist yet. Defaults to today. Shorthand for
+    "record this right now" without composing the date yourself.
+
+    Args:
+        content: Text to append (supports [[links]], #tags)
+        date: Journal date as YYYY-MM-DD (default: today)
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    elif not re.match(r"^\d{4}-\d{2}-\d{2}$", date.strip()):
+        return "Error: date must look like YYYY-MM-DD"
+    date = date.strip()
+
+    conn = _db()
+    try:
+        new_content = _append(conn, date, content)
+        if new_content is not None:
+            conn.commit()
+            return f"Appended to journal {date} ({len(new_content.splitlines())} lines total)"
+        cur = conn.execute(
+            "INSERT INTO pages (name, content) VALUES (?, ?)", (date, content)
+        )
+        _sync_refs(conn, cur.lastrowid, content)
+        conn.commit()
+        return f"Created journal {date} with {len(content)} chars"
+    except Exception as e:
+        conn.rollback()
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def recently_changed(since: str, limit: int = 50) -> str:
+    """List pages updated after a point in time. Use for incremental
+    sync ("what changed since I last looked").
+
+    Args:
+        since: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' (local time)
+        limit: Max results (default 50)
+    """
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT name, updated_at FROM pages WHERE updated_at > ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (since.strip(), limit),
+        ).fetchall()
+        if not rows:
+            return f"No pages changed since {since}"
+        return f"Changed since {since} ({len(rows)}):\n" + "\n".join(
+            f"- {r['name']} (updated {r['updated_at']})" for r in rows
+        )
     finally:
         conn.close()
 

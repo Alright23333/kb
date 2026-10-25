@@ -20,7 +20,8 @@ kb/
 ├── database.py          # SQLite schema、连接池、FTS/版本触发器
 ├── routers/api.py       # REST API 端点
 ├── parse.py             # Markdown 解析：[[links]]、#tags、key:: value
-├── mcp_server.py        # MCP Server（stdio，15 个工具，供 AI agent 使用）
+├── mcp_server.py        # MCP Server（stdio，17 个工具，供 AI agent 使用）
+├── backup.py            # 自动备份（VACUUM INTO 快照 + 保留策略，应用内后台任务）
 ├── export.py            # 导出 CLI（markdown / json / zip）
 ├── import_logseq.py     # 从 Logseq 文件版导入
 ├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt）
@@ -87,6 +88,7 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 - **引用补全**：`[[` 触发，上下箭头导航，Enter/Tab 选中，失焦安全
 - **标签补全**：`#` 触发，按使用频次排序，与引用补全同一交互
 - 保存 `Ctrl+S`，重命名支持
+- **草稿自动保存**：编辑内容每 30 秒存入 localStorage（与打开时内容不同才存），误关/崩溃后重开编辑器出现恢复条，一键恢复或丢弃；保存成功自动清理
 - **🕘 版本历史**：编辑已有页面时头部按钮，侧滑面板预览 + 一键恢复
 - **🗑️ 删除**：确认弹窗，删除后可从回收站恢复
 - **hover 链接预览**：悬停 `[[链接]]` 300ms 弹出内容摘要卡片（LRU 缓存 20 条），未创建页面可点击直接创建
@@ -278,22 +280,24 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 
 ## MCP Server（AI Agent 接入）
 
-`mcp_server.py` 通过 stdio transport 暴露 15 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
+`mcp_server.py` 通过 stdio transport 暴露 17 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
-| 读 | `search(query)` | FTS 全文搜索（jieba 分词 + 名称相关度重排） |
+| 读 | `search(query)` | FTS 全文搜索（jieba 分词 + 名称相关度重排 + 内容摘要片段，省一次 get_page） |
 | 读 | `get_page(name)` | JSON 返回：`content` 独立字段 + tags/links/backlinks/properties，可安全回喂 `update_page` |
 | 读 | `list_pages()` | 所有页面名 |
 | 读 | `get_recent_pages(limit)` | 最近更新页面 |
+| 读 | `recently_changed(since)` | 某时间点之后改动的页面（增量同步：`2026-10-25` 或带时分秒） |
 | 读 | `get_tags()` | 所有标签 + 计数 |
 | 读 | `get_pages_by_tag(tag)` | 按标签查页面 |
-| 读 | `get_backlinks(name)` | 反向链接 |
+| 读 | `get_backlinks(name)` | 反向链接（含引用原文行） |
 | 写 | `create_page(name, content)` | 创建页面 |
 | 写 | `update_page(name, content)` | 更新页面（整页覆盖） |
 | 写 | `rename_page(old, new)` | 原子改名 + 重写入链 |
 | 写 | `delete_page(name)` | 删除（版本快照保留，可恢复） |
 | 行级 | `append_to_page(name, content)` | 追加写入页尾（自动补换行，避免全文覆盖） |
+| 行级 | `append_to_journal(content, date?)` | 追加到日记页（默认今天，不存在则创建）——AI 记录当下的一步调用 |
 | 行级 | `delete_lines(name, start, end)` | 按行号区间删除（1-based 含端点，返回被删行供核对） |
 | 保险 | `get_page_versions(name)` | 版本历史（已删除页面也可查） |
 | 保险 | `restore_page_version(name, id)` | 恢复旧版本 |
@@ -407,6 +411,16 @@ server {
 
 ### 备份
 
+**自动备份（内置）**：应用启动 60 秒后做第一次快照，之后每 24 小时一次；用 `VACUUM INTO` 原子快照，服务运行中可安全执行，不需要停机。文件在 `<data>/backups/kb-YYYYMMDD-HHMMSS.db`，按时间排序保留最新 N 份。
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `KB_BACKUP_ENABLED` | `1` | 设 `0` 关闭 |
+| `KB_BACKUP_DIR` | `<data>/backups` | 快照目录 |
+| `KB_BACKUP_KEEP` | `30` | 保留份数 |
+
+手动备份（临时另存一份时）：
+
 ```bash
 # 直接复制 SQLite 文件（WAL 模式下先 checkpoint）
 sqlite3 data/kb.db "PRAGMA wal_checkpoint"
@@ -441,7 +455,7 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 - [x] 重命名事务（`PATCH /rename` + refs 冲突预处理）
 - [x] 导入/导出（zip + JSON + CLI）
 - [x] 页面历史（自动快照 + 恢复 + 回收站）
-- [x] MCP Server（15 个工具：读/写/行级修改/版本恢复闭环）
+- [x] MCP Server（17 个工具：读/写/行级修改/版本恢复闭环）
 - [x] 命令面板 `Ctrl+K`（混合搜索 + 前缀指令 + 快速捕获）
 - [x] hover 链接预览（内容卡片 + 一键创建缺失页）
 - [x] `#` 标签补全（与 `[[` 补全同交互）

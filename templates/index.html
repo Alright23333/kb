@@ -420,6 +420,27 @@ code {
 .kb-embed-create:hover { color: var(--accent); }
 .dashboard-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
 .dashboard { margin-bottom: var(--sp-5); }
+/* Draft recovery bar (editor) */
+#draft-bar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  background: var(--accent-dim);
+  font-size: 13px;
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+}
+.draft-btn {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--accent);
+  padding: 3px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.draft-btn:hover { border-color: var(--accent); }
 #backlinks { margin-top: var(--sp-7); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
 #backlinks h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: var(--sp-2); }
 .backlink-item { padding: 10px 4px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
@@ -1228,6 +1249,11 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     <div id="editor">
       <div id="editor-layout">
         <div id="editor-pane">
+          <div id="draft-bar">
+            <span id="draft-msg"></span>
+            <button class="draft-btn" onclick="draftRestore()">恢复</button>
+            <button class="draft-btn" onclick="draftDiscard()">丢弃</button>
+          </div>
           <div id="editor-header">
             <input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">
             <button id="history-btn" class="ebtn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button>
@@ -1862,6 +1888,7 @@ async function deleteCurrentPage() {
     }
     showToast(`已删除「${name}」，可在回收站恢复`);
     invalidateCache();
+    localStorage.removeItem('kb-draft:page:' + name.toLowerCase());
     currentName = null;
     showHome();
   } catch (e) {
@@ -2174,6 +2201,8 @@ function newPage() {
   document.getElementById('editor-pane').style.width = '50%';
   setTimeout(() => cm.refresh(), 0);
   updatePreview();
+  draftBase = '';
+  checkDraft('');
 }
 
 function editPage(page) {
@@ -2196,7 +2225,80 @@ function editPage(page) {
   document.getElementById('editor-pane').style.width = '50%';
   setTimeout(() => cm.refresh(), 0);
   updatePreview();
+  draftBase = page.content;
+  checkDraft(page.content);
 }
+
+// ── Draft autosave (localStorage, every 30s + beforeunload) ──────
+// Keyed by page name (lowercased; '__new__' for untitled). Only written
+// when content differs from what was loaded (draftBase), so merely
+// opening a page never creates a draft. Cleared on successful save/delete.
+
+let draftBase = '';
+
+function draftKey() {
+  if (currentSaveMode === 'journal') return 'kb-draft:journal';
+  const name = document.getElementById('page-name')?.value.trim().toLowerCase();
+  return 'kb-draft:page:' + (name || '__new__');
+}
+
+function draftSave() {
+  if (!cm || document.getElementById('editor').style.display !== 'block') return;
+  const content = cm.getValue();
+  if (!content.trim() || content === draftBase) return;
+  const name = currentSaveMode === 'journal'
+    ? journalDate
+    : document.getElementById('page-name').value.trim();
+  try {
+    localStorage.setItem(draftKey(), JSON.stringify({ name, content, ts: Date.now() }));
+  } catch (e) { /* storage full — drop silently */ }
+}
+
+function _draftMinutes(ts) { return Math.max(1, Math.round((Date.now() - ts) / 60000)); }
+
+function checkDraft(base, keyOverride) {
+  const bar = document.getElementById('draft-bar');
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(keyOverride || draftKey()) || 'null'); } catch (e) {}
+  if (!draft || draft.content === base) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar._draft = draft;
+  const label = currentSaveMode === 'journal'
+    ? `📝 ${draft.name} 的日记草稿（${_draftMinutes(draft.ts)} 分钟前未保存）`
+    : `📝 「${draft.name || '未命名'}」的草稿（${_draftMinutes(draft.ts)} 分钟前未保存）`;
+  document.getElementById('draft-msg').textContent = label;
+  bar.style.display = 'flex';
+}
+
+function draftRestore() {
+  const bar = document.getElementById('draft-bar');
+  const draft = bar._draft;
+  if (!draft) return;
+  if (currentSaveMode === 'journal') {
+    if (draft.name && draft.name !== journalDate) {
+      journalDate = draft.name;
+      const di = document.getElementById('journal-date-input');
+      if (di) di.value = journalDate;
+    }
+  } else if (draft.name) {
+    document.getElementById('page-name').value = draft.name;
+  }
+  cm.setValue(draft.content);
+  draftBase = draft.content;
+  updatePreview();
+  bar.style.display = 'none';
+  showToast('已恢复草稿（记得保存）');
+}
+
+function draftDiscard() {
+  localStorage.removeItem(draftKey());
+  document.getElementById('draft-bar').style.display = 'none';
+}
+
+setInterval(draftSave, 30000);
+window.addEventListener('beforeunload', draftSave);
 
 async function savePage() {
   const name = document.getElementById('page-name').value.trim();
@@ -2232,6 +2334,7 @@ async function savePage() {
 
   if (resp.ok) {
     invalidateCache();
+    localStorage.removeItem(draftKey());
     showToast('保存成功');
     navigate('page', name);
   } else {
@@ -2506,6 +2609,8 @@ async function showJournal(date) {
   document.getElementById('editor-pane').style.width = '50%';
   setTimeout(() => cm.refresh(), 0);
   updatePreview();
+  draftBase = content;
+  checkDraft(content, 'kb-draft:journal');
 }
 
 async function saveJournal() {
@@ -2520,6 +2625,8 @@ async function saveJournal() {
 
   if (resp.ok) {
     invalidateCache();
+    localStorage.removeItem('kb-draft:journal');
+    draftBase = cm.getValue();
     showToast('日记已保存');
   } else {
     const err = await resp.json();
