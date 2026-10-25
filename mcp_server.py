@@ -44,7 +44,7 @@ import sqlite3
 from datetime import datetime
 
 from fastmcp import FastMCP
-from search import build_search_query, rerank_by_name
+from search import build_search_query, rerank_by_name, make_snippet
 
 DB_PATH = os.environ.get("KB_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "kb.db"))
 DB_PATH = os.path.expanduser(DB_PATH)
@@ -57,24 +57,6 @@ def _db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
-
-
-def _snippet(query: str, content: str, width: int = 90) -> str:
-    """First content fragment matching any query term, for search results."""
-    if not content:
-        return ""
-    q = query.strip()
-    terms = [q] + [t for t in re.split(r"\s+", q) if t]
-    hay = content.casefold()
-    for t in terms:
-        i = hay.find(t.casefold())
-        if i >= 0:
-            start = max(0, i - width)
-            end = min(len(content), i + len(t) + width)
-            frag = content[start:end].replace("\n", " ").strip()
-            return ("…" if start > 0 else "") + frag + ("…" if end < len(content) else "")
-    first = content.strip().replace("\n", " ")
-    return first[:120] + ("…" if len(first) > 120 else "")
 
 
 def _append(conn: sqlite3.Connection, name: str, content: str) -> str | None:
@@ -189,7 +171,7 @@ def search(query: str, limit: int = 10) -> str:
             return f"No results for '{query}'"
         ranked = rerank_by_name([dict(r) for r in rows], query)
         return "\n".join(
-            f"- {r['name']} (updated {r['updated_at']})\n  > {_snippet(query, r.get('content', ''))}"
+            f"- {r['name']} (updated {r['updated_at']})\n  > {make_snippet(query, r.get('content', ''))}"
             for r in ranked
         )
     finally:

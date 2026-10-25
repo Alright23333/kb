@@ -144,3 +144,23 @@ def rerank_by_name(rows: list[dict], query: str, name_key: str = "name") -> list
         return best
 
     return sorted(rows, key=tier)
+
+
+def make_snippet(query: str, content: str, width: int = 90) -> str:
+    """Content fragment for search results: the first region matching any
+    query term (whole query, then space-split words), ±width chars.
+    Falls back to the content head. Shared by REST API and MCP search."""
+    if not content:
+        return ""
+    q = query.strip()
+    terms = [q] + [t for t in re.split(r"\s+", q) if t]
+    hay = content.casefold()
+    for t in terms:
+        i = hay.find(t.casefold())
+        if i >= 0:
+            start = max(0, i - width)
+            end = min(len(content), i + len(t) + width)
+            frag = content[start:end].replace("\n", " ").strip()
+            return ("…" if start > 0 else "") + frag + ("…" if end < len(content) else "")
+    first = content.strip().replace("\n", " ")
+    return first[:120] + ("…" if len(first) > 120 else "")

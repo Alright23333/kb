@@ -441,6 +441,63 @@ code {
   white-space: nowrap;
 }
 .draft-btn:hover { border-color: var(--accent); }
+.page-list-item .snippet {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.saved-searches { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--sp-3); }
+.health-overview { font-size: 13px; color: var(--fg); padding: 6px 4px 2px; }
+.health-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 4px 10px; }
+/* TOC */
+.toc-toggle {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  padding: 4px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+.toc-toggle:hover { border-color: var(--accent); color: var(--accent); }
+#toc-list { border-left: 2px solid var(--border); margin: 4px 0 12px; max-height: 40vh; overflow-y: auto; }
+.toc-item {
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toc-item:hover { color: var(--accent); }
+.toc-item.lvl2 { padding-left: 24px; font-size: 12.5px; }
+.toc-item.lvl3 { padding-left: 38px; font-size: 12px; }
+.saved-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  cursor: pointer;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.saved-chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip-x { color: var(--muted); font-size: 11px; }
+.chip-x:hover { color: var(--overdue); }
 /* Keyboard navigation highlight (j/k) */
 .knav-active {
   background: var(--hover);
@@ -1252,6 +1309,10 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
           <a href="#" id="edit-btn-link">编辑</a>
         </div>
         <div class="tags-display" id="page-tags"></div>
+        <div id="toc-bar" style="display:none">
+          <button class="toc-toggle" onclick="toggleToc()">📖 目录 <span id="toc-toggle-hint" style="font-size:12px;color:var(--muted)">（展开）</span></button>
+          <div id="toc-list" style="display:none"></div>
+        </div>
       </div>
       <div id="page-content"></div>
       <div id="backlinks"></div>
@@ -1652,6 +1713,12 @@ async function showHome() {
   }
 
   let html = '';
+  const saved = getSavedSearches();
+  if (saved.length) {
+    html += `<div class="list-col saved-searches">` + saved.map(sv =>
+      `<button class="saved-chip" onclick="doSavedSearch(${JSON.stringify(sv.q).replace(/"/g, '&quot;')})" title="${escapeHtml(sv.q)}">🔎 ${escapeHtml(sv.q)}<span class="chip-x" onclick="event.stopPropagation();removeSavedSearch(event)">✕</span></button>`
+    ).join('') + `</div>`;
+  }
   if (dash) {
     html += `<div class="list-col dashboard">
       <div class="dashboard-toolbar">
@@ -2006,9 +2073,10 @@ async function loadTrash() {
 }
 
 async function computeHealth() {
-  const [graph, allPages] = await Promise.all([
+  const [graph, allPages, tags] = await Promise.all([
     cachedFetch('graph', `${API}/graph`),
     cachedFetch('allPages', `${API}/pages?limit=500`),
+    cachedFetch('tags', `${API}/tags`).catch(() => []),
   ]);
   const nodeSet = new Set(graph.nodes.map(n => n.name.toLowerCase()));
   const updatedMap = {};
@@ -2029,7 +2097,15 @@ async function computeHealth() {
     (brokenMap[k] = brokenMap[k] || { target: e.target, sources: [] }).sources.push(e.source);
   }
   const broken = Object.values(brokenMap).sort((a, b) => b.sources.length - a.sources.length);
-  return { orphans, broken };
+  const weekAgo = Date.now() - 7 * 86400000;
+  const active7 = allPages.filter(p2 => new Date(p2.updated_at.replace(' ', 'T')).getTime() >= weekAgo).length;
+  const stats = {
+    pages: graph.nodes.length,
+    links: graph.edges.filter(e => e.source.toLowerCase() !== e.target.toLowerCase()).length,
+    active7,
+    topTags: (tags || []).slice(0, 8),
+  };
+  return { orphans, broken, stats };
 }
 
 async function toggleHealth() {
@@ -2057,7 +2133,12 @@ async function loadHealth() {
     list.innerHTML = `<div class="empty-hint">体检失败: ${escapeHtml(e.message)}</div>`;
     return;
   }
-  let html = `<div class="time-group">🪺 孤立页（${h.orphans.length}）—— 没有任何页面链接到它们</div>`;
+  let html = `<div class="health-overview">📊 ${h.stats.pages} 页 · ${h.stats.links} 条链接 · 近 7 天活跃 ${h.stats.active7} 页</div>`;
+  if (h.stats.topTags.length) {
+    html += `<div class="health-tags">` + h.stats.topTags.map(t2 =>
+      `<span class="tag-chip" data-tag="${escapeHtml(t2.name)}">#${escapeHtml(t2.name)} ×${t2.count}</span>`).join('') + `</div>`;
+  }
+  html += `<div class="time-group">🪺 孤立页（${h.orphans.length}）—— 没有任何页面链接到它们</div>`;
   if (!h.orphans.length) {
     html += '<div class="health-item src">无 —— 没有孤岛</div>';
   } else {
@@ -2150,6 +2231,7 @@ async function loadPage(name) {
   document.getElementById('page-tags').innerHTML = tagsHtml;
 
   document.getElementById('page-content').innerHTML = renderContent(page.content);
+  buildToc();
   await markUnresolved();
   renderMermaidBlocks(document.getElementById('page-content'));
 
@@ -2165,6 +2247,27 @@ async function loadPage(name) {
     }
   }
   document.getElementById('backlinks').innerHTML = backlinksHtml;
+}
+
+function buildToc() {
+  const headers = [...document.querySelectorAll('#page-content h1, #page-content h2, #page-content h3')];
+  const bar = document.getElementById('toc-bar');
+  if (!bar) return;
+  if (headers.length < 3) { bar.style.display = 'none'; bar.open = false; document.getElementById('toc-list').style.display = 'none'; return; }
+  bar.style.display = '';
+  const list = document.getElementById('toc-list');
+  list.innerHTML = headers.map((h, i) => {
+    h.id = 'toc-h-' + i;
+    const cls = h.tagName === 'H1' ? 'lvl1' : h.tagName === 'H2' ? 'lvl2' : 'lvl3';
+    return `<div class="toc-item ${cls}" onclick="document.getElementById('toc-h-${i}').scrollIntoView({block:'start'})">${escapeHtml(h.textContent)}</div>`;
+  }).join('');
+}
+
+function toggleToc() {
+  const list = document.getElementById('toc-list');
+  const show = list.style.display === 'none';
+  list.style.display = show ? '' : 'none';
+  document.getElementById('toc-toggle-hint').textContent = show ? '（收起）' : '（展开）';
 }
 
 async function markUnresolved(root) {
@@ -2817,6 +2920,33 @@ async function showTagPages(tag) {
   document.getElementById('home-view').innerHTML = html;
 }
 
+// ── Saved searches (localStorage, max 8) ───────────────────────
+
+function getSavedSearches() {
+  try { return JSON.parse(localStorage.getItem('kb-saved-searches') || '[]'); }
+  catch (e) { return []; }
+}
+
+function saveSearch(q) {
+  if (!q) return;
+  const list = getSavedSearches().filter(s => s.q !== q);
+  list.unshift({ q, ts: Date.now() });
+  localStorage.setItem('kb-saved-searches', JSON.stringify(list.slice(0, 8)));
+  showToast('已固定到首页 ✓');
+}
+
+function removeSavedSearch(e) {
+  const chip = e.target.closest('.saved-chip');
+  const q = chip ? chip.title : '';
+  localStorage.setItem('kb-saved-searches', JSON.stringify(getSavedSearches().filter(s => s.q !== q)));
+  showHome();
+}
+
+function doSavedSearch(q) {
+  document.getElementById('search-input').value = q;
+  doSearch();
+}
+
 // ── Search ─────────────────────────────────────────────────────
 
 async function doSearch() {
@@ -2842,7 +2972,8 @@ async function doSearch() {
   }
   pages.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
 
-  let html = `<div class="list-col"><div class="view-title">搜索 "${escapeHtml(q)}" <span class="count">${pages.length}</span></div>`;
+  let html = `<div class="list-col"><div class="view-title">搜索 "${escapeHtml(q)}" <span class="count">${pages.length}</span>
+    <span class="spacer" style="flex:1"></span><button class="btn-imp" onclick="saveSearch(${JSON.stringify(q).replace(/"/g, '&quot;')})">📌 固定此搜索</button></div>`;
   if (pages.length === 0) {
     html += '<div class="empty-hint">没有匹配的结果。<br>换个关键词，或直接输入 [[页面名]] 直达。</div>';
   } else {
@@ -2859,6 +2990,7 @@ async function doSearch() {
       }
       html += `<div class="page-list-item" data-page="${escapeHtml(p.name)}">
         <div class="row"><span class="title">${displayName}</span><span class="meta">${relativeDate(p.updated_at)}</span></div>
+        ${p.snippet ? `<div class="snippet">${escapeHtml(p.snippet)}</div>` : ''}
       </div>`;
     }
   }

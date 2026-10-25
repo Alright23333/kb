@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from database import get_db, DB_PATH
 from parse import parse as parse_content, find_link_lines
-from search import build_search_query, rerank_by_name
+from search import build_search_query, rerank_by_name, make_snippet
 
 router = APIRouter()
 
@@ -96,7 +96,7 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
             rows = await _fetchall(
                 db,
                 """
-                SELECT p.name, p.updated_at, p.created_at
+                SELECT p.name, p.updated_at, p.created_at, p.content
                 FROM pages_fts f JOIN pages p ON p.id = f.rowid
                 WHERE pages_fts MATCH ?
                 ORDER BY rank LIMIT ? OFFSET ?
@@ -104,7 +104,10 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
                 (fts_expr, limit, offset),
             )
             if rows:
-                return rerank_by_name([dict(r) for r in rows], q)
+                ranked = rerank_by_name([dict(r) for r in rows], q)
+                for r in ranked:
+                    r["snippet"] = make_snippet(q, r.pop("content") or "")
+                return ranked
         except Exception:
             pass
 
@@ -120,26 +123,32 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
         rows = await _fetchall(
             db,
             f"""
-            SELECT name, updated_at, created_at FROM pages
+            SELECT name, updated_at, created_at, content FROM pages
             WHERE {' OR '.join(conditions)}
             ORDER BY updated_at DESC LIMIT ? OFFSET ?
             """,
             tuple(params),
         )
-        return rerank_by_name([dict(r) for r in rows], q)
+        ranked = rerank_by_name([dict(r) for r in rows], q)
+        for r in ranked:
+            r["snippet"] = make_snippet(q, r.pop("content") or "")
+        return ranked
 
     # Final fallback: raw query LIKE (for very short input)
     like = f"%{q}%"
     rows = await _fetchall(
         db,
         """
-        SELECT name, updated_at, created_at FROM pages
+        SELECT name, updated_at, created_at, content FROM pages
         WHERE name LIKE ? OR content LIKE ?
         ORDER BY updated_at DESC LIMIT ? OFFSET ?
         """,
         (like, like, limit, offset),
     )
-    return rerank_by_name([dict(r) for r in rows], q)
+    ranked = rerank_by_name([dict(r) for r in rows], q)
+    for r in ranked:
+        r["snippet"] = make_snippet(q, r.pop("content") or "")
+    return ranked
 
 
 async def _rename_page(db: aiosqlite.Connection, page_id: int, old_name: str, new_name: str) -> None:
