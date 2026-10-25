@@ -1010,6 +1010,36 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 .ai-msg a.wikilink.unresolved { color: var(--muted); text-decoration: underline dotted; }
 .ai-cursor { display: inline-block; width: 7px; height: 14px; vertical-align: -2px; background: var(--accent); animation: aiBlink 1s steps(2) infinite; margin-left: 2px; }
 @keyframes aiBlink { 50% { opacity: 0; } }
+.ai-cites { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
+.ai-cites .cite-chip {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 1px 9px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.ai-cites .cite-chip::before { content: '📄 '; opacity: 0.7; }
+.ai-msg-actions { margin-top: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ai-msg-actions button {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border-soft);
+  padding: 2px 9px;
+  border-radius: var(--r-sm);
+}
+.ai-msg-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.ai-msg-actions input { font-size: 12px; padding: 3px 8px; width: 200px; }
+.ai-msg-actions .saved-link { font-size: 12px; color: var(--accent); }
+.ai-presets { display: flex; gap: 6px; padding: 6px var(--sp-4) 0; flex-wrap: wrap; }
+.ai-presets button {
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 11px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+}
+.ai-presets button:hover { border-color: var(--accent); color: var(--accent); }
 .ai-empty { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 40px; line-height: 2; }
 .ai-inputbar {
   display: flex;
@@ -1071,6 +1101,21 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 .ls-reason { color: var(--muted); font-size: 12px; flex: 1 1 100%; }
 .ls-apply { margin-left: auto; border: 1px solid var(--border); padding: 3px 12px; border-radius: var(--r-sm); font-size: 12px; flex-shrink: 0; }
 .ls-apply:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Batch AI link scan (体检区) */
+.scan-status { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+.scan-start-btn {
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 5px 14px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  margin: 4px 0;
+}
+.scan-start-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.scan-group { margin: 10px 0 2px; }
+.scan-group .scan-page-name { font-size: 13px; font-weight: 500; color: var(--accent); cursor: pointer; }
+.scan-group .ls-row { border-top: none; border-left: 2px solid var(--border-soft); padding-left: 10px; margin: 2px 0; }
 
 /* ═══════════════ Command palette ═══════════════ */
 #palette-overlay {
@@ -1542,9 +1587,13 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
   </div>
   <div class="ai-ctx" id="ai-ctx-row">
     <label><input type="checkbox" id="ai-use-page" checked> 引用当前页面</label>
+    <label><input type="checkbox" id="ai-use-journal"> 含最近7天日记</label>
     <span id="ai-ctx-name"></span>
   </div>
   <div class="ai-msgs" id="ai-msgs"></div>
+  <div class="ai-presets">
+    <button onclick="aiPresetDigest()">📅 本周总结</button>
+  </div>
   <div class="ai-inputbar" id="ai-inputbar">
     <textarea id="ai-input" placeholder="问点什么… Enter 发送,Shift+Enter 换行"></textarea>
     <button id="ai-send" onclick="aiSend()">发送</button>
@@ -2332,7 +2381,11 @@ async function loadHealth() {
       </div>`;
     }
   }
+  if (aiStatus && aiStatus.enabled) {
+    html += `<div class="time-group">✨ AI 建链扫描</div><div id="ai-scan-box"></div>`;
+  }
   list.innerHTML = html;
+  renderAiScan();
 }
 
 async function restoreFromTrash(name, versionId) {
@@ -5001,9 +5054,14 @@ document.addEventListener('keydown', (e) => {
 // ── AI assistant: 问(chat) / 写(selection edit) / 连(link suggest) ──
 
 let aiStatus = null;      // {enabled, model, provider} from /api/ai/status
-let aiChat = [];          // [{role:'user'|'assistant', content}]
+let aiChat = [];          // [{role:'user'|'assistant', content, cites?:[name], error?:bool}]
 let aiBusy = false;       // a stream is in flight
 let viewingPage = null;   // page currently shown in #page-view (not editor)
+const AI_CHAT_KEY = 'kb-ai-chat';
+
+function aiPersist() {
+  try { localStorage.setItem(AI_CHAT_KEY, JSON.stringify(aiChat.slice(-40))); } catch (e) {}
+}
 
 async function initAi() {
   try {
@@ -5011,6 +5069,10 @@ async function initAi() {
     if (resp.ok) aiStatus = await resp.json();
   } catch (e) { /* AI backend unreachable → stay disabled */ }
   if (!aiStatus) aiStatus = { enabled: false, model: '' };
+  try {
+    const saved = JSON.parse(localStorage.getItem(AI_CHAT_KEY) || '[]');
+    if (Array.isArray(saved)) aiChat = saved.filter(m => m && m.role && m.content);
+  } catch (e) { /* corrupted storage → start fresh */ }
   const btn = document.getElementById('ai-btn');
   if (aiStatus.enabled) {
     btn.classList.add('on');
@@ -5059,6 +5121,7 @@ function toggleAiPanel() {
 
 function aiClearChat() {
   aiChat = [];
+  aiPersist();
   aiRenderMessages();
 }
 
@@ -5069,6 +5132,19 @@ function aiRenderInputState() {
   input.disabled = aiBusy;
 }
 
+function aiCitesHtml(cites) {
+  if (!cites || !cites.length) return '';
+  const chips = cites.slice(0, 12).map(n =>
+    `<span class="cite-chip" data-page="${escapeHtml(n)}" title="本回答引用的页面">${escapeHtml(n)}</span>`).join('');
+  return `<div class="ai-cites">${chips}</div>`;
+}
+
+function aiActionsHtml(idx) {
+  return `<div class="ai-msg-actions" id="ai-actions-${idx}">
+    <button onclick="aiShowSaveInput(${idx})">📄 存为页面</button>
+  </div>`;
+}
+
 function aiRenderMessages(streamEl) {
   const box = document.getElementById('ai-msgs');
   box.innerHTML = '';
@@ -5076,15 +5152,75 @@ function aiRenderMessages(streamEl) {
     box.innerHTML = '<div class="ai-empty">问点什么,例如:<br>「我最近在关注什么?」<br>「XX 和 YY 有什么关系?」</div>';
     return;
   }
-  for (const m of aiChat) {
+  aiChat.forEach((m, idx) => {
     const div = document.createElement('div');
     div.className = 'ai-msg ' + m.role + (m.error ? ' error' : '');
-    if (m.role === 'user') div.textContent = m.content;
-    else { div.innerHTML = renderContent(m.content); markUnresolved(div); }
+    if (m.role === 'user') {
+      div.textContent = m.content;
+    } else {
+      let inner = aiCitesHtml(m.cites);
+      if (m.error) inner += escapeHtml(m.content);
+      else inner += `<div class="ai-msg-body">${renderContent(m.content)}</div>`;
+      if (!m.error) inner += aiActionsHtml(idx);
+      div.innerHTML = inner;
+      if (!m.error) markUnresolved(div);
+    }
     box.appendChild(div);
-  }
+  });
   if (streamEl) box.appendChild(streamEl);
   box.scrollTop = box.scrollHeight;
+}
+
+function aiShowSaveInput(idx) {
+  const row = document.getElementById('ai-actions-' + idx);
+  if (!row) return;
+  const m = aiChat[idx];
+  const journalCtx = document.getElementById('ai-use-journal').checked;
+  const today = new Date().toISOString().slice(0, 10);
+  const defName = (journalCtx ? '周报-' : 'AI-笔记-') + today;
+  row.innerHTML = `<input type="text" value="${escapeHtml(defName)}" id="ai-save-name-${idx}"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();aiDoSavePage(${idx})}">
+    <button onclick="aiDoSavePage(${idx})">保存</button>
+    <button onclick="aiRenderMessages()">取消</button>`;
+  const input = document.getElementById('ai-save-name-' + idx);
+  input.focus();
+  input.select();
+}
+
+async function aiDoSavePage(idx) {
+  const m = aiChat[idx];
+  const input = document.getElementById('ai-save-name-' + idx);
+  const name = input && input.value.trim();
+  const row = document.getElementById('ai-actions-' + idx);
+  if (!m || !name || !row) return;
+  try {
+    const resp = await fetch(`${API}/pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content: m.content }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(err.detail || '保存失败', 'error');
+      return;
+    }
+    invalidateCache();
+    allNames = null;
+    row.innerHTML = `<span class="saved-link">✓ 已保存 </span><a href="#" data-page="${escapeHtml(name)}">${escapeHtml(name)}</a>`;
+    showToast(`✓ 已保存为页面「${name}」`);
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+function aiPresetDigest() {
+  const panel = document.getElementById('ai-panel');
+  if (!panel.classList.contains('open')) toggleAiPanel();
+  if (!aiStatus.enabled || aiBusy) return;
+  document.getElementById('ai-use-journal').checked = true;
+  document.getElementById('ai-input').value =
+    '根据下面的日记上下文,总结我最近 7 天:做了什么、在推进什么、有什么值得注意的变化。用要点输出,直接可保存为周报。';
+  aiSend();
 }
 
 async function aiSend() {
@@ -5094,6 +5230,7 @@ async function aiSend() {
   if (!text) return;
   input.value = '';
   aiChat.push({ role: 'user', content: text });
+  aiPersist();
   aiBusy = true;
   aiRenderInputState();
 
@@ -5106,11 +5243,17 @@ async function aiSend() {
   box.scrollTop = box.scrollHeight;
 
   let acc = '';
+  let cites = null;
   let lastPaint = 0;
   const usePage = document.getElementById('ai-use-page').checked;
+  const useJournal = document.getElementById('ai-use-journal').checked;
   const page = usePage ? aiContextPage() : null;
   const history = aiChat.slice(0, -1).concat([]);  // previous turns
-  const payload = { messages: [...history, { role: 'user', content: text }], page };
+  const payload = {
+    messages: [...history, { role: 'user', content: text }],
+    page,
+    journal_days: useJournal ? 7 : null,
+  };
 
   try {
     const resp = await fetch(`${API}/ai/chat`, {
@@ -5137,12 +5280,16 @@ async function aiSend() {
         if (!frame.startsWith('data:')) continue;
         let obj;
         try { obj = JSON.parse(frame.slice(5).trim()); } catch (e) { continue; }
+        if (obj.context_pages) {
+          cites = obj.context_pages;
+          bubble.innerHTML = aiCitesHtml(cites) + '<span class="ai-cursor"></span>';
+        }
         if (obj.delta) {
           acc += obj.delta;
           const now = performance.now();
           if (now - lastPaint > 120) {   // throttle markdown re-render
             lastPaint = now;
-            bubble.innerHTML = renderContent(acc) + '<span class="ai-cursor"></span>';
+            bubble.innerHTML = aiCitesHtml(cites) + renderContent(acc) + '<span class="ai-cursor"></span>';
             markUnresolved(bubble);
             box.scrollTop = box.scrollHeight;
           }
@@ -5152,10 +5299,12 @@ async function aiSend() {
       }
     }
     if (errMsg) throw new Error(errMsg);
-    aiChat.push({ role: 'assistant', content: acc || '（空回复）' });
+    aiChat.push({ role: 'assistant', content: acc || '（空回复）', cites: cites || [] });
+    aiPersist();
     aiRenderMessages();
   } catch (e) {
     aiChat.push({ role: 'assistant', content: String(e.message || e), error: true });
+    aiPersist();
     aiRenderMessages();
   } finally {
     aiBusy = false;
@@ -5345,6 +5494,102 @@ async function applyLinkSuggestion(i) {
     showToast(`✓ 已链接 [[${s.target}]]`);
     await loadPage(linkSuggest.name);   // reload to show the new link
     renderLinkSuggestCard();            // loadPage clears the card — re-render rest
+  } catch (e) {
+    showToast('应用失败: ' + e.message, 'error');
+  }
+}
+
+// ── 连+: batch AI link scan (体检区) ─────────────────────────────
+
+let linkScan = null;        // {status, done, total, results:[{name, suggestions}]}
+let scanPollTimer = null;
+
+async function startAiScan() {
+  if (!aiStatus || !aiStatus.enabled) return;
+  try {
+    const resp = await fetch(`${API}/ai/links/scan`, { method: 'POST' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    linkScan = await resp.json();
+    renderAiScan();
+    startScanPoll();
+  } catch (e) {
+    showToast('扫描启动失败: ' + e.message, 'error');
+  }
+}
+
+function startScanPoll() {
+  clearInterval(scanPollTimer);
+  scanPollTimer = setInterval(async () => {
+    try {
+      const resp = await fetch(`${API}/ai/links/scan`);
+      if (!resp.ok) return;
+      linkScan = await resp.json();
+      renderAiScan();
+      if (linkScan.status !== 'running') { clearInterval(scanPollTimer); scanPollTimer = null; }
+    } catch (e) { /* transient */ }
+  }, 1500);
+}
+
+function renderAiScan() {
+  const box = document.getElementById('ai-scan-box');
+  if (!box) return;
+  if (!aiStatus || !aiStatus.enabled) { box.innerHTML = ''; return; }
+  if (!linkScan || linkScan.status === 'idle') {
+    box.innerHTML = '<button class="scan-start-btn" onclick="startAiScan()">✨ AI 扫全库建链建议</button>' +
+      '<div class="scan-status">逐页分析内容与全库页面名,找出「提到了但没建链」的概念(最近改动的 40 页内)。</div>';
+    return;
+  }
+  if (linkScan.status === 'running') {
+    if (!scanPollTimer) startScanPoll();   // fold re-opened mid-scan → resume polling
+    box.innerHTML = `<div class="scan-status">⏳ 扫描中 ${linkScan.done}/${linkScan.total} 页…</div>`;
+    return;
+  }
+  // done
+  clearInterval(scanPollTimer);
+  scanPollTimer = null;
+  const totalSuggestions = linkScan.results.reduce((n, g) => n + g.suggestions.length, 0);
+  let html = `<div class="scan-status">✓ 扫描完成:${linkScan.results.length} 页 · ${totalSuggestions} 条建议
+    <button class="scan-start-btn" style="margin-left:10px;padding:2px 10px" onclick="startAiScan()">重扫</button></div>`;
+  if (!totalSuggestions) {
+    html += '<div class="empty-hint">没有发现可建链接 —— 图谱已经很密了</div>';
+  } else {
+    linkScan.results.forEach((g, gi) => {
+      const rows = g.suggestions.map((s, si) => `
+        <div class="ls-row">
+          <span class="ls-anchor" title="${escapeHtml(s.anchor)}">${escapeHtml(s.anchor)}</span>
+          <span class="ls-arrow">→</span>
+          <span class="ls-target">${escapeHtml(s.target)}</span>
+          <button class="ls-apply" onclick="applyScanSuggestion(${gi},${si})">应用</button>
+          ${s.reason ? `<span class="ls-reason">${escapeHtml(s.reason)}</span>` : ''}
+        </div>`).join('');
+      html += `<div class="scan-group">
+        <span class="scan-page-name" data-page="${escapeHtml(g.name)}">${escapeHtml(g.name)}</span>
+        ${rows}
+      </div>`;
+    });
+  }
+  box.innerHTML = html;
+}
+
+async function applyScanSuggestion(gi, si) {
+  const g = linkScan && linkScan.results[gi];
+  const s = g && g.suggestions[si];
+  if (!s) return;
+  try {
+    const resp = await fetch(`${API}/ai/links/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: g.name, anchor: s.anchor, target: s.target }),
+    });
+    if (resp.status !== 422 && !resp.ok) throw new Error('HTTP ' + resp.status);
+    g.suggestions.splice(si, 1);
+    if (!g.suggestions.length) linkScan.results.splice(gi, 1);
+    if (resp.ok) {
+      invalidateCache();
+      showToast(`✓ 已链接 [[${s.target}]]`);
+      if (viewingPage === g.name) await loadPage(g.name);
+    }
+    renderAiScan();
   } catch (e) {
     showToast('应用失败: ' + e.message, 'error');
   }

@@ -13,6 +13,7 @@ Config (env):
 - KB_AI_BASE_URL  — default https://open.bigmodel.cn/api/paas/v4 (GLM)
 - KB_AI_MODEL     — default glm-4-flash (free tier)
 """
+import datetime
 import json
 import os
 import re
@@ -177,9 +178,17 @@ async def _search_pages(q: str, limit: int) -> list[tuple[str, str]]:
         await db.close()
 
 
-async def build_chat_context(question: str, current_page: str | None) -> str:
-    """Assemble the grounded-context block injected as the system message."""
+async def build_chat_context(
+    question: str, current_page: str | None, journal_days: int | None = None
+) -> dict:
+    """Assemble the grounded-context block + the pages it used (citation chips).
+
+    Returns {"text": str, "pages": [name, ...]}. Sources, in order:
+    current page → recent journal entries (journal_days) → keyword retrieval.
+    """
     blocks: list[str] = []
+    pages_used: list[str] = []
+    cited = set()
 
     if current_page:
         db = await get_db()
@@ -192,17 +201,42 @@ async def build_chat_context(question: str, current_page: str | None) -> str:
             await db.close()
         if row:
             blocks.append(f"【当前页面:{row['name']}】\n{(row['content'] or '')[:4000]}")
+            pages_used.append(row["name"])
+            cited.add(row["name"].casefold())
+
+    if journal_days:
+        cutoff = (datetime.date.today() - datetime.timedelta(days=journal_days - 1)).isoformat()
+        db = await get_db()
+        try:
+            cur = await db.execute(
+                """SELECT name, content FROM pages
+                   WHERE name GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                     AND name >= ?
+                   ORDER BY name DESC LIMIT 10""",
+                (cutoff,),
+            )
+            rows = await cur.fetchall()
+        finally:
+            await db.close()
+        if rows:
+            entries = "\n\n".join(f"### {r['name']}\n{(r['content'] or '')[:1500]}" for r in rows)
+            blocks.append(f"【最近 {journal_days} 天日记】\n{entries}")
+            for r in rows:
+                pages_used.append(r["name"])
+                cited.add(r["name"].casefold())
+        else:
+            blocks.append(f"【最近 {journal_days} 天日记】（该时间段没有日记页面）")
 
     hits = await _search_pages(question, limit=4)
-    cited = {current_page.casefold()} if current_page else set()
     others = [(n, c) for n, c in hits if n.casefold() not in cited]
     if others:
         pages = "\n\n".join(f"### {n}\n{c[:1200]}" for n, c in others)
         blocks.append(f"【检索到的相关页面】\n{pages}")
+        pages_used.extend(n for n, _ in others)
 
     if not blocks:
-        return "（知识库为空或没有检索到相关内容）"
-    return "\n\n".join(blocks)
+        return {"text": "（知识库为空或没有检索到相关内容）", "pages": []}
+    return {"text": "\n\n".join(blocks), "pages": pages_used}
 
 
 CHAT_SYSTEM = """你是用户个人知识库(KB)的内置 AI 助手。规则:

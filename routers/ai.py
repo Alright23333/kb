@@ -1,5 +1,6 @@
 """AI endpoints: status, grounded chat (SSE stream), editor actions,
-link suggestions + apply. All read their config from ai.py env vars."""
+link suggestions + apply + batch scan. All read their config from ai.py env vars."""
+import asyncio
 import json
 from typing import Optional
 
@@ -33,6 +34,7 @@ async def ai_status():
 class ChatIn(BaseModel):
     messages: list[dict]
     page: Optional[str] = None
+    journal_days: Optional[int] = None
 
 
 @router.post("/chat")
@@ -48,15 +50,32 @@ async def ai_chat(body: ChatIn):
     if not clean or clean[-1]["role"] != "user":
         raise HTTPException(422, "最后一条消息必须是用户消息")
 
-    last_user = clean[-1]["content"]
-    try:
-        context = await ai.build_chat_context(last_user, body.page)
-    except Exception as e:  # retrieval must never kill the chat
-        context = f"（检索失败:{e}）"
+    # Retrieval query: last 2 user messages joined, so follow-ups like
+    # "那第二点展开讲讲" still carry the original topic's keywords.
+    user_msgs = [m["content"] for m in clean if m["role"] == "user"]
+    retrieval_query = " ".join(user_msgs[-2:])
 
-    full = [{"role": "system", "content": ai.CHAT_SYSTEM + context}] + clean
+    journal_days = body.journal_days
+    if journal_days is not None:
+        journal_days = max(1, min(30, journal_days))
+
+    try:
+        ctx = await ai.build_chat_context(retrieval_query, body.page, journal_days)
+    except Exception as e:  # retrieval must never kill the chat
+        ctx = {"text": f"（检索失败:{e}）", "pages": []}
+
+    full = [{"role": "system", "content": ai.CHAT_SYSTEM + ctx["text"]}] + clean
 
     async def gen():
+        # First frame: the pages this answer is grounded on (citation chips)
+        yield (
+            "data: "
+            + json.dumps(
+                {"context_pages": ctx["pages"], "current_page": body.page},
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
         try:
             async for delta in ai.chat_stream(full):
                 yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
@@ -157,3 +176,50 @@ async def ai_links_apply(body: LinkApplyIn):
     finally:
         await db.close()
     return {"content": new_content}
+
+
+# ── 连+: batch link scan over the whole library ───────────────────
+# Module-level state: single-process app, one scan at a time. Restart → idle.
+
+_scan_state = {"status": "idle", "done": 0, "total": 0, "results": []}
+_SCAN_PAGE_CAP = 40
+_SCAN_MIN_CONTENT = 80
+
+
+async def _scan_loop(pages: list[dict], all_names: list[str]) -> None:
+    for p in pages:
+        try:
+            suggestions = await ai.suggest_links(p["name"], p["content"], all_names)
+        except AIError:
+            suggestions = []
+        if suggestions:
+            _scan_state["results"].append({"name": p["name"], "suggestions": suggestions})
+        _scan_state["done"] += 1
+    _scan_state["status"] = "done"
+
+
+@router.post("/links/scan")
+async def ai_links_scan_start():
+    _require_enabled()
+    if _scan_state["status"] == "running":
+        return _scan_state
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT name, content FROM pages
+               WHERE length(content) >= ? ORDER BY updated_at DESC LIMIT ?""",
+            (_SCAN_MIN_CONTENT, _SCAN_PAGE_CAP),
+        )
+        pages = [{"name": r["name"], "content": r["content"] or ""} for r in await cur.fetchall()]
+        cur = await db.execute("SELECT name FROM pages")
+        all_names = [r["name"] for r in await cur.fetchall()]
+    finally:
+        await db.close()
+    _scan_state.update(status="running", done=0, total=len(pages), results=[])
+    asyncio.create_task(_scan_loop(pages, all_names))
+    return _scan_state
+
+
+@router.get("/links/scan")
+async def ai_links_scan_status():
+    return _scan_state
