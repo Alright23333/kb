@@ -92,6 +92,14 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - api.py (`_search`) 和 mcp_server.py (`search`) 都调用此函数
 - 修改搜索逻辑时只改此函数，两处调用者自动生效
 
+### `ai.py` + `routers/ai.py` — AI 助手（ai-native 分支）
+
+- `ai.py`：OpenAI 兼容客户端（`chat` 非流式 / `chat_stream` SSE）+ RAG-lite 上下文构建（jieba 分词→FTS/LIKE 检索 top4 + 当前页全文）+ 链接建议（`suggest_links` 提议→服务端硬校验 / `apply_link` 安全替换）
+- 配置：`KB_AI_API_KEY`（空=全部禁用）/ `KB_AI_BASE_URL`（默认智谱）/ `KB_AI_MODEL`（默认 glm-4-flash）
+- 端点在 `routers/ai.py`：`GET /ai/status`、`POST /ai/chat`（SSE，注意 `X-Accel-Buffering: no` 头，nginx 代理下必须）、`POST /ai/edit`、`POST /ai/links`、`POST /ai/links/apply`（复用 `routers.api._sync` 同步 refs）
+- **设计铁律：LLM 输出一律过服务端硬校验，永远不直接写库**（anchor 必须逐字存在且不在代码块/已有 wikilink 内、target 必须存在且未链接过）
+- 测试：`scripts/mock_llm_server.py`（容器内 :8011，按 system prompt 前缀路由 canned 回答）；设计文档 `docs/ai-native.md`
+
 ## 常见陷阱
 
 ### 1. refs UNIQUE 约束冲突
@@ -217,6 +225,13 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 - `md.inline.ruler.before(名字, ...)` 在**名字对应的规则不存在时直接 throw**，会杀死整个 `<script>`（症状：首载白屏但函数手动调用正常——函数声明提升仍在）。新增规则注册时必须放在被引用规则**注册语句之后**（`kbembed` 的注册在 wikilink 之后，靠 `before('wikilink')` 插到它前面——先定义 `kbEmbedRule` 函数再注册，就是这个原因）。
 - 嵌入引用 `![[页面]]`：inline 规则只输出 `.kb-embed` 占位 div，内容由 `fillEmbeds(root, depth)` 异步拉取填充（`cachedFetch`），depth ≥ 2 显示"层级上限"防循环；缺失页占位 `.kb-embed-create` 走全局 `data-create` 委托（newPage + 预填名字）。
 - 首页看板：`showHome` 先试 `getDashboardPage()`（localStorage `kb-dashboard-page`，空 = 禁用），存在则渲染 + `fillEmbeds` + `renderMermaidBlocks`。看板就是普通页面，没有专用 API。
+
+### 23. AI 集成的四个坑（ai-native 分支实测）
+
+- **`get_db()` 不是 async context manager**：它是返回连接的协程。`async with get_db()` 会抛 `TypeError: 'coroutine' object does not support the asynchronous context manager protocol`（症状：500）。正确写法：`db = await get_db()` + `try/finally: await db.close()`。
+- **wikilink 方向是 `[[页面名|显示文本]]`——target 在竖线前面**。`apply_link` 曾写成 `[[anchor|target]]` 导致 alias 被当链接目标、refs 指向不存在的页。改名/写链接生成逻辑时永远 target-first。
+- **mock LLM 的分支路由必须用 system prompt 前缀匹配**：chat 的 system prompt 里嵌着检索到的页面全文，正文若含"续写/润色"等关键词会撞上 `in system` 判断——必须用 `startswith` 且 chat 分支最先判。
+- **IAB 测试环境两个怪癖**：① 长百分号编码 URL 会被截断（`/edit/AI-%E9%93%BE…` 变 `/edit/A`，触发 404 → 跳首页），测编辑器用短 ASCII 页名；② IAB 的 playwright click 管线对 `#ai-edit-bar`（fixed 定位运行时定位的元素）会无限等待 actionability（几何/命中测试均正常仍超时）——验证功能用 `element.click()` 程序化触发，不代表真实浏览器有 bug。
 
 ## 修改流程
 

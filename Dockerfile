@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir fastapi uvicorn aiosqlite python-multipart fastmcp jieba
+RUN pip install --no-cache-dir fastapi uvicorn aiosqlite python-multipart fastmcp jieba httpx
 
 # Copy application
 COPY . .

@@ -935,6 +935,143 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 }
 .vp-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ═══ AI assistant (问/写/连) ═══ */
+#ai-panel {
+  position: fixed;
+  top: 0; bottom: 0; right: 0;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  transform: translateX(100%);
+  transition: transform 0.22s var(--ease);
+  display: flex;
+  flex-direction: column;
+  z-index: 500;
+}
+#ai-panel.open { transform: translateX(0); }
+.ai-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.ai-head .actions { display: flex; gap: 2px; }
+.ai-head .actions button { color: var(--muted); font-size: 12px; padding: 2px 6px; }
+.ai-head .actions button:hover { color: var(--fg); }
+.ai-model { color: var(--muted); font-size: 11px; margin-left: 8px; font-family: var(--font-mono); }
+.ai-ctx {
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-ctx label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.ai-ctx .ctx-page { color: var(--accent); }
+.ai-msgs {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ai-msg {
+  max-width: 94%;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.ai-msg.user { align-self: flex-end; background: var(--accent-dim); }
+.ai-msg.assistant { align-self: flex-start; background: var(--hover); border: 1px solid var(--border-soft); }
+.ai-msg.assistant.error { border-color: var(--overdue); color: var(--overdue); }
+.ai-msg p { margin: 0 0 6px; }
+.ai-msg p:last-child { margin: 0; }
+.ai-msg pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.ai-msg code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-soft); padding: 1px 4px; border-radius: 3px; }
+.ai-msg ul, .ai-msg ol { padding-left: 18px; margin: 4px 0; }
+.ai-msg a.wikilink { color: var(--accent); }
+.ai-msg a.wikilink.unresolved { color: var(--muted); text-decoration: underline dotted; }
+.ai-cursor { display: inline-block; width: 7px; height: 14px; vertical-align: -2px; background: var(--accent); animation: aiBlink 1s steps(2) infinite; margin-left: 2px; }
+@keyframes aiBlink { 50% { opacity: 0; } }
+.ai-empty { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 40px; line-height: 2; }
+.ai-inputbar {
+  display: flex;
+  gap: 8px;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  align-items: flex-end;
+}
+#ai-input { flex: 1; resize: none; height: 60px; font-size: 13px; }
+#ai-send {
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--r-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+#ai-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.ai-setup { padding: var(--sp-5) var(--sp-4); color: var(--muted); font-size: 13px; line-height: 1.9; }
+.ai-setup code { font-family: var(--font-mono); font-size: 12px; background: var(--hover); padding: 1px 6px; border-radius: var(--r-sm); }
+.ai-setup .steps { margin-top: 10px; }
+
+/* Editor selection toolbar (写) */
+#ai-edit-bar {
+  position: fixed;
+  z-index: 600;
+  display: none;
+  gap: 2px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: 4px;
+  align-items: center;
+}
+#ai-edit-bar button { padding: 5px 10px; font-size: 12px; border-radius: var(--r-sm); }
+#ai-edit-bar button:hover { background: var(--accent-dim); color: var(--accent); }
+#ai-edit-bar button:disabled { opacity: 0.5; cursor: wait; }
+#ai-edit-bar .sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 3px; }
+#ai-edit-bar input { display: none; font-size: 12px; padding: 4px 8px; width: 180px; }
+#ai-edit-bar.custom input { display: inline-block; }
+#ai-btn.on { color: var(--accent); border-color: var(--accent); }
+
+/* Post-save link suggestions (连) */
+#link-suggest-card {
+  margin: 0 0 var(--sp-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  font-size: 13px;
+}
+#link-suggest-card .ls-title { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; margin-bottom: 4px; }
+#link-suggest-card .ls-title button { margin-left: auto; color: var(--muted); font-size: 12px; }
+#link-suggest-card .ls-title button:hover { color: var(--fg); }
+.ls-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--border-soft); flex-wrap: wrap; }
+.ls-anchor { background: var(--tag-dim); color: var(--tag); padding: 1px 7px; border-radius: var(--r-sm); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-arrow { color: var(--muted); }
+.ls-target { color: var(--accent); font-weight: 500; }
+.ls-reason { color: var(--muted); font-size: 12px; flex: 1 1 100%; }
+.ls-apply { margin-left: auto; border: 1px solid var(--border); padding: 3px 12px; border-radius: var(--r-sm); font-size: 12px; flex-shrink: 0; }
+.ls-apply:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ═══════════════ Command palette ═══════════════ */
 #palette-overlay {
   position: fixed; inset: 0;
@@ -1061,6 +1198,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
   #header > button:not(#hamburger) { flex-shrink: 0; }
   #search-btn, #new-btn { padding: 6px 10px; font-size: 12px; order: 2; }
   #theme-toggle { order: 2; padding: 6px 8px; font-size: 14px; }
+  #ai-btn { order: 2; padding: 6px 8px; font-size: 14px; }
 
   /* Editing: top bar collapses to hamburger only */
   #header.compact { padding: 8px 12px; gap: 8px; flex-wrap: nowrap; }
@@ -1258,6 +1396,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     <button id="search-btn" class="hbtn" onclick="doSearch()">搜索</button>
     <button id="new-btn" class="hbtn primary" onclick="newPage()">+ 新页面</button>
     <button id="theme-toggle" class="hbtn" title="切换主题">🌙</button>
+    <button id="ai-btn" class="hbtn" title="AI 助手" onclick="toggleAiPanel()">✨</button>
   </div>
 
   <div id="content">
@@ -1314,6 +1453,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
           <div id="toc-list" style="display:none"></div>
         </div>
       </div>
+      <div id="link-suggest-card" style="display:none"></div>
       <div id="page-content"></div>
       <div id="backlinks"></div>
     </div>
@@ -1390,6 +1530,34 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
   <div class="vp-actions">
     <button id="vp-restore-btn" onclick="restoreSelectedVersion()" disabled>恢复此版本</button>
   </div>
+</div>
+<!-- AI chat panel (问) -->
+<div id="ai-panel">
+  <div class="ai-head">
+    <strong>✨ AI 助手<span class="ai-model" id="ai-model-name"></span></strong>
+    <div class="actions">
+      <button onclick="aiClearChat()" title="清空对话">清空</button>
+      <button onclick="toggleAiPanel()" title="关闭">✕</button>
+    </div>
+  </div>
+  <div class="ai-ctx" id="ai-ctx-row">
+    <label><input type="checkbox" id="ai-use-page" checked> 引用当前页面</label>
+    <span id="ai-ctx-name"></span>
+  </div>
+  <div class="ai-msgs" id="ai-msgs"></div>
+  <div class="ai-inputbar" id="ai-inputbar">
+    <textarea id="ai-input" placeholder="问点什么… Enter 发送,Shift+Enter 换行"></textarea>
+    <button id="ai-send" onclick="aiSend()">发送</button>
+  </div>
+</div>
+<!-- AI editor selection toolbar (写) -->
+<div id="ai-edit-bar">
+  <button onclick="aiEditAction('polish')">✨ 润色</button>
+  <button onclick="aiEditAction('continue')">续写</button>
+  <button onclick="aiEditAction('summarize')">总结</button>
+  <span class="sep"></span>
+  <button onclick="aiToggleCustomEdit()" title="自定义指令">✎</button>
+  <input type="text" id="ai-custom-input" placeholder="指令,如:改成更口语的风格">
 </div>
 <!-- Command palette -->
 <div id="palette-overlay">
@@ -2223,6 +2391,8 @@ async function loadPage(name) {
   }
 
   document.getElementById('page-view').style.display = 'block';
+  viewingPage = page.name;
+  updateAiCtx();
   document.getElementById('page-name-display').textContent = page.name;
   document.getElementById('page-date').textContent = `${relativeDate(page.updated_at)} 更新`;
   document.getElementById('edit-btn-link').onclick = (e) => { e.preventDefault(); editPage(page); };
@@ -2247,6 +2417,7 @@ async function loadPage(name) {
     }
   }
   document.getElementById('backlinks').innerHTML = backlinksHtml;
+  renderLinkSuggestCard();   // re-show pending suggestions after navigation
 }
 
 function buildToc() {
@@ -2392,6 +2563,8 @@ function initCM(textareaEl, opts) {
     previewEl.scrollTop = pct * previewMax;
     requestAnimationFrame(() => { isSyncing = false; });
   });
+
+  aiBindSelectionToolbar();
 
   // Draggable divider
   const divider = document.getElementById('divider');
@@ -2602,6 +2775,7 @@ async function savePage() {
     localStorage.removeItem(draftKey());
     showToast('保存成功');
     navigate('page', name);
+    if (currentSaveMode === 'page') maybeRequestLinkSuggestions(name, content);
   } else {
     const err = await resp.json();
     showToast(err.detail || '保存失败', 'error');
@@ -4093,6 +4267,8 @@ function hideAll() {
   document.getElementById('graph-view').style.display = 'none';
   document.getElementById('page-view').style.display = 'none';
   document.getElementById('editor').style.display = 'none';
+  viewingPage = null;
+  updateAiCtx();
 }
 
 function formatDate(s) {
@@ -4822,11 +4998,366 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ── AI assistant: 问(chat) / 写(selection edit) / 连(link suggest) ──
+
+let aiStatus = null;      // {enabled, model, provider} from /api/ai/status
+let aiChat = [];          // [{role:'user'|'assistant', content}]
+let aiBusy = false;       // a stream is in flight
+let viewingPage = null;   // page currently shown in #page-view (not editor)
+
+async function initAi() {
+  try {
+    const resp = await fetch(`${API}/ai/status`);
+    if (resp.ok) aiStatus = await resp.json();
+  } catch (e) { /* AI backend unreachable → stay disabled */ }
+  if (!aiStatus) aiStatus = { enabled: false, model: '' };
+  const btn = document.getElementById('ai-btn');
+  if (aiStatus.enabled) {
+    btn.classList.add('on');
+    btn.title = `AI 助手 (${aiStatus.model})`;
+    document.getElementById('ai-model-name').textContent = aiStatus.model;
+  } else {
+    btn.title = 'AI 助手（未配置）';
+  }
+  aiRenderInputState();
+}
+
+function aiContextPage() {
+  if (document.getElementById('page-view').style.display === 'block') return viewingPage;
+  return currentName || null;
+}
+
+function updateAiCtx() {
+  const name = aiContextPage();
+  const span = document.getElementById('ai-ctx-name');
+  if (name) span.innerHTML = '· 当前: <span class="ctx-page">' + escapeHtml(name) + '</span>';
+  else span.textContent = '';
+}
+
+function toggleAiPanel() {
+  const panel = document.getElementById('ai-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    updateAiCtx();
+    if (!aiStatus.enabled) {
+      document.getElementById('ai-msgs').innerHTML =
+        '<div class="ai-setup">AI 尚未配置。在启动环境变量里设置:<br>' +
+        '<code>KB_AI_API_KEY</code> — 任意 OpenAI 兼容平台的 key<br>' +
+        '<code>KB_AI_BASE_URL</code> — 默认智谱 open.bigmodel.cn(可换 OpenAI/DeepSeek 等)<br>' +
+        '<code>KB_AI_MODEL</code> — 默认 glm-4-flash(免费)<br>' +
+        '<div class="steps">设置后重启服务即可启用 ✨ 每个功能都可以独立使用。</div></div>';
+      document.getElementById('ai-inputbar').style.display = 'none';
+      document.getElementById('ai-ctx-row').style.display = 'none';
+    } else {
+      document.getElementById('ai-inputbar').style.display = '';
+      document.getElementById('ai-ctx-row').style.display = '';
+      aiRenderMessages();
+      document.getElementById('ai-input').focus();
+    }
+  }
+}
+
+function aiClearChat() {
+  aiChat = [];
+  aiRenderMessages();
+}
+
+function aiRenderInputState() {
+  const send = document.getElementById('ai-send');
+  const input = document.getElementById('ai-input');
+  send.disabled = aiBusy || !aiStatus.enabled;
+  input.disabled = aiBusy;
+}
+
+function aiRenderMessages(streamEl) {
+  const box = document.getElementById('ai-msgs');
+  box.innerHTML = '';
+  if (aiChat.length === 0 && !streamEl) {
+    box.innerHTML = '<div class="ai-empty">问点什么,例如:<br>「我最近在关注什么?」<br>「XX 和 YY 有什么关系?」</div>';
+    return;
+  }
+  for (const m of aiChat) {
+    const div = document.createElement('div');
+    div.className = 'ai-msg ' + m.role + (m.error ? ' error' : '');
+    if (m.role === 'user') div.textContent = m.content;
+    else { div.innerHTML = renderContent(m.content); markUnresolved(div); }
+    box.appendChild(div);
+  }
+  if (streamEl) box.appendChild(streamEl);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function aiSend() {
+  if (aiBusy || !aiStatus.enabled) return;
+  const input = document.getElementById('ai-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  aiChat.push({ role: 'user', content: text });
+  aiBusy = true;
+  aiRenderInputState();
+
+  // Streaming bubble
+  const bubble = document.createElement('div');
+  bubble.className = 'ai-msg assistant';
+  bubble.innerHTML = '<span class="ai-cursor"></span>';
+  const box = document.getElementById('ai-msgs');
+  aiRenderMessages(bubble);
+  box.scrollTop = box.scrollHeight;
+
+  let acc = '';
+  let lastPaint = 0;
+  const usePage = document.getElementById('ai-use-page').checked;
+  const page = usePage ? aiContextPage() : null;
+  const history = aiChat.slice(0, -1).concat([]);  // previous turns
+  const payload = { messages: [...history, { role: 'user', content: text }], page };
+
+  try {
+    const resp = await fetch(`${API}/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.status }));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let errMsg = null, done = false;
+    while (!done) {
+      const { done: rdDone, value } = await reader.read();
+      if (rdDone) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (!frame.startsWith('data:')) continue;
+        let obj;
+        try { obj = JSON.parse(frame.slice(5).trim()); } catch (e) { continue; }
+        if (obj.delta) {
+          acc += obj.delta;
+          const now = performance.now();
+          if (now - lastPaint > 120) {   // throttle markdown re-render
+            lastPaint = now;
+            bubble.innerHTML = renderContent(acc) + '<span class="ai-cursor"></span>';
+            markUnresolved(bubble);
+            box.scrollTop = box.scrollHeight;
+          }
+        }
+        if (obj.error) errMsg = obj.error;
+        if (obj.done) done = true;
+      }
+    }
+    if (errMsg) throw new Error(errMsg);
+    aiChat.push({ role: 'assistant', content: acc || '（空回复）' });
+    aiRenderMessages();
+  } catch (e) {
+    aiChat.push({ role: 'assistant', content: String(e.message || e), error: true });
+    aiRenderMessages();
+  } finally {
+    aiBusy = false;
+    aiRenderInputState();
+  }
+}
+
+// Enter to send (Shift+Enter = newline)
+document.getElementById('ai-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    aiSend();
+  }
+});
+
+// ── 写: editor selection toolbar ────────────────────────────────
+
+let aiEditBusy = false;
+
+function aiBindSelectionToolbar() {
+  const wrapper = cm.getWrapperElement();
+  // mouseup/touchend: selection settles after the event → check on next tick
+  wrapper.addEventListener('mouseup', () => setTimeout(aiMaybeShowEditBar, 0));
+  wrapper.addEventListener('touchend', () => setTimeout(aiMaybeShowEditBar, 0));
+  wrapper.addEventListener('scroll', hideAiEditBar, true);
+  cm.on('cursorActivity', () => { if (!cm.somethingSelected()) hideAiEditBar(); });
+}
+
+function aiMaybeShowEditBar() {
+  if (!aiStatus || !aiStatus.enabled || aiEditBusy) return;
+  if (!cm || !cm.somethingSelected()) return;
+  const bar = document.getElementById('ai-edit-bar');
+  bar.classList.remove('custom');
+  const pos = cm.charCoords(cm.getCursor('to'), 'window');
+  bar.style.display = 'flex';
+  // measure after it's visible, then clamp to viewport
+  const w = bar.offsetWidth, h = bar.offsetHeight;
+  let left = Math.max(8, Math.min(pos.left - 20, window.innerWidth - w - 8));
+  let top = pos.top - h - 8;
+  if (top < 56) top = pos.bottom + 8;
+  bar.style.left = left + 'px';
+  bar.style.top = top + 'px';
+}
+
+function hideAiEditBar() {
+  const bar = document.getElementById('ai-edit-bar');
+  if (!bar) return;
+  bar.style.display = 'none';
+  bar.classList.remove('custom');
+}
+
+function aiToggleCustomEdit() {
+  const bar = document.getElementById('ai-edit-bar');
+  bar.classList.toggle('custom');
+  const input = document.getElementById('ai-custom-input');
+  if (bar.classList.contains('custom')) input.focus();
+  else input.value = '';
+}
+
+document.getElementById('ai-custom-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault();
+    const instruction = e.target.value.trim();
+    if (instruction) aiEditAction('custom', instruction);
+  }
+});
+
+async function aiEditAction(action, instruction) {
+  if (aiEditBusy || !cm || !cm.somethingSelected()) return;
+  const text = cm.getSelection();
+  const from = cm.getCursor('from');
+  const to = cm.getCursor('to');
+  const bar = document.getElementById('ai-edit-bar');
+  aiEditBusy = true;
+  bar.querySelectorAll('button').forEach(b => b.disabled = true);
+
+  try {
+    const resp = await fetch(`${API}/ai/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, text, instruction }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      showToast(err.detail || 'AI 处理失败', 'error');
+      return;
+    }
+    let { result } = await resp.json();
+    if (!result) return;
+    if (action === 'polish' || action === 'custom') {
+      cm.replaceSelection(result);
+    } else {
+      if (action === 'summarize') {
+        result = result.split('\n').map(l => (l.trim() ? '> ' + l : l)).join('\n');
+      }
+      cm.setCursor(to);
+      cm.replaceSelection('\n\n' + result);
+    }
+    showToast('✨ 已应用,可 Ctrl+Z 撤销');
+    aiMaybeShowEditBar();  // reposition for the (usually cleared) selection
+  } catch (e) {
+    showToast('AI 处理失败: ' + e.message, 'error');
+  } finally {
+    aiEditBusy = false;
+    bar.querySelectorAll('button').forEach(b => b.disabled = false);
+    hideAiEditBar();
+  }
+}
+
+// Hide the bar when clicking anywhere else
+document.addEventListener('mousedown', (e) => {
+  const bar = document.getElementById('ai-edit-bar');
+  if (bar.style.display === 'flex' && !bar.contains(e.target)) hideAiEditBar();
+});
+
+// ── 连: post-save link suggestions ──────────────────────────────
+
+let linkSuggest = null;  // {name, sig, loading, suggestions[]}
+
+function maybeRequestLinkSuggestions(name, content) {
+  if (!aiStatus || !aiStatus.enabled) return;
+  const sig = content.length + ':' + content.slice(0, 60);
+  if (linkSuggest && linkSuggest.name === name && linkSuggest.sig === sig) return;
+  linkSuggest = { name, sig, loading: true, suggestions: [] };
+  fetch(`${API}/ai/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+    .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+    .then(data => {
+      if (!linkSuggest || linkSuggest.name !== name || linkSuggest.sig !== sig) return;  // stale
+      linkSuggest.loading = false;
+      linkSuggest.suggestions = data.suggestions || [];
+      renderLinkSuggestCard();
+    })
+    .catch(() => { /* silent — suggestions are best-effort */ });
+}
+
+function renderLinkSuggestCard() {
+  const card = document.getElementById('link-suggest-card');
+  if (!linkSuggest || !linkSuggest.suggestions.length
+      || viewingPage !== linkSuggest.name
+      || document.getElementById('page-view').style.display !== 'block') {
+    card.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+  const rows = linkSuggest.suggestions.map((s, i) => `
+    <div class="ls-row" data-ls="${i}">
+      <span class="ls-anchor" title="${escapeHtml(s.anchor)}">${escapeHtml(s.anchor)}</span>
+      <span class="ls-arrow">→</span>
+      <span class="ls-target">${escapeHtml(s.target)}</span>
+      <button class="ls-apply" onclick="applyLinkSuggestion(${i})">应用</button>
+      ${s.reason ? `<span class="ls-reason">${escapeHtml(s.reason)}</span>` : ''}
+    </div>`).join('');
+  card.innerHTML = `
+    <div class="ls-title">✨ AI 发现 ${linkSuggest.suggestions.length} 条可建链接
+      <button onclick="dismissLinkSuggestions()">忽略</button>
+    </div>${rows}`;
+  card.style.display = 'block';
+}
+
+function dismissLinkSuggestions() {
+  linkSuggest = null;
+  renderLinkSuggestCard();
+}
+
+async function applyLinkSuggestion(i) {
+  const s = linkSuggest && linkSuggest.suggestions[i];
+  if (!s) return;
+  try {
+    const resp = await fetch(`${API}/ai/links/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: linkSuggest.name, anchor: s.anchor, target: s.target }),
+    });
+    if (resp.status === 422) {
+      // anchor moved / already applied — just drop the row
+      linkSuggest.suggestions.splice(i, 1);
+      renderLinkSuggestCard();
+      return;
+    }
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    linkSuggest.suggestions.splice(i, 1);
+    invalidateCache();
+    showToast(`✓ 已链接 [[${s.target}]]`);
+    await loadPage(linkSuggest.name);   // reload to show the new link
+    renderLinkSuggestCard();            // loadPage clears the card — re-render rest
+  } catch (e) {
+    showToast('应用失败: ' + e.message, 'error');
+  }
+}
+
 // ── Boot ────────────────────────────────────────────────────────
 
 // Fix logo href for path-prefix deployments
 const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
+
+// AI status probe (enables ✨ button / panel / selection toolbar when configured)
+initAi();
 
 // Inject user-defined custom CSS (data/custom.css)
 (async function loadCustomCSS() {

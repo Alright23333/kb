@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backup import backup_loop
 from database import init_db
 from routers.api import router as api_router
+from routers.ai import router as ai_router
 
 app = FastAPI(title="Knowledge Base", version="0.1.0")
 
@@ -88,6 +89,7 @@ app.add_middleware(
 
 # API routes
 app.include_router(api_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
 
 # Static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
