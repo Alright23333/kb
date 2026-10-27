@@ -18,17 +18,21 @@ Claude Desktop config (claude_desktop_config.json):
 }
 
 Tools:
-  search(query)           → FTS search
-  get_page(name)          → full page + tags + links + backlinks
+  search(query)           → FTS search (name-relevance re-ranked, with content snippets)
+  get_page(name)          → JSON: content in separate field + tags/links/backlinks/props
   create_page(name, content) → create new page
-  update_page(name, content) → update existing page
+  update_page(name, content) → update existing page (full overwrite)
+  append_to_page(name, content) → append text to page end (no rewrite)
+  append_to_journal(content, date?) → append to a journal page (default today)
+  delete_lines(name, start, end) → delete lines by 1-based range
   delete_page(name)       → delete page (restorable via versions)
   rename_page(old, new)   → rename + rewrite inbound links (atomic)
   list_pages()            → all page names
   get_recent_pages(limit) → recently updated pages
+  recently_changed(since) → pages updated after a timestamp (incremental sync)
   get_tags()              → all tags with counts
   get_pages_by_tag(tag)   → pages having a tag
-  get_backlinks(name)     → pages linking to this page
+  get_backlinks(name)     → pages linking to this page (with quoting line)
   get_page_versions(name) → version history (works for deleted pages)
   restore_page_version(name, version_id) → restore old version
 """
@@ -36,10 +40,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
+from datetime import datetime
 
 from fastmcp import FastMCP
-from search import build_search_query
+from search import build_search_query, rerank_by_name, make_snippet
 
 # MCP stdio uses stdout for the protocol — logging must go to stderr, which is
 # what the logging module does by default.
@@ -56,6 +62,25 @@ def _db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
+
+
+def _append(conn: sqlite3.Connection, name: str, content: str) -> str | None:
+    """Append content to an existing page. Returns the new content, or None."""
+    row = conn.execute(
+        "SELECT id, content FROM pages WHERE name=? COLLATE NOCASE", (name,)
+    ).fetchone()
+    if not row:
+        return None
+    current = row["content"] or ""
+    if current and not current.endswith("\n"):
+        current += "\n"
+    new_content = current + content
+    conn.execute(
+        "UPDATE pages SET content=?, updated_at=datetime('now','localtime') WHERE id=?",
+        (new_content, row["id"]),
+    )
+    _sync_refs(conn, row["id"], new_content)
+    return new_content
 
 
 def _sync_refs(conn: sqlite3.Connection, page_id: int, content: str) -> None:
@@ -97,6 +122,9 @@ def _sync_refs(conn: sqlite3.Connection, page_id: int, content: str) -> None:
 def search(query: str, limit: int = 10) -> str:
     """Full-text search across all pages. Returns matching page names with dates.
 
+    Results are re-ranked so pages whose name matches the query come first
+    (exact > starts-with > contains > content-only).
+
     Args:
         query: Search query (supports CJK with jieba segmentation)
         limit: Max results (default 10)
@@ -110,7 +138,7 @@ def search(query: str, limit: int = 10) -> str:
         if fts_expr:
             try:
                 rows = conn.execute(
-                    "SELECT p.name, p.updated_at FROM pages_fts f "
+                    "SELECT p.name, p.updated_at, p.content FROM pages_fts f "
                     "JOIN pages p ON p.id = frowid "
                     "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
                     (fts_expr, limit),
@@ -129,7 +157,7 @@ def search(query: str, limit: int = 10) -> str:
                 params.extend([like, like])
             params.append(limit)
             rows = conn.execute(
-                f"SELECT name, updated_at FROM pages "
+                f"SELECT name, updated_at, content FROM pages "
                 f"WHERE {' OR '.join(conditions)} "
                 f"ORDER BY updated_at DESC LIMIT ?",
                 tuple(params),
@@ -139,7 +167,7 @@ def search(query: str, limit: int = 10) -> str:
         if not rows:
             like = f"%{query}%"
             rows = conn.execute(
-                "SELECT name, updated_at FROM pages "
+                "SELECT name, updated_at, content FROM pages "
                 "WHERE name LIKE ? OR content LIKE ? "
                 "ORDER BY updated_at DESC LIMIT ?",
                 (like, like, limit),
@@ -147,14 +175,22 @@ def search(query: str, limit: int = 10) -> str:
 
         if not rows:
             return f"No results for '{query}'"
-        return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in rows)
+        ranked = rerank_by_name([dict(r) for r in rows], query)
+        return "\n".join(
+            f"- {r['name']} (updated {r['updated_at']})\n  > {make_snippet(query, r.get('content', ''))}"
+            for r in ranked
+        )
     finally:
         conn.close()
 
 
 @mcp.tool
 def get_page(name: str) -> str:
-    """Get a page's full content, tags, links, backlinks, and properties.
+    """Get a page as JSON with content in a separate field, plus
+    tags, links, backlinks, and properties.
+
+    The `content` field is the raw markdown — feed it back to update_page
+    as-is. Metadata is returned in separate fields, NOT mixed into content.
 
     Args:
         name: Page name (case-insensitive)
@@ -187,17 +223,16 @@ def get_page(name: str) -> str:
             (row["id"],),
         ).fetchall()}
 
-        parts = [f"# {row['name']}", ""]
-        if props:
-            parts.append("Properties: " + json.dumps(props, ensure_ascii=False))
-        if tags:
-            parts.append(f"Tags: {', '.join('#' + t for t in tags)}")
-        if links:
-            parts.append(f"Links to: {', '.join(links)}")
-        if backlinks:
-            parts.append(f"Backlinks from: {', '.join(b['name'] for b in backlinks)}")
-        parts.append(f"\n---\n{row['content']}")
-        return "\n".join(parts)
+        return json.dumps({
+            "name": row["name"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "tags": tags,
+            "links": links,
+            "backlinks": backlinks,
+            "properties": props,
+            "content": row["content"],
+        }, ensure_ascii=False, indent=2)
     finally:
         conn.close()
 
@@ -268,6 +303,142 @@ def update_page(name: str, content: str) -> str:
 
 
 @mcp.tool
+def append_to_page(name: str, content: str) -> str:
+    """Append text to the end of a page without rewriting existing content.
+
+    Use this for journal-style or checklist-style updates instead of
+    update_page, to avoid accidentally clobbering the rest of the page.
+    A newline separator is inserted automatically if needed.
+
+    Args:
+        name: Page name (case-insensitive)
+        content: Text to append (supports [[links]], #tags)
+    """
+    conn = _db()
+    try:
+        new_content = _append(conn, name, content)
+        if new_content is None:
+            return f"Error: Page '{name}' not found"
+        conn.commit()
+        return (
+            f"Appended {len(content)} chars to '{name}' "
+            f"(page now {len(new_content.splitlines())} lines)"
+        )
+    except Exception as e:
+        conn.rollback()
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def append_to_journal(content: str, date: str | None = None) -> str:
+    """Append to a journal page (page name = date, YYYY-MM-DD), creating
+    it if it doesn't exist yet. Defaults to today. Shorthand for
+    "record this right now" without composing the date yourself.
+
+    Args:
+        content: Text to append (supports [[links]], #tags)
+        date: Journal date as YYYY-MM-DD (default: today)
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    elif not re.match(r"^\d{4}-\d{2}-\d{2}$", date.strip()):
+        return "Error: date must look like YYYY-MM-DD"
+    date = date.strip()
+
+    conn = _db()
+    try:
+        new_content = _append(conn, date, content)
+        if new_content is not None:
+            conn.commit()
+            return f"Appended to journal {date} ({len(new_content.splitlines())} lines total)"
+        cur = conn.execute(
+            "INSERT INTO pages (name, content) VALUES (?, ?)", (date, content)
+        )
+        _sync_refs(conn, cur.lastrowid, content)
+        conn.commit()
+        return f"Created journal {date} with {len(content)} chars"
+    except Exception as e:
+        conn.rollback()
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def recently_changed(since: str, limit: int = 50) -> str:
+    """List pages updated after a point in time. Use for incremental
+    sync ("what changed since I last looked").
+
+    Args:
+        since: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' (local time)
+        limit: Max results (default 50)
+    """
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT name, updated_at FROM pages WHERE updated_at > ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (since.strip(), limit),
+        ).fetchall()
+        if not rows:
+            return f"No pages changed since {since}"
+        return f"Changed since {since} ({len(rows)}):\n" + "\n".join(
+            f"- {r['name']} (updated {r['updated_at']})" for r in rows
+        )
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def delete_lines(name: str, start_line: int, end_line: int) -> str:
+    """Delete a range of lines from a page by line number (1-based, inclusive).
+
+    Line numbers refer to the page's CURRENT content — call get_page first
+    if the page may have changed. Returns the deleted lines so you can verify.
+
+    Args:
+        name: Page name (case-insensitive)
+        start_line: First line to delete (1-based)
+        end_line: Last line to delete (inclusive)
+    """
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT id, content FROM pages WHERE name=? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if not row:
+            return f"Error: Page '{name}' not found"
+        if start_line < 1 or end_line < start_line:
+            return f"Error: invalid range {start_line}-{end_line}"
+
+        lines = row["content"].split("\n")
+        if start_line > len(lines):
+            return f"Error: start_line {start_line} beyond page ({len(lines)} lines)"
+        end = min(end_line, len(lines))
+
+        deleted = lines[start_line - 1 : end]
+        new_content = "\n".join(lines[: start_line - 1] + lines[end:])
+
+        conn.execute(
+            "UPDATE pages SET content=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (new_content, row["id"]),
+        )
+        _sync_refs(conn, row["id"], new_content)
+        conn.commit()
+        preview = "\n".join(deleted[:20])
+        if len(deleted) > 20:
+            preview += f"\n... ({len(deleted) - 20} more)"
+        return f"Deleted {len(deleted)} line(s) from '{name}':\n{preview}"
+    except Exception as e:
+        conn.rollback()
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+
+@mcp.tool
 def list_pages() -> str:
     """List all page names, sorted alphabetically."""
     conn = _db()
@@ -298,7 +469,8 @@ def get_tags() -> str:
 
 @mcp.tool
 def get_backlinks(name: str) -> str:
-    """Get all pages that link to the given page.
+    """Get all pages that link to the given page, with the quoting line
+    from each source page's content.
 
     Args:
         name: Target page name (case-insensitive)
@@ -306,7 +478,7 @@ def get_backlinks(name: str) -> str:
     conn = _db()
     try:
         rows = conn.execute(
-            "SELECT p.name, p.updated_at FROM refs r "
+            "SELECT p.name, p.updated_at, p.content FROM refs r "
             "JOIN pages p ON p.id = r.source_id "
             "WHERE r.kind='link' AND r.target_name=? COLLATE NOCASE "
             "ORDER BY p.updated_at DESC",
@@ -314,7 +486,15 @@ def get_backlinks(name: str) -> str:
         ).fetchall()
         if not rows:
             return f"No backlinks to '{name}'"
-        return "\n".join(f"- {r['name']} (updated {r['updated_at']})" for r in rows)
+        from parse import find_link_lines
+        lines = []
+        for r in rows:
+            snippet = (find_link_lines(r["content"], name, max_lines=1) or [""])[0]
+            if snippet:
+                lines.append(f"- {r['name']} (updated {r['updated_at']}): {snippet}")
+            else:
+                lines.append(f"- {r['name']} (updated {r['updated_at']})")
+        return "\n".join(lines)
     finally:
         conn.close()
 

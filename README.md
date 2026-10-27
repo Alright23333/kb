@@ -3,7 +3,7 @@
 一个自托管的双链笔记系统，SQLite 后端 + FastAPI REST API + 原生 JS 单页 Web UI。
 设计目标：**人能用，AI 也能用**——多设备通过 Tailscale 访问，FastAPI 让 AI agent 直接读写知识库。
 
-功能亮点：双链 `[[wikilinks]]`、标签、全文搜索、实时预览编辑器、引用补全、知识图谱、任务管理（甘特图/列表）、深浅主题。
+功能亮点：双链 `[[wikilinks]]`、嵌入引用 `![[页面]]`、首页看板、标签、全文搜索、实时预览编辑器、引用补全、知识图谱、任务管理（甘特图/列表）、mermaid 图表、知识库体检（孤立页/断链）、键盘流、草稿自动保存、每日自动备份、深浅主题。
 
 ## 设计原则
 
@@ -20,7 +20,8 @@ kb/
 ├── database.py          # SQLite schema、连接池、FTS/版本触发器
 ├── routers/api.py       # REST API 端点
 ├── parse.py             # Markdown 解析：[[links]]、#tags、key:: value
-├── mcp_server.py        # MCP Server（stdio，13 个工具，供 AI agent 使用）
+├── mcp_server.py        # MCP Server（stdio，17 个工具，供 AI agent 使用）
+├── backup.py            # 自动备份（VACUUM INTO 快照 + 保留策略，应用内后台任务）
 ├── export.py            # 导出 CLI（markdown / json / zip）
 ├── import_logseq.py     # 从 Logseq 文件版导入
 ├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt）
@@ -87,6 +88,7 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 - **引用补全**：`[[` 触发，上下箭头导航，Enter/Tab 选中，失焦安全
 - **标签补全**：`#` 触发，按使用频次排序，与引用补全同一交互
 - 保存 `Ctrl+S`，重命名支持
+- **草稿自动保存**：编辑内容每 30 秒存入 localStorage（与打开时内容不同才存），误关/崩溃后重开编辑器出现恢复条，一键恢复或丢弃；保存成功自动清理
 - **🕘 版本历史**：编辑已有页面时头部按钮，侧滑面板预览 + 一键恢复
 - **🗑️ 删除**：确认弹窗，删除后可从回收站恢复
 - **hover 链接预览**：悬停 `[[链接]]` 300ms 弹出内容摘要卡片（LRU 缓存 20 条），未创建页面可点击直接创建
@@ -107,16 +109,8 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 ### 导航与侧边栏
 
 - **收窄模式**：`◀` 收窄为 56px 图标栏（保留图标 + tooltip），`▶` 展开
-- **深浅主题**：`🌙/☀️` 切换，CSS 变量驱动，跟随系统偏好，localStorage 持久化
-- **自定义 CSS**：设置面板编辑 `data/custom.css`，实时预览。主题是 **token 驱动** 的——所有颜色走 CSS 变量，自定义样式只需覆盖变量即可
-
-  ```css
-  /* 两个主题各写一份 */
-  [data-theme="dark"]  { --card: #16161e; --accent: #7aa2f7; }
-  [data-theme="light"] { --card: #f0f0f0; --accent: #2e7de9; }
-  ```
-
-  可覆盖的 token：`--bg` `--card` `--hover` `--fg` `--muted` `--border` `--accent` `--accent-dim` `--accent-hover` `--tag` `--tag-bg` `--p1`~`--p4` `--p3-fg` `--on-accent` `--on-priority` `--overdue` `--danger`。因为组件全部读 `var()`，动态生成的卡片和两个主题都会自动生效，无需写 `!important` 逐元素打补丁。
+- **深浅主题**：`🌙/☀️` 切换，CSS 变量驱动（暗色 = Tokyo Night 色板，全部在 `[data-theme]` 变量层，无 JS 内联样式），跟随系统偏好，localStorage 持久化
+- **自定义 CSS**：设置面板编辑 `data/custom.css`，实时预览。只需覆盖变量（如 `[data-theme="dark"] { --card: #16161e; }`）——组件全部读 `var()`，动态生成的卡片和两个主题都会自动生效，无需逐元素打补丁
 - **命令面板 `Ctrl+K`**：
   - 混合搜索：页面名模糊匹配 + 标签 + 操作，FTS 内容匹配兑底
   - 前缀指令：`>` 只搜操作、`#` 只搜标签、`+ 页面名` 快速创建
@@ -132,7 +126,8 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
 
 - ≤ 768px 断点，纯 CSS 媒体查询 + 最小 JS 增强
 - **侧边栏**：抽屉式 Overlay，汉堡 ☰ 按钮打开，点击遮罩关闭
-- **编辑器**：编辑/预览标签切换（`预览` 按钮），隐藏拖拽分隔条，浮动保存按钮（FAB）
+- **编辑器**：编辑/预览标签切换（`预览` 按钮，切换后按钮变 `编辑` 常驻可切回），隐藏拖拽分隔条，浮动保存按钮（FAB）
+- **编辑时顶栏折叠**：编辑视图下顶栏收缩为单行 ☰（MutationObserver 驱动，离开编辑器自动恢复）
 - **触摸交互**：
   - 图谱单指拖动节点/平移画布，双指捏合缩放
   - 链接预览：tap 弹出底部卡片（替代 hover）
@@ -147,17 +142,23 @@ CREATE VIRTUAL TABLE pages_fts USING fts5(
   - "记笔记的方法" → `"记笔记的方法" OR "记笔记"`（"方法" 走 LIKE 降级）
   - jieba 未安装时自动降级为原有行为
 - 搜索结果按**名称相关度排序**：精确匹配 > 开头匹配 > 包含匹配 > 内容匹配
+  （重排逻辑在 `search.py` 的 `rerank_by_name`，REST API 与 MCP search 共用）
 - 匹配部分**高亮标记**
 - `<3` 字符走 LIKE 兜底
 
 ### 页面浏览
 
 - **所有页面**：字母排序，实时筛选，DocumentFragment 批量渲染
-- 页面详情：反向链接、标签、属性
+- **🩺 体检**（所有页面内折叠区）：孤立页清单（零入链，按更新时间排序）+ 断链清单（按目标聚合，显示引用来源，一键创建缺失页）；折叠条后台预计算摘要数字，不展开也知道有没有问题。数据来自图谱 API，零新增后端
+- **键盘流**：列表页 `j`/`k` 上下移动（高亮 + 竖条），`Enter` 打开，`Esc` 取消；输入焦点/中文输入法/移动端自动失效；编辑器 `Ctrl/Cmd+B` 加粗、`Ctrl/Cmd+I` 斜体（有选区包裹，无选区插入定界符）
+- **首页最近页面**：按 今天/昨天/本周 分组，相对时间（`3 小时前`）
+- 页面详情：反向链接（含引用原文行）、标签、属性
+- **反向链接预览**：每条反链显示源页面中引用本页的原文行（`parse.py` 的 `find_link_lines`，大小写不敏感、含别名形式，截 200 字符，前端两行截断）
 
 ### 任务管理（TODO）
 
 - 侧边栏入口 → 任务页面
+- **多页面切换**：设置中任务来源页支持逗号分隔多个（如 `Tasks, 工作, 树莓`），任务视图顶部下拉即时切换；当前选择持久化，回退到列表第一项
 - **快速添加**：列表顶部输入框，回车即加（纯文本默认 p2 今天开始，支持完整语法）
 - **勾选完成**：
   - 普通任务 → 行尾追加 `done:日期`，灰显+删除线
@@ -189,20 +190,37 @@ p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w done:2024-01-1
 
 `done:日期` 标记任务完成；循环任务勾选时不加 done 而是滚动 due 到下周期。
 
+### 首页看板与嵌入引用
+
+- **首页即看板**：约定页面（默认 `KB-看板`，设置中可改/清空禁用）存在时，首页顶部渲染该页内容，下方保留"最近页面"分组；首页右上角"✏️ 编辑看板"直达编辑（页面不存在则预填名字新建）
+- **嵌入引用 `![[页面名]]`**：把目标页面内容嵌入当前位置渲染（与 `[[链接]]` 同族语法）；嵌套深度限制 2 层自动切断循环引用；目标不存在显示占位，点击即创建
+- 看板是普通页面：版本历史、MCP `update_page`、mermaid 图表全部可用——配置即内容，无独立配置界面
+- 图片上传暂未支持，外链 `![](url)` 可用
+
+### Mermaid 图表
+
+- 笔记中写 ` ```mermaid ` 代码块即渲染成图（flowchart / sequence / pie / gantt / class / state 等），Markdown 是唯一权威源，无中间产物
+- **按需加载**：mermaid 9.4.3（UMD，自托管 `static/vendor/`）首次遇到图表块才加载；加载失败时降级显示原码
+- **主题联动**：图表配色注入 KB 设计 token（accent/tag/p1-p4/卡片底色），深浅切换即时重渲染
+- **编辑预览**：实时预览中同步渲染（300ms 防抖）；语法错误时显示 mermaid 错误图，不影响页面其余部分
+- **斜杠命令** `/图表`：插入 graph 骨架模板
+- **任务导出**：任务视图甘特 tab 一键"复制代码"——当前任务页转 mermaid gantt 代码块，粘贴到任意页面即成活图（数据流单向：任务 → 文本，不产生会过时的生成页）
+
 ### 知识图谱
 
-- 力导向布局，内联 SVG，节点可点击导航
+- **力导向布局**（手写力模型：斥力 + 弹簧 + 向心 + alpha 冷却，零依赖），收敛后自动适配视图；拖动节点时固定该点，松手后邻居重新排布
 - **全屏模式**：填充整个内容区
 - **缩放**：滚轮缩放（以鼠标位置为中心，0.1x-5x）+ +/-/⟲ 按钮
 - **平移**：拖拽背景平移（grab 光标）
 - **节点拖动**：拖拽单个节点重新布局，连线跟随
 - 节点大小随连接数变化，悬浮 tooltip
+- **hover 聚焦**：悬停节点高亮相邻节点与连线，其余淡出；孤立节点灰显
 
 ## 解析层 (`parse.py`)
 
 ```python
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
-TAG_RE = re.compile(r"(?<!#)#(?!\+)([^\s#\[\]()]+)")
+TAG_RE = re.compile(r"(?<![\w#])#(?!\+)([\w-]+)")
 PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 ```
 
@@ -210,6 +228,11 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 - `extract_tags()` → `set[str]`
 - `extract_properties()` → `dict[str, str|None]`
 - `parse()` → `{"links", "tags", "properties"}`
+
+标签解析规则(2026-10-24 收紧):
+- `#` 前必须是词边界——`foo#bar`、URL 锚点(`a#frag`)、`##` 标题都不再误判
+- 标签字符集限定 `[\w-]`(词字符含汉字 + 连字符)——全角/半角标点(`（）`、`,`、`。` 等)终止标签,不再被带进标签名
+- **跳过代码块(``` 围栏)与行内代码**——代码里的 `#注释`、`#include` 不登记为标签
 
 大小写去重：`casefold()` 字典归并，防止 `[[Foo]]` + `[[foo]]` 触发 UNIQUE 约束。
 
@@ -221,7 +244,7 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 |--------|------|------|-------------|
 | `GET` | `/api/pages` | — | 列表（`?tag=`、`?search=`、`?limit=`、`?offset=`） |
 | `GET` | `/api/pages/names` | — | 所有页面名 |
-| `GET` | `/api/pages/{name}` | — | 详情 + tags + links + backlinks + properties |
+| `GET` | `/api/pages/{name}` | — | 详情 + tags + links + backlinks（含引用原文行 snippet） + properties |
 | `POST` | `/api/pages` | `{name, content}` | 创建 |
 | `PUT` | `/api/pages/{name}` | `{name?, content?}` | 更新（改名时重写引用） |
 | `PATCH` | `/api/pages/{name}/rename` | `{name}` | 原子改名（含 refs 冲突预处理） |
@@ -260,21 +283,25 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 
 ## MCP Server（AI Agent 接入）
 
-`mcp_server.py` 通过 stdio transport 暴露 13 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
+`mcp_server.py` 通过 stdio transport 暴露 17 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
-| 读 | `search(query)` | FTS 全文搜索（jieba 分词增强 CJK） |
-| 读 | `get_page(name)` | 页面详情（内容+tags+links+backlinks） |
+| 读 | `search(query)` | FTS 全文搜索（jieba 分词 + 名称相关度重排 + 内容摘要片段，省一次 get_page） |
+| 读 | `get_page(name)` | JSON 返回：`content` 独立字段 + tags/links/backlinks/properties，可安全回喂 `update_page` |
 | 读 | `list_pages()` | 所有页面名 |
 | 读 | `get_recent_pages(limit)` | 最近更新页面 |
+| 读 | `recently_changed(since)` | 某时间点之后改动的页面（增量同步：`2026-10-25` 或带时分秒） |
 | 读 | `get_tags()` | 所有标签 + 计数 |
 | 读 | `get_pages_by_tag(tag)` | 按标签查页面 |
-| 读 | `get_backlinks(name)` | 反向链接 |
+| 读 | `get_backlinks(name)` | 反向链接（含引用原文行） |
 | 写 | `create_page(name, content)` | 创建页面 |
-| 写 | `update_page(name, content)` | 更新页面 |
+| 写 | `update_page(name, content)` | 更新页面（整页覆盖） |
 | 写 | `rename_page(old, new)` | 原子改名 + 重写入链 |
 | 写 | `delete_page(name)` | 删除（版本快照保留，可恢复） |
+| 行级 | `append_to_page(name, content)` | 追加写入页尾（自动补换行，避免全文覆盖） |
+| 行级 | `append_to_journal(content, date?)` | 追加到日记页（默认今天，不存在则创建）——AI 记录当下的一步调用 |
+| 行级 | `delete_lines(name, start, end)` | 按行号区间删除（1-based 含端点，返回被删行供核对） |
 | 保险 | `get_page_versions(name)` | 版本历史（已删除页面也可查） |
 | 保险 | `restore_page_version(name, id)` | 恢复旧版本 |
 
@@ -324,6 +351,8 @@ services:
       - KB_IP_WHITELIST=1
       - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48
       - KB_TRUSTED_PROXIES=127.0.0.0/8,::1/128,172.16.0.0/12
+      # 自动备份（默认开启，data/backups/ 保留 30 份）
+      # - KB_BACKUP_KEEP=30
 ```
 
 ```bash
@@ -400,6 +429,16 @@ server {
 
 ### 备份
 
+**自动备份（内置）**：应用启动 60 秒后做第一次快照，之后每 24 小时一次；用 `VACUUM INTO` 原子快照，服务运行中可安全执行，不需要停机。文件在 `<data>/backups/kb-YYYYMMDD-HHMMSS.db`，按时间排序保留最新 N 份。
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `KB_BACKUP_ENABLED` | `1` | 设 `0` 关闭 |
+| `KB_BACKUP_DIR` | `<data>/backups` | 快照目录 |
+| `KB_BACKUP_KEEP` | `30` | 保留份数 |
+
+手动备份（临时另存一份时）：
+
 ```bash
 # 直接复制 SQLite 文件（WAL 模式下先 checkpoint）
 sqlite3 data/kb.db "PRAGMA wal_checkpoint"
@@ -411,7 +450,7 @@ cp data/kb.db backup/kb-$(date +%Y%m%d).db
 | 层 | 技术 |
 |----|------|
 | 后端 | Python 3.11+, FastAPI, aiosqlite |
-| 前端 | Vanilla JS (ES2020+), CodeMirror 5.65.7, markdown-it 13.0.2, Frappe Gantt 0.6.1 |
+| 前端 | Vanilla JS (ES2020+), CodeMirror 5.65.7, markdown-it 13.0.2, Frappe Gantt 0.6.1, Mermaid 9.4.3（均自托管 `static/vendor/`，无 CDN） |
 | 数据库 | SQLite 3.35+ (WAL mode, FTS5 trigram) |
 | 服务器 | Uvicorn (ASGI) |
 
@@ -481,7 +520,7 @@ static/vendor/
 - [x] 重命名事务（`PATCH /rename` + refs 冲突预处理）
 - [x] 导入/导出（zip + JSON + CLI）
 - [x] 页面历史（自动快照 + 恢复 + 回收站）
-- [x] MCP Server（13 个工具：读/写/版本恢复闭环）
+- [x] MCP Server（17 个工具：读/写/行级修改/版本恢复闭环）
 - [x] 命令面板 `Ctrl+K`（混合搜索 + 前缀指令 + 快速捕获）
 - [x] hover 链接预览（内容卡片 + 一键创建缺失页）
 - [x] `#` 标签补全（与 `[[` 补全同交互）

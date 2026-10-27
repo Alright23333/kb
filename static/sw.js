@@ -13,7 +13,7 @@
  * old HTML until the worker updates.
  */
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
-const VERSION = 'kb-shell-v1';
+const VERSION = 'kb-shell-v2';
 
 const SHELL = [
   BASE + '/',
@@ -29,6 +29,7 @@ const SHELL = [
   BASE + '/static/vendor/markdown-it.min.js',
   BASE + '/static/vendor/frappe-gantt/frappe-gantt.css',
   BASE + '/static/vendor/frappe-gantt/frappe-gantt.min.js',
+  BASE + '/static/vendor/mermaid/mermaid.min.js',
 ];
 
 self.addEventListener('install', (event) => {

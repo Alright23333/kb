@@ -1,4 +1,5 @@
 """Main FastAPI application."""
+import asyncio
 import ipaddress
 import os
 
@@ -6,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from backup import backup_loop
 from database import init_db, DB_PATH
 from routers.api import router as api_router
 
@@ -181,6 +183,7 @@ def _assert_data_dir_writable() -> None:
 async def startup():
     _assert_data_dir_writable()
     await init_db()
+    asyncio.create_task(backup_loop())
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)

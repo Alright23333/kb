@@ -27,6 +27,9 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 - 纯函数，无 I/O，可被 API 层和导入器共用
 - 返回 `{"links": set, "tags": set, "properties": dict}`
+- 标签提取：先剥离代码块（``` / ~~~ 围栏）与行内代码，再剥离 `[[..]]`；`TAG_RE` 要求 `#` 前是词边界，字符集限定 `[\w-]`（2026-10-24 收紧，防止全角标点/URL 锚点/代码内容混入标签）
+- `find_link_lines(content, target)`：反链预览取引用原文行（大小写不敏感、含别名），api.py 与 mcp_server.py 共用
+- 前端 `TAG_TRIGGER_RE`（`#` 补全触发）与后端 `TAG_RE` 规则保持一致，改一处要同步另一处
 - 正则不要动，改了要跑解析单测
 
 ### `routers/api.py` — REST API
@@ -40,13 +43,20 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 - CodeMirror 5（不是 6，CDN 6.65.7 实际是 5.65.7），连同 markdown-it / Frappe Gantt 都已 vendored 到 `static/vendor/`，不再走 CDN
 - markdown-it 自定义 `wikilink` 内联规则：`[[target]]` → `<a data-page="target">`
-- Frappe Gantt 0.6.1（甘特图渲染，CDN）
+- Frappe Gantt 0.6.1（甘特图渲染，static/vendor/ 自托管）
 - 全局事件委托处理所有点击（`[data-page]`、`[data-tag]`、`[data-nav]`）
 - `navigate(target, ...args)` 是唯一路由入口
-- 主题：**token 驱动** —— 所有颜色走 CSS 变量（`--bg/--card/--fg/--muted/--border/--hover/--accent/--accent-dim/--accent-hover/--tag/--tag-bg/--p1..--p4/--on-accent/--on-priority/--overdue/--danger/--bar-progress`），`[data-theme="dark"/"light"]` 给值，localStorage 持久化
-- 自定义 CSS（`data/custom.css`）**只覆盖变量**，注入 `<style id="custom-css">` 追加到 `<head>` 末尾。不要在 JS 里逐元素写 inline style —— 那样后渲染的卡片会漏、切主题会残留
+- 主题：CSS 变量 `[data-theme="dark"/"light"]`（Tokyo Night 色板 + 语义色 --tag/--overdue/--p1..p4），localStorage 持久化。**不要用 JS 内联样式改颜色**（已删过一次 applyCustomCSS hack，那是主题切换bug的根源），一律走 CSS 变量
+- 设计系统：token 分层在 `:root`（间距/圆角/阴影/缓动）与 `[data-theme]`（颜色）；新增样式优先用 `var(--sp-*)`/`var(--r-*)` 等既有 token，不要写内联 style
+- 自定义 CSS（`data/custom.css`）**只覆盖变量**，注入 `<style id="custom-css">` 追加到 `<head>` 末尾（同等特异性下后者胜出）。不要在 JS 里逐元素写 inline style —— 后渲染的卡片会漏、切主题会残留
+- 不要用 `@media (prefers-color-scheme)` 新增一套主题变量定义：媒体查询块 `:root:not([data-theme=…])` 的特异性 (0,2,0) 会静默压过用户显式选择的 `[data-theme="light"]`（(0,1,0)）——现在 light 媒体块与 `[data-theme="light"]` 的值完全相同才没出 bug，改动时两处必须同步
+- 移动端编辑顶栏折叠：MutationObserver 监听 `#editor` 显隐切换 `#header.compact`（CSS 在 media query 内）
+- 侧边栏窄栏切换有 width 0.2s 过渡；移动端是 transform 动画，两套 transition 在不同规则里，别合并
 - 日记编辑器复用页面编辑器，`currentSaveMode` 区分保存目标
-- 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图
+- 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图；任务条颜色从 CSS 变量读取（`ganttPriorityColor`），甘特网格/文字主题化规则在 `/* Frappe Gantt */` 注释块
+- 图谱力导向：`startForceLayout()`/`graphSimFrame()`（rAF + alpha 冷却，收敛即停）；拖动中的节点置 `_fixed=true`（tick 跳过其速度），松手 `graphReheat(0.35)`；参数（斥力/弹簧/向心）在 `graphForceTick` 顶部
+- 键盘导航（j/k/Enter）是全局 document keydown：必须过滤输入焦点、`.CodeMirror-focused`、`isComposing`（中文输入法）、移动端；`knavMove` 里 `knavClear()` 会把索引重置为 -1，先算好 next 再 clear 再用（曾因此 TypeError 按键全崩）
+- 体检报告（孤立页/断链）是「所有页面」视图里的折叠区（同回收站模式），`computeHealth()` 纯前端算自 /api/graph，别为它加后端 API
 
 ### `import_logseq.py` — Logseq 导入
 
@@ -57,7 +67,10 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 ### `mcp_server.py` — MCP Server（stdio）
 
-- 13 个工具（读/写/版本恢复），直连 SQLite 不走 FastAPI
+- 17 个工具（读/写/行级修改/版本恢复），直连 SQLite 不走 FastAPI
+- `search` 返回体每条带内容摘要片段（`_snippet()`）；追加类工具走共用 `_append()` helper，改追加逻辑只动它
+- `get_page` 返回 JSON，`content` 为独立字段——元信息不再混入正文，返回值可安全喂回 `update_page`
+- 行级修改用 `append_to_page`（追加）与 `delete_lines`（1-based 行号区间删除），减少全文覆盖风险
 - `_sync_refs()` 与 api.py 的 `_sync()` 逻辑对等，改解析逻辑时两边同步改
 - 注意陷阱 #12：环境变量白名单问题
 
@@ -76,6 +89,7 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 ### `search.py` — 搜索查询构建
 
 - `build_search_query(query)` → `(fts_expr, like_patterns)` 元组
+- `rerank_by_name(rows, query)` → 名称相关度重排（精确 > 前缀 > 包含 > 内容），api.py 与 mcp_server.py 共用
 - jieba 可选依赖：`try/except import`，无 jieba 时降级为原始查询
 - api.py (`_search`) 和 mcp_server.py (`search`) 都调用此函数
 - 修改搜索逻辑时只改此函数，两处调用者自动生效
@@ -113,7 +127,7 @@ CDN 上 `6.65.7` 实际是 `5.65.7`。v6 是完全不同的 ESM 架构，不要�
 ### 5. 日记是页面
 
 日记不是独立表，是 `name = YYYY-MM-DD` 的页面。不要为日记建单独的表或 API。
-日记编辑器复用页面编辑器的 CodeMirror 实例，通过 `currentSaveMode = 'journal' | 'page'` 区分保存目标。`showJournal()` 会替换 `#editor-header` 为日期选择器，`newPage()`/`editPage()` 必须用 `originalHeaderHTML` 恢复。
+日记编辑器复用页面编辑器的 CodeMirror 实例，通过 `currentSaveMode = 'journal' | 'page'` 区分保存目标。`showJournal()` 会替换 `#editor-header` 为日期选择器，`newPage()`/`editPage()` 必须用 `originalHeaderHTML` 恢复。日记保存是「PUT 404 → POST 创建」两级（每天首篇日记页面不存在，纯 PUT 必失败）；日期选择器切换走 `journalSwitchDate()`（存草稿 + 重载内容），**不要**改回只赋值 `journalDate`——那会把 A 日未保存内容写进 B 日。
 
 ### 6. refs 写入不完整
 
@@ -177,7 +191,7 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 ### 18. 甘特图幻影条与 colorGanttBars 索引对齐
 
-循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。
+循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。任务条颜色经 `ganttPriorityColor()` 从 CSS 变量 `--p1..--p4` 读取（改优先级色只改变量，两处调用者——列表圆点 CSS 和甘特条 JS——同时生效）。
 
 ### 19. IP 白名单只信任可信代理的 X-Forwarded-For
 
@@ -192,26 +206,25 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 - **不要修改桌面行为**：桌面端 sidebar 仍是 narrow 模式，不要改成 drawer
 - **触摸事件不替代鼠标事件**：触摸事件和鼠标事件是并存的，都要支持
 
-### 21. 主题必须走 CSS 变量，不要在 JS 里写 inline style
+### 21. mermaid 是懒加载 + 幂等重渲染，v9 别升 v10+
 
-所有颜色都写成 `var(--token)`，token 定义在 `:root` / `[data-theme=...]`。自定义 CSS（`data/custom.css`）**只覆盖变量**，注入的 `<style id="custom-css">` 追加到 `<head>` 末尾（同等特异性下后者胜出）。
+- mermaid 9.4.3（UMD，自托管 `static/vendor/mermaid/`）首次遇到 `.mermaid` 块才加载（`ensureMermaidLoaded`）。**不要升级 v10/v11**：v10+ 只发 ESM 构建，内嵌浏览器加载不了 ESM（实测动态 import 超时），除非先把 ESM bundle 自托管到 static/。
+- `renderMermaidBlocks(root)` 是幂等的：原文存在 `dataset.src`，重渲染前必须 `textContent = src` 重置 + **`removeAttribute('data-processed')`**（v9 init 跳过已处理节点，漏了这步主题切换后图表会变成纯文本）。
+- 主题切换（setTheme）会 `initMermaidTheme()` 重新注入 CSS 变量并全量重渲染；新增主题变量只在 `initMermaidTheme` 里改。
+- 编辑预览走 300ms 防抖（updatePreview._mmd），别改成同步渲染——v9 init 是重同步操作。
+- 语法错误的块由 v9 就地渲染错误图，不要用 try/catch 替换成静默失败。
 
-**反面教材**（已废弃的 `applyCustomCSS()`）：遍历元素写 `el.style.backgroundColor`。后果：
-- 调用时不在 DOM 里的卡片（列表重渲染、命令面板、版本面板）拿不到样式 → 回退内置灰色
-- inline style 不会随主题切换清除 → 深浅色残留
-- 每次调用都 `addEventListener('mouseenter')` → 监听器堆积
-- 调色板硬编码在 JS 里，与 custom.css 重复
+### 22. markdown-it 规则注册顺序 + 嵌入引用机制
 
-新增可主题化的颜色时：在 `:root` 加 token → 组件里用 `var(--token)` → **不要**写死 hex。另外不要用
-`@media (prefers-color-scheme)` 定义主题变量：`initTheme()` 已经把系统偏好解析成 `data-theme`，媒体查询块的`:root:not([data-theme])`特异性 (0,2,0) 会静默压过用户的 `[data-theme="light"]` 覆盖。
+- `md.inline.ruler.before(名字, ...)` 在**名字对应的规则不存在时直接 throw**，会杀死整个 `<script>`（症状：首载白屏但函数手动调用正常——函数声明提升仍在）。新增规则注册时必须放在被引用规则**注册语句之后**（`kbembed` 的注册在 wikilink 之后，靠 `before('wikilink')` 插到它前面——先定义 `kbEmbedRule` 函数再注册，就是这个原因）。
+- 嵌入引用 `![[页面]]`：inline 规则只输出 `.kb-embed` 占位 div，内容由 `fillEmbeds(root, depth)` 异步拉取填充（`cachedFetch`），depth ≥ 2 显示"层级上限"防循环；缺失页占位 `.kb-embed-create` 走全局 `data-create` 委托（newPage + 预填名字）。
+- 首页看板：`showHome` 先试 `getDashboardPage()`（localStorage `kb-dashboard-page`，空 = 禁用），存在则渲染 + `fillEmbeds` + `renderMermaidBlocks`。看板就是普通页面，没有专用 API。
 
-### 22. 日记保存必须 PUT 失败后 POST
+### 23. 日记保存必须 PUT 失败后 POST
 
 日记是“以日期为名的页面”，可能尚不存在。`PUT /api/pages/{name}` 对不存在的页面返回 404，所以 `saveJournal()` 必须先 PUT、`resp.status === 404` 时回退 POST `/api/pages`。页面编辑器（`savePage()`）靠 `currentName` 区分 POST/PUT，日记没有这个名字，不能直接复用那条路径。
 
-另：`showJournal()` 要设 `currentName = date`，这样历史的 `deleteCurrentPage()` / `showVersionHistory()`（它们回退到 `currentName`）能直接作用于日记。
-
-### 23. pushRoute 的参数必须是数组
+### 24. pushRoute 的参数必须是数组
 
 `routeToUrl()` 用 `args[0]` 取参，所以 `pushRoute()` 内部要把单值包装成数组：
 
@@ -221,22 +234,20 @@ const arr = Array.isArray(args) ? args : (args == null ? [] : [args]);
 
 否则 `navigate('page', 'Ideas')` 会把字符串当字符数组，URL 被截成 `/page/I`，刷新/分享全 404。`navigate`、`editPage` 都传单值。
 
-### 24. Ctrl/Cmd-S 要绑在 document 而非 CodeMirror
+### 25. Ctrl/Cmd-S 要绑在 document 而非 CodeMirror
 
 CodeMirror 的 `extraKeys` 只在编辑器有焦点时触发。用户常在页面名输入框里按 Ctrl-S，此时会静默无反应。统一绑在 `document` 的 keydown 上，并加 `editor.style.display === 'block'` 守卫，不要再在 `extraKeys` 里重复绑（会双写）。
 
-### 25. 前端依赖必须自托管（vendor），不能依赖 CDN
+### 26. 前端依赖必须自托管（vendor），不能依赖 CDN
 
-所有库在 `static/vendor/`，由应用自己提供。**不要改回 CDN**：
+所有库在 `static/vendor/`（CodeMirror / markdown-it / Frappe Gantt / Mermaid），由应用自己提供。**不要改回 CDN**：
 
 - CDN 不可达时（离线/内网/墙）`<script>` 加载失败，`window.markdownit is not a function` 会在 `let md = window.markdownit({...})` 处**中断整个内联脚本**，页面白屏且无任何提示
 - 依赖是**浏览器**加载的，服务器能访问 CDN 不代表客户端能
 
 前缀处理：`templates/index.html` 头部的 bootstrap 用 `document.write` 注入带前缀的资源 URL，并把结果写入 `window.__KB_BASE__`；`detectBase()` 优先读它。后端 `main.py` 的 `strip_static_prefix` 中间件把 `/<prefix>/static/...` 重写为 `/static/...`，所以两种部署都不用改 nginx。
 
-主脚本开头有一个守卫：依赖缺失时渲染错误页并 `throw`，不要再出现静默白屏。
-
-### 26. 异步视图加载必须防竞态
+### 27. 异步视图加载必须防竞态
 
 视图切换都是 `async + await fetch`。若不加守卫，慢请求会覆盖后点的页面（已实测复现：先点 A 后点 B，A 的响应后到就把 B 盖掉）。
 
@@ -257,7 +268,7 @@ async function loadPage(name) {
 
 新增异步视图时照抄这个模式，否则会重新引入这个 bug。
 
-### 27. 不要用 monkey-patch 包装函数（会吞返回值）
+### 28. 不要用 monkey-patch 包装函数（会吞返回值）
 
 移动端适配曾这样给 `hideAll` 挂 FAB 刷新：
 
@@ -271,11 +282,11 @@ window.hideAll = function() { _origHideAll(); updateFABVisibility(); };
 而 `const token = hideAll()` 就全是 `undefined` —— 上一条的防线因此全部失效，
 且**不报任何错**（表现为页面永远不渲染）。
 
-**正确做法**：直接在函数体内显式调用 `updateFABVisibility()`（函数声明会提升，
-定义在后面也能调），不要包装。新增类似“副作用”时同理，
-写进目标函数而不是套壳。
+**正确做法**：直接在函数体内显式调用副作用（`updateFABVisibility()` /
+`resetMobilePreview()`，函数声明会提升，定义在后面也能调），不要包装。
+新增类似“副作用”时同理，写进目标函数而不是套壳。
 
-### 28. 不要静默吞异常
+### 29. 不要静默吞异常
 
 `except Exception: pass` 曾用在 FTS 查询上（查询写错时无从发现）。
 正确做法：捕窄异常类型 + 记日志 + 明确降级：
@@ -288,7 +299,7 @@ except sqlite3.OperationalError as e:
 注意：MCP 走 stdio，**stdout 是协议通道**，日志一律用 `logging`（默认 stderr），
 绝不能用 `print`。
 
-### 29. 容器 uid 必须与 data/ 属主一致
+### 30. 容器 uid 必须与 data/ 属主一致
 
 Dockerfile 用 `USER ${KB_UID}:${KB_GID}`（默认 1000）降权。uid 不匹配时写入会失败，
 所以 `main.py` 启动时用 `_assert_data_dir_writable()` 自检并**报错退出**，
@@ -301,7 +312,7 @@ KB_UID=$(id -u) KB_GID=$(id -g) docker compose up -d --build
 不要用 `useradd` 创建命名用户再 `USER name` —— 直接用数字 uid:gid 更简单，
 且不依赖基础镜像里是否有 `useradd`。
 
-### 30. sw.js / manifest 必须放在应用根路径
+### 31. sw.js / manifest 必须放在应用根路径
 
 Service Worker 的**作用域由其自身 URL 推导**，manifest 的 `start_url` /
 `scope` / 图标路径也都是**相对 manifest URL**解析。若放在 `/static/` 下：

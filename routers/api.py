@@ -18,8 +18,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_db, DB_PATH
-from parse import parse as parse_content
-from search import build_search_query
+from parse import parse as parse_content, find_link_lines
+from search import build_search_query, rerank_by_name, make_snippet
 
 router = APIRouter()
 
@@ -99,7 +99,7 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
             rows = await _fetchall(
                 db,
                 """
-                SELECT p.name, p.updated_at, p.created_at
+                SELECT p.name, p.updated_at, p.created_at, p.content
                 FROM pages_fts f JOIN pages p ON p.id = f.rowid
                 WHERE pages_fts MATCH ?
                 ORDER BY rank LIMIT ? OFFSET ?
@@ -107,7 +107,10 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
                 (fts_expr, limit, offset),
             )
             if rows:
-                return [dict(r) for r in rows]
+                ranked = rerank_by_name([dict(r) for r in rows], q)
+                for r in ranked:
+                    r["snippet"] = make_snippet(q, r.pop("content") or "")
+                return ranked
         except sqlite3.OperationalError as e:
             # A malformed MATCH expression must not abort the search, but do
             # leave a trace: swallowing this silently once hid a broken query
@@ -126,26 +129,32 @@ async def _search(db, q: str, limit: int, offset: int) -> list[dict]:
         rows = await _fetchall(
             db,
             f"""
-            SELECT name, updated_at, created_at FROM pages
+            SELECT name, updated_at, created_at, content FROM pages
             WHERE {' OR '.join(conditions)}
             ORDER BY updated_at DESC LIMIT ? OFFSET ?
             """,
             tuple(params),
         )
-        return [dict(r) for r in rows]
+        ranked = rerank_by_name([dict(r) for r in rows], q)
+        for r in ranked:
+            r["snippet"] = make_snippet(q, r.pop("content") or "")
+        return ranked
 
     # Final fallback: raw query LIKE (for very short input)
     like = f"%{q}%"
     rows = await _fetchall(
         db,
         """
-        SELECT name, updated_at, created_at FROM pages
+        SELECT name, updated_at, created_at, content FROM pages
         WHERE name LIKE ? OR content LIKE ?
         ORDER BY updated_at DESC LIMIT ? OFFSET ?
         """,
         (like, like, limit, offset),
     )
-    return [dict(r) for r in rows]
+    ranked = rerank_by_name([dict(r) for r in rows], q)
+    for r in ranked:
+        r["snippet"] = make_snippet(q, r.pop("content") or "")
+    return ranked
 
 
 async def _rename_page(db: aiosqlite.Connection, page_id: int, old_name: str, new_name: str) -> None:
@@ -402,17 +411,24 @@ async def get_page(name: str):
         )
         page["links"] = [l["target_name"] for l in links]
 
-        backlinks = await _fetchall(
+        backlink_rows = await _fetchall(
             db,
             """
-            SELECT p.name, p.updated_at FROM refs r
+            SELECT p.name, p.updated_at, p.content FROM refs r
             JOIN pages p ON p.id = r.source_id
             WHERE r.kind = 'link' AND r.target_name = ? COLLATE NOCASE
             ORDER BY p.updated_at DESC
             """,
             (name,),
         )
-        page["backlinks"] = [dict(b) for b in backlinks]
+        page["backlinks"] = [
+            {
+                "name": b["name"],
+                "updated_at": b["updated_at"],
+                "snippet": (find_link_lines(b["content"], name, max_lines=1) or [""])[0],
+            }
+            for b in backlink_rows
+        ]
 
         props = await _fetchall(
             db, "SELECT key, value FROM properties WHERE page_id = ?", (page["id"],)
