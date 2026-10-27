@@ -245,7 +245,7 @@ CodeMirror 的 `extraKeys` 只在编辑器有焦点时触发。用户常在页�
 - CDN 不可达时（离线/内网/墙）`<script>` 加载失败，`window.markdownit is not a function` 会在 `let md = window.markdownit({...})` 处**中断整个内联脚本**，页面白屏且无任何提示
 - 依赖是**浏览器**加载的，服务器能访问 CDN 不代表客户端能
 
-前缀处理：`templates/index.html` 头部的 bootstrap 用 `document.write` 注入带前缀的资源 URL，并把结果写入 `window.__KB_BASE__`；`detectBase()` 优先读它。后端 `main.py` 的 `strip_static_prefix` 中间件把 `/<prefix>/static/...` 重写为 `/static/...`，所以两种部署都不用改 nginx。
+前缀处理：`templates/index.html` 头部的 bootstrap 用 `document.write` 注入带前缀的资源 URL，并把结果写入 `window.__KB_BASE__`；`detectBase()` 优先读它。后端 `main.py` 的 `strip_static_prefix` 中间件把 `/<prefix>/static/...` 和 `/<prefix>/api/...` 重写为 `/static/...`、`/api/...`。检测必须在**未解码**的 `raw_path` 上做——`scope["path"]` 已解码，页面名里的 `%2F` 会变回 `/`，名为 `api/x`、`static/y` 的页面会被误重写（在 path 上检测 `/static/` 的旧版就有这个潜在 bug）。`raw_path` 保留 `%2F`，字面 `/static/`、`/api/` 只可能是部署前缀。两种部署都不用改 nginx。
 
 ### 27. 异步视图加载必须防竞态
 

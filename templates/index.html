@@ -1833,10 +1833,15 @@ function getDashboardPage() {
 async function editDashboard() {
   const name = getDashboardPage();
   if (!name) return;
+  const token = ++viewToken;   // claim this navigation before the await
   try {
     const resp = await fetch(`${API}/pages/${encodeURIComponent(name)}`);
+    if (token !== viewToken) return;
     if (resp.ok) { editPage(await resp.json()); return; }
-  } catch (e) { /* fall through to create */ }
+  } catch (e) {
+    if (token !== viewToken) return;
+    /* fall through to create */
+  }
   newPage();
   document.getElementById('page-name').value = name;
   if (cm) cm.focus();

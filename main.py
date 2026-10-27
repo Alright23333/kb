@@ -2,6 +2,7 @@
 import asyncio
 import ipaddress
 import os
+from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -117,20 +118,28 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 
 
-# ── Static assets under a deployment prefix ─────────────────────
+# ── Static assets & API under a deployment prefix ───────────────
 # nginx passes the prefix through untouched (proxy_pass without a trailing
-# slash), so /kb/static/vendor/x.js arrives verbatim while StaticFiles only
-# knows about /static. Rewrite the path before routing so the vendored assets
-# resolve under both subdomain and path-prefix deployments, with no extra
-# nginx location block and no duplicated file-serving logic.
+# slash), so /kb/static/vendor/x.js and /kb/api/pages arrive verbatim while
+# StaticFiles and the API router only know /static and /api. Rewrite the path
+# before routing so both resolve under subdomain and path-prefix deployments,
+# with no extra nginx location block.
+#
+# Detection MUST run on the raw (still percent-encoded) path: scope["path"]
+# is already decoded, so a page named "api/x" (URL /page/api%2Fx, slashes
+# encoded per encodeURIComponent) would falsely match "/api/" after decoding.
+# raw_path keeps %2F as-is, so a literal "/static/" or "/api/" there can only
+# be a deployment prefix.
 @app.middleware("http")
 async def strip_static_prefix(request: Request, call_next):
-    path = request.scope.get("path", "")
-    idx = path.find("/static/")
-    if idx > 0:  # >0 means there is a prefix; /static/... is already correct
-        trimmed = path[idx:]
-        request.scope["path"] = trimmed
-        request.scope["raw_path"] = trimmed.encode("utf-8")
+    raw = request.scope.get("raw_path") or request.scope["path"].encode("utf-8")
+    for marker in (b"/static/", b"/api/"):
+        idx = raw.find(marker)
+        if idx > 0:  # >0 means there is a prefix; the marker path is already correct
+            trimmed = raw[idx:]
+            request.scope["raw_path"] = trimmed
+            request.scope["path"] = unquote(trimmed.decode("latin-1"))
+            break
     return await call_next(request)
 
 
