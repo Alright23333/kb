@@ -83,13 +83,37 @@ kb-docker/data/kb.db                                      │
 
 ## 本机（fajita）的配置对比
 
-本机不需要 SSH 跳板，直接用 docker exec：
+本机不需要 SSH 跳板，直接连常驻的 kb-mcp 容器的 HTTP 端点：
 
 ```yaml
 mcp_servers:
   kb:
-    command: docker
+    url: http://127.0.0.1:8092/mcp/
+    timeout: 120
+    connect_timeout: 60
+    enabled: true
+```
+
+> HTTP 传输（Streamable HTTP）优于 stdio：stdio 下每个 MCP 客户端都会
+> `docker exec` 拉起一份 `python mcp_server.py`，本机一度同时有 4 份，
+> 各约 80MB PSS；HTTP 只有一份常驻。
+>
+> 端点**不鉴权**，所以容器只绑 `127.0.0.1:8092`，不对外暴露。
+> 其他设备请用下面的 SSH 跳板方式。
+
+### 跨设备（stdio over SSH）
+
+```yaml
+mcp_servers:
+  kb:
+    command: ssh
     args:
+      - -o
+      - StrictHostKeyChecking=accept-new
+      - -o
+      - ConnectTimeout=10
+      - user@100.88.251.64
+      - docker
       - exec
       - -i
       - kb
@@ -117,6 +141,10 @@ mcp_servers:
 | `get_backlinks(name)` | 获取反链 |
 | `get_page_versions(name)` | 版本历史（含已删除页面） |
 | `restore_page_version(name, version_id)` | 恢复旧版本 |
+| `append_to_page(name, content)` | 追加写入（不覆盖全文，行级修改场景更安全） |
+| `delete_lines(name, lines)` | 逐行删除（避开全文覆盖式更新的纰漏） |
+| `append_to_journal(content, date?)` | 记日记一步到位（默认今天，页面不存在自动创建） |
+| `recently_changed(since)` | 增量拉取「上次看过之后改了什么」 |
 
 ---
 
