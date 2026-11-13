@@ -18,10 +18,21 @@ WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 # markers ("#+BEGIN_..."), URL anchors ("a#frag") and mid-word hashes
 # ("foo#bar"). Punctuation (half/full-width brackets, commas...) terminates
 # the tag instead of being captured into it.
-TAG_RE = re.compile(r"(?<![\w#])#(?!\+)([\w-]+)")
+#
+# The lookbehind is ASCII-only on purpose: Python's \w matches CJK, so a
+# CJK-aware lookbehind would reject "第12周#Monday" while the front-end
+# (JS \w is ASCII-only) still autocompletes it — the two rules would drift
+# apart. The tag *body* stays \w so CJK tag names ("#采购") still work.
+TAG_RE = re.compile(r"(?<![0-9A-Za-z_#])#(?!\+)([\w-]+)")
 
 # Fenced code blocks (``` / ~~~) and inline code are never parsed for tags.
 CODE_RE = re.compile(r"(?s)(```.*?```|~~~.*?~~~|`[^`\n]*`)")
+
+# URLs are stripped before tag extraction: a '#' inside a URL is a fragment
+# ("https://x.com/#grid12", "…#cookie"), never a tag. The character class
+# stops at whitespace and at the punctuation that commonly closes a URL in
+# prose or a markdown link.
+URL_RE = re.compile(r"(?i)\b(?:https?|ftp)://[^\s)\]\"'<>]+")
 
 # Property line: optional list bullet, then `key:: value`.
 PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
@@ -43,9 +54,10 @@ def extract_tags(content: str) -> set[str]:
     """Return the set of tags from `#tag`, ignoring [[..]] internals, headings,
     and anything inside code blocks or inline code."""
     # Strip code first, then wiki-link brackets so a tag inside [[#x]]
-    # is not double-counted.
+    # is not double-counted, then URLs so "#frag" is not read as a tag.
     stripped = CODE_RE.sub(" ", content)
     stripped = WIKILINK_RE.sub(" ", stripped)
+    stripped = URL_RE.sub(" ", stripped)
     tags = {m.group(1).rstrip("-") for m in TAG_RE.finditer(stripped)}
     return {t for t in tags if t}
 

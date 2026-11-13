@@ -9,6 +9,10 @@ import os
 
 import aiosqlite
 
+# Pin the process timezone before any timestamp is written: the DB stores
+# naive local times and the front-end shows them as browser-local.
+import timeutil  # noqa: F401  — importing pins TZ
+
 DB_PATH = os.environ.get("KB_DB_PATH", "/home/user/services/kb/data/kb.db")
 
 SCHEMA = """

@@ -191,9 +191,13 @@ async def _rename_page(db: aiosqlite.Connection, page_id: int, old_name: str, ne
     # 3. Update page name
     await db.execute("UPDATE pages SET name = ? WHERE id = ?", (new_name, page_id))
 
-    # 4. Rewrite inbound links
+    # 4. Rewrite inbound links.
+    # Only kind='link': a tag ref comes from the page *content* (#tag), not
+    # from a page name. Rewriting tag refs here turned "#画画" into the
+    # phantom tag "绘画-练习日志" when the page 画画 was renamed.
     await db.execute(
-        "UPDATE refs SET target_name = ? WHERE target_name = ? COLLATE NOCASE",
+        "UPDATE refs SET target_name = ? WHERE target_name = ? COLLATE NOCASE "
+        "AND kind = 'link'",
         (new_name, old_name),
     )
 
@@ -561,13 +565,16 @@ async def delete_page(name: str):
 async def list_tags():
     db = await get_db()
     try:
+        # Join pages: a ref whose source page was deleted is an orphan and
+        # must not keep a tag visible ("无人使用的标签没有自动删除").
         rows = await _fetchall(
             db,
             """
-            SELECT target_name AS name, COUNT(*) AS count
-            FROM refs WHERE kind = 'tag'
-            GROUP BY target_name
-            ORDER BY count DESC, target_name
+            SELECT r.target_name AS name, COUNT(*) AS count
+            FROM refs r JOIN pages p ON p.id = r.source_id
+            WHERE r.kind = 'tag'
+            GROUP BY r.target_name
+            ORDER BY count DESC, r.target_name
             """,
         )
         return [dict(r) for r in rows]

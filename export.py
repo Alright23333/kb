@@ -12,6 +12,10 @@ import sys
 import zipfile
 from datetime import datetime
 
+# Pin the process timezone before any timestamp is written: the DB stores
+# naive local times and the front-end shows them as browser-local.
+import timeutil  # noqa: F401  — importing pins TZ
+
 DB_PATH = os.environ.get(
     "KB_DB_PATH",
     os.path.join(os.path.dirname(__file__), "data", "kb.db"),

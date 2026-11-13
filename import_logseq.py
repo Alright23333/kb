@@ -15,6 +15,10 @@ import aiosqlite
 from database import DB_PATH, init_db, get_db
 from parse import parse as parse_content
 
+# Pin the process timezone before any timestamp is written: the DB stores
+# naive local times and the front-end shows them as browser-local.
+import timeutil  # noqa: F401  — importing pins TZ
+
 LOGSEQ_DIR = os.environ.get("LOGSEQ_DIR", "/home/user/Documents/DocumentsNya")
 
 # journals/2026_6_18.md -> name "2026-06-18" (month/day zero-padded)

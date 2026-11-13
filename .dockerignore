@@ -45,3 +45,8 @@ docker-compose*.yml
 Dockerfile
 .dockerignore
 *.log
+
+# Tests and one-off maintenance scripts: not needed at runtime.
+# Run them on the host against the mounted data/ instead.
+tests/
+scripts/

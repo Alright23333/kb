@@ -8,6 +8,8 @@ services:
       args:
         KB_UID: ${KB_UID:-1000}
         KB_GID: ${KB_GID:-1000}
+        # fajita-recovery: 校园网直连 pypi.org 极慢，默认走国内镜像（可 env 覆盖）
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.ustc.edu.cn/pypi/simple}
     container_name: kb
     ports:
       # Loopback only: nginx proxies from the host. Prevents direct external
@@ -18,13 +20,58 @@ services:
     restart: unless-stopped
     environment:
       - KB_DB_PATH=/app/data/kb.db
+      # The container must run in the user's timezone. Without TZ, glibc
+      # falls back to UTC and SQLite datetime('now','localtime') writes
+      # UTC — the stored wall clock then disagrees with the browser.
+      - TZ=Asia/Shanghai
       - KB_IP_WHITELIST=1
-      - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48
+      # 172.17/172.22 是 Docker 网桥网段：容器端口绑 127.0.0.1，外部进不来，
+      # 这里的网段只用于「本机直连且没带 X-Forwarded-For」的兼容路径
+      #（例：curl 127.0.0.1:8080）。正常走 nginx 时 peer 是 172.17.0.1，
+      # 已在 KB_TRUSTED_PROXIES 内，会采信 XFF 取真实客户端 IP。
+      - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,172.17.0.0/16,172.22.0.0/16,::1/128,fd7a:115c:a1e0::/48
       # nginx reaches the container through the Docker bridge gateway
       # (172.17.0.1), so XFF is trusted from loopback + 172.16.0.0/12.
       - KB_TRUSTED_PROXIES=127.0.0.0/8,::1/128,172.16.0.0/12
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/pages?limit=1', timeout=5).read(100)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # KB 的 MCP server，改用 Streamable HTTP 传输。
+  # 为什么要单独一个容器：stdio 传输下，每个 MCP 客户端都会 stdio 拉起一份
+  # python mcp_server.py（本机一度有 4 份，各 ~80MB PSS）。HTTP 只有一份常驻。
+  # 与 kb 主服务共用 ./data（SQLite WAL 模式，多进程并发读写安全）。
+  kb-mcp:
+    build:
+      context: .
+      args:
+        KB_UID: ${KB_UID:-1000}
+        KB_GID: ${KB_GID:-1000}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.ustc.edu.cn/pypi/simple}
+    container_name: kb-mcp
+    command: ["python3", "/app/mcp_http.py"]
+    ports:
+      # 仅本机：MCP 端点不鉴权，暴露到 tailnet 等于把 KB 读写开放给所有设备
+      - "127.0.0.1:8092:8081"
+    volumes:
+      - ./data:/app/data
+      - ./mcp_http.py:/app/mcp_http.py:ro
+    restart: unless-stopped
+    environment:
+      - KB_DB_PATH=/app/data/kb.db
+      - TZ=Asia/Shanghai
+    healthcheck:
+      # Streamable HTTP 只接受 POST，GET /mcp/ 会返回 400 —— 必须用真实的
+      # initialize 请求做探针，否则永远 unhealthy。
+      test: ["CMD", "python", "-c", "import urllib.request,json; d=json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'hc','version':'1'}}}).encode(); r=urllib.request.Request('http://localhost:8081/mcp/',data=d,headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}); urllib.request.urlopen(r,timeout=5).read(64)"]
       interval: 30s
       timeout: 10s
       start_period: 15s

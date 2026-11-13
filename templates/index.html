@@ -2849,8 +2849,12 @@ function insertRef(name) {
 let autocompleteMode = null;   // 'ref' | 'tag'
 let tagCache = null;           // [{name, count}]
 
-// Trigger pattern: # not preceded by another # (heading) or word char
-const TAG_TRIGGER_RE = /(^|[^#\w])#([\w-]*)$/;
+// Trigger pattern: # not preceded by another # (heading) or an ASCII word
+// char. The left boundary is ASCII-only on purpose (JS \w is ASCII-only),
+// matching the backend TAG_RE: a CJK char before '#' does not cancel the
+// tag ("第12周#Monday"). The tag body accepts Unicode letters/numbers so
+// CJK tag names ("#采购") autocomplete too.
+const TAG_TRIGGER_RE = /(^|[^#0-9A-Za-z_])#([\p{L}\p{N}_-]*)$/u;
 
 async function showTagAutocomplete(query, cursor) {
   autocompleteMode = 'tag';

@@ -47,6 +47,10 @@ from datetime import datetime
 from fastmcp import FastMCP
 from search import build_search_query, rerank_by_name, make_snippet
 
+# Pin the process timezone before any timestamp is written: the DB stores
+# naive local times and the front-end shows them as browser-local.
+import timeutil  # noqa: F401  — importing pins TZ
+
 # MCP stdio uses stdout for the protocol — logging must go to stderr, which is
 # what the logging module does by default.
 log = logging.getLogger("kb.mcp")
@@ -61,6 +65,11 @@ def _db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # Cascade DELETE on refs/properties when a page is deleted. Without this
+    # pragma SQLite ignores the FOREIGN KEY ... ON DELETE CASCADE clauses in
+    # the schema, so deleting a page left its refs behind — orphan tag rows
+    # that kept showing up in the tag list with no page behind them.
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -456,9 +465,12 @@ def get_tags() -> str:
     """List all tags with page counts, sorted by count descending."""
     conn = _db()
     try:
+        # Join pages: orphan refs (source page deleted) must not show up.
         rows = conn.execute(
-            "SELECT target_name AS name, COUNT(*) AS count FROM refs "
-            "WHERE kind='tag' GROUP BY target_name ORDER BY count DESC, target_name"
+            "SELECT r.target_name AS name, COUNT(*) AS count FROM refs r "
+            "JOIN pages p ON p.id = r.source_id "
+            "WHERE r.kind='tag' GROUP BY r.target_name "
+            "ORDER BY count DESC, r.target_name"
         ).fetchall()
         if not rows:
             return "No tags"
@@ -544,8 +556,12 @@ def rename_page(old_name: str, new_name: str) -> str:
             (old_name, new_name),
         )
         conn.execute("UPDATE pages SET name=? WHERE id=?", (new_name, page_id))
+        # Only kind='link': a tag ref comes from the page *content* (#tag), not
+        # from a page name. Rewriting tag refs here turned "#画画" into the
+        # phantom tag "绘画-练习日志" when the page 画画 was renamed.
         conn.execute(
-            "UPDATE refs SET target_name=? WHERE target_name=? COLLATE NOCASE",
+            "UPDATE refs SET target_name=? WHERE target_name=? COLLATE NOCASE "
+            "AND kind='link'",
             (new_name, old_name),
         )
         conn.commit()

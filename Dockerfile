@@ -8,13 +8,16 @@ ARG KB_UID=1000
 ARG KB_GID=1000
 
 ENV PYTHONUNBUFFERED=1 \
-    HOME=/home/kb
+    HOME=/home/kb \
+    TZ=Asia/Shanghai
 
 WORKDIR /app
 
 # Dependencies first so editing the app doesn't invalidate the pip layer.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# fajita-recovery: 可覆盖的 PyPI 源（校园网直连 pypi.org 极慢，默认走 USTC 镜像）
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN pip install --no-cache-dir -i "${PIP_INDEX_URL}" -r requirements.txt
 
 # Application. See .dockerignore: data/, .git and __pycache__ never enter
 # the image (the DB is a bind-mounted volume at runtime).
