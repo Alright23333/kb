@@ -1,7 +1,8 @@
 > KB（自建笔记软件：FastAPI + SQLite + 速成前端 + Hermes Agent MCP 接口，详见 [[KB]]）——兼作**问题清单 + 开发更新日志**。
 > 上半部是待办状态（做完打勾、只改状态）；最底部“更新日志”是按日期的时间线，只追加不回改。
 > 2026-10-10 整理：汇总自 [[KB]] 页的“bug与待办 / KB修改计划 / 可选”，叠加同日通过 MCP 全链路实测发现的问题。方向性结论回写 [[KB]] 描述。
-> **[[2026-10-25]] 状态快照**：P0–P2 彻底清零；P3 完成 2/4（剩 AI 参与度重审、飞书——均属决策/权限，暂缓）；**P4 全部 12 项完成**。⚠️ 生产 **fajita 尚未部署**（仍是 2026-09-29 版，部署前先备份数据库）；本地领先 8 个提交待 SSH push。
+> **[[2026-11-13]] 状态快照**：P0–P2 彻底清零；P3 完成 2/4（剩 AI 参与度重审、飞书——均属决策/权限，暂缓）；**P4 全部 12 项完成**。✅ 生产 **fajita 已部署**（容器 healthy，与仓库同 commit）；✅ Git 已同步（本地 = origin/main，无领先/落后）。
+> 本轮新增：**fajita 生产环境的 6 项 bug 修复正式入库**（此前只存在于服务器工作区未提交，随时可能因 pull 丢失）——时区（容器 UTC 差 8 小时）、URL 片段误判为标签、CJK 标签规则前后端漂移、改名误改标签、孤儿 ref 残留、MCP stdio 多进程内存开销。附带入库：`timeutil.py` 时区固定、`mcp_http.py` Streamable HTTP 传输、`tests/` 32 例单元测试、`scripts/` 运维脚本、`MCP_REMOTE.md` 远程接入指南。
 
 ## P0 索引与后端（影响所有 AI 协作）
 
@@ -59,6 +60,28 @@
 - [x] 搜索结果内容命中片段（Google 式摘要，现在只高亮页名）（[[2026-10-25]] 实现：`make_snippet` 下沉 search.py 三路共享，REST 与 MCP 同源）
 - [x] 常用搜索/过滤器保存（[[2026-10-25]] 实现：搜索页“📌 固定”→ 首页 chips，≤8 个，点击再搜/✕ 删除）
 
+## P5 生产环境修复与工程化（[[2026-11-13]] fajita 实测发现，全部已入库）
+
+- [x] **容器时区**：无 TZ env 时 glibc 回落 UTC，SQLite `datetime('now','localtime')` 写入 UTC 时刻，而浏览器按本地渲染 → 全站时间戳差 8 小时（[[2026-11-13]] 新增 `timeutil.py`：import 即 `tzset()` 固定时区，默认 Asia/Shanghai，可用 `KB_TZ` 覆盖；各入口 import；compose 加 `TZ=Asia/Shanghai`。实测：无 TZ 写 06:53 → 修复后写 14:53）
+- [x] **URL 片段误判为标签**：`https://x.com/#grid12` 的 `#grid12` 被登记成真标签（[[2026-11-13]] `parse.py` 加 `URL_RE` 先行剥离 URL）
+- [x] **CJK 标签规则前后端漂移**：Python `\w` 匹配 CJK，`第12周#Monday` 被后端拒但前端仍补全（[[2026-11-13]] 后端 lookbehind 改 ASCII-only；前端 `TAG_TRIGGER_RE` 正文改 `\p{L}\p{N}`，CJK 标签名（#采购）可补全；规则对齐）
+- [x] **改名误改标签**：rename 把所有 target 匹配行都改写，包括 `kind='tag'` —— 页面「画画」改名后，内容里的 `#画画` 变成幻影标签「绘画-练习日志」（[[2026-11-13]] rename 只重写 `kind='link'`：标签来自内容不是页面名）
+- [x] **孤儿 ref 残留**：SQLite 默认不启用 FK，schema 里的 `ON DELETE CASCADE` 被忽略 → 删页后 refs 残留，「无人使用的标签」仍显示在列表里（[[2026-11-13]] `mcp_server.py` 加 `PRAGMA foreign_keys=ON`；`list_tags` JOIN pages 过滤孤儿）
+- [x] **MCP stdio 多进程开销**：stdio 传输下每个客户端都拉起一份 `python mcp_server.py`（本机一度 4 份，各 ~80MB PSS）（[[2026-11-13]] 新增 `mcp_http.py`：同一 FastMCP 实例走 Streamable HTTP，一份常驻；compose 加 `kb-mcp` 服务，绑 `127.0.0.1:8092`；附 `MCP_REMOTE.md` 远程接入指南）
+- [x] **服务器工作区与仓库分叉风险**：上述修复原本只在服务器未提交，下次 pull 必冲突（[[2026-11-13]] 全部整理入库（`bed4469`），服务器改用 `git pull` 更新）
+- [x] **仓库无测试**：改解析正则没回归网（[[2026-11-13]] 新增 `tests/` 32 例单元测试（标签/URL 边界 27 + FK/改名/孤儿 5），`scripts/` 运维脚本（时区修复、reindex））
+
+## P6 前端可访问性与信息密度（[[2026-11-13]] ui-ux-pro-max review，实测发现）
+
+- [ ] **侧边栏导航键盘不可达**：`<a class="nav-item">` 无 `href`/`tabindex` → 5 个导航项 Tab 全部跳过，键盘用户无法离开首页（改法：加 `href`，现有 click 委托已 `preventDefault`，顺带获得新标签打开）
+- [ ] **次要文字对比度不达标**：`var(--muted)` 实测 2.54–4.91:1（要求 4.5）——内置 light 3.54/3.25、Tokyo Night dark 2.76/2.91、Tokyo Night light 2.54/3.28；被 63 处引用
+- [ ] **焦点样式被移除**：全文件仅 2 处 `:focus` 且都 `outline: none` 无替代，键盘用户看不到焦点位置（改法：统一 `:focus-visible` 环）
+- [ ] **列表不随数据规模扩展**：生产库 470 页 / 75 标签，但列表是全宽单列无 `max-width`（对比 `#page-view` 有 720px），470 页 ≈ 3.7 万像素滚动；标签侧栏无折叠/过滤
+- [ ] **图标按钮无无障碍名称**：0 处 `aria-label`，只有 `title`（`◀ ⚙️ 🌙 ＋ － 🗑️ 🕘` 等）
+- [ ] **toast 不播报**：无 `aria-live`/`role="status"`，保存成功/失败对读屏用户不可知
+- [ ] **未尊重减弱动效**：0 处 `prefers-reduced-motion`，但有 9 处 `transition`
+- [ ] **图标用 emoji**（约 50 处）：字形跨平台不一致、无法用设计 token 调色、同层级混用填充/线性风格（skill 明确列为反模式）
+
 ## 工程习惯（源自 KB 页风险提示，保持）
 
 - 更新前先手动备份 kb 数据库文件（每日自动备份目录之外再加一层）
@@ -92,3 +115,5 @@
 - [[2026-10-25]] — P4 第二批（键盘流 + 体检）：j/k/Enter/Esc 列表导航（焦点/输入法/移动端过滤，Ctrl/Cmd+B/I 编辑器包裹）；「所有页面」新增 🩺 体检折叠区（孤立页按新旧排序 + 断链按目标聚合可一键创建，摘要后台预计算，纯前端基于 graph API；独立侧边栏入口方案经用户反馈否决）。全链路浏览器验证通过（修复 knavClear 索引重置 TypeError）
 - [[2026-10-25]] — P4 批A（检索+阅读四件套）：搜索命中片段（make_snippet 三路共享）、页面 TOC 折叠条（h≥3，缩进跳转）、库统计并入体检区（页/链/近7天活跃+标签TOP8）、保存搜索（首页 chips ≤8）；批B：图谱力导向布局（手写力模型零依赖，拖动 pin/松手 reheat，收敛自动 fit），签名视图最终形态。P4 至此 12/12 全清
 - [[2026-10-25]] — 修日记保存 bug（P2 最后一项，原 10-07 修复已丢失故在仓库重修）：saveJournal PUT 遇 404 回落 POST（每天首篇日记此前必失败）；日期选择器切换改为重载当天内容 + 草稿兜底，消除跨日覆盖隐患。新建/更新/切日全链路验证通过
+- [[2026-11-13]] — 生产环境修复入库（`bed4469`）：fajita 上实测发现的 6 个 bug 此前只存在于服务器工作区（未提交，随时可能因 pull 丢失），现全部整理进仓库，服务器改用 git pull 更新。① 时区：容器无 TZ → glibc 回落 UTC → SQLite 写 UTC 时刻，浏览器按本地渲染，全站时间戳差 8 小时；新增 `timeutil.py`（import 即 tzset，默认 Asia/Shanghai，KB_TZ 可覆盖），各入口 import + compose 加 TZ，实测 06:53 → 14:53 ② URL 片段误判为标签（`#grid12`）→ parse.py 加 URL_RE ③ CJK 标签规则前后端漂移（`第12周#Monday`）→ 后端 lookbehind 改 ASCII-only、前端 `TAG_TRIGGER_RE` 正文改 `\p{L}\p{N}` ④ 改名误改标签（页面「画画」改名后 `#画画` 变幻影标签）→ rename 只重写 kind='link' ⑤ 孤儿 ref 残留（SQLite 未启用 FK，CASCADE 被忽略，删页后「无人使用的标签」仍显示）→ mcp_server 加 `PRAGMA foreign_keys=ON` + list_tags JOIN pages ⑥ MCP stdio 多进程开销（本机 4 份各 ~80MB）→ 新增 mcp_http.py 走 Streamable HTTP + compose kb-mcp 服务（127.0.0.1:8092）。同时入库 `tests/` 32 例单元测试、`scripts/` 运维脚本、`MCP_REMOTE.md` 接入指南、Dockerfile/compose 的 PIP 镜像可覆盖（校园网 pypi.org 极慢）。仓库复现验证：单元测试 32/32 ✓ 时区 ✓ 改名 ✓ 孤儿标签 ✓
+- [[2026-11-13]] — 进度对齐：确认生产 fajita 已部署（容器 healthy、与仓库同 commit）、Git 已同步（原「本地领先 8 个提交待 push」与「生产尚未部署」两条均已过时，状态快照已改写）。新增 P6 前端可访问性清单（ui-ux-pro-max review 实测：侧边栏导航 Tab 完全跳过 / `--muted` 对比度 2.54–4.91:1 不达标 / 焦点样式被移除 / 470 页列表无 max-width / 0 处 aria-label / 无 aria-live toast / 无 prefers-reduced-motion / 约 50 处 emoji 图标），已按 P0→P3 排序待办
