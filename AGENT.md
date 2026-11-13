@@ -65,14 +65,31 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - `pages/子目录/页面.md` → 页面名 `子目录/页面`
 - `_reset_db()` 会删除 `kb.db`、`kb.db-wal`、`kb.db-shm` 三个文件
 
-### `mcp_server.py` — MCP Server（stdio）
+### `mcp_server.py` — MCP Server（工具定义）
 
 - 17 个工具（读/写/行级修改/版本恢复），直连 SQLite 不走 FastAPI
+- **两种传输共用同一份工具定义**：
+  - stdio：`python mcp_server.py`（本地 Claude Desktop / 跨设备 over SSH）
+  - Streamable HTTP：`python mcp_http.py`（服务端常驻，一份进程服务多个客户端）
+  - 选 HTTP 的理由：stdio 下每个客户端都拉起一份 python（本机一度 4 份，各 ~80MB PSS）
+- HTTP 端点**不鉴权** → 必须绑 `127.0.0.1`，对外只走 SSH / 受控代理
 - `search` 返回体每条带内容摘要片段（`_snippet()`）；追加类工具走共用 `_append()` helper，改追加逻辑只动它
 - `get_page` 返回 JSON，`content` 为独立字段——元信息不再混入正文，返回值可安全喂回 `update_page`
 - 行级修改用 `append_to_page`（追加）与 `delete_lines`（1-based 行号区间删除），减少全文覆盖风险
 - `_sync_refs()` 与 api.py 的 `_sync()` 逻辑对等，改解析逻辑时两边同步改
 - 注意陷阱 #12：环境变量白名单问题
+
+### `timeutil.py` — 时区固定
+
+- import 即固定进程时区（`TZ` env + `time.tzset()`），默认 `Asia/Shanghai`，`KB_TZ` 可覆盖
+- **每个写库的入口都要 import**（`database.py` / `export.py` / `import_logseq.py` / `mcp_server.py`）
+- 容器里还需 `TZ=Asia/Shanghai`（compose 已配）——两者缺一不可，见陷阱 #31
+
+### `tests/` / `scripts/`
+
+- `tests/` 单元测试（32 例）：标签/URL 边界、FK 级联、改名只改 link、孤儿 tag 不计入
+- 改解析正则后必须跑：`python -m unittest discover -s tests -v`
+- `scripts/` 运维脚本：`fix_tz_utc_to_local.py`（历史数据时区修复）、`reindex.py`（重建 refs/properties）
 
 ### `export.py` — 导出 CLI
 
@@ -326,6 +343,82 @@ manifest 里的路径全部用相对形式（`start_url: "."`、图标 `static/i
 这样 `/` 和 `/kb/` 共用同一份文件，不需要服务端注入前缀。
 
 改了外壳内容记得递增 `static/sw.js` 的 `VERSION`。
+
+### 32. 容器必须显式设时区，否则时间戳差 8 小时
+
+数据库存的是**无时区的本地时刻**（`datetime('now','localtime')`），前端按浏览器
+本地渲染。容器**没有 `TZ` env 时 glibc 回落 UTC** → SQLite 写入的是 UTC 时刻
+→ 浏览器按本地渲染 → 全站时间戳差 8 小时。
+
+修复是**两处都要**：
+1. compose 加 `TZ=Asia/Shanghai`
+2. 各写库入口 `import timeutil`（见 #33）
+
+光设 `TZ` 不够——进程内的 SQLite 连接仍可能不跟随；光 import 不够——容器
+启动时 glibc 已经是 UTC。
+
+实测：缺 `TZ` 时 SQLite 写 `06:53`，`import timeutil` 后写 `14:53`（= 真实 CST）。
+
+### 33. 写库的入口都要 import timeutil
+
+```python
+import timeutil   # noqa: F401 — import 即固定时区
+```
+
+`timeutil.py` 在 import 时设 `TZ` env 并调 `time.tzset()`，让 Python 与 SQLite
+的 `localtime` 一致（SQLite 的 `localtime` 跟 C 库走）。默认 `Asia/Shanghai`，
+`KB_TZ` 可覆盖。
+
+已覆盖的入口：`database.py` / `export.py` / `import_logseq.py` / `mcp_server.py`。
+**新增写库脚本时别忘了**——历史数据可用 `scripts/fix_tz_utc_to_local.py` 修。
+
+### 34. SQLite 默认不启用外键
+
+`PRAGMA foreign_keys` **默认 OFF**，此时 schema 里的
+`REFERENCES ... ON DELETE CASCADE` 被忽略 → 删页后 `refs` 残留 → 孤儿行
+仍出现在标签列表（「无人使用的标签没有自动删除」）。
+
+- `database.py:get_db()` 已设 `PRAGMA foreign_keys=ON`
+- `mcp_server.py:_db()` 也必须设（它用原生 `sqlite3` 直连，不走 `get_db`）
+- 新增裸 sqlite3 连接时记得带上
+
+### 35. 标签规则前后端必须一致（Python \\w 匹配 CJK，JS \\w 不匹配）
+
+`extract_tags()` 的 lookbehind 必须是 **ASCII-only**：
+
+```python
+TAG_RE = re.compile(r"(?<![0-9A-Za-z_#])#(?!\+)([\w-]+)")   # 对
+```
+
+若写成 `(?<![\w#])`，Python 的 `\w` 会匹配 CJK → `第12周#Monday` 被后端拒，
+而前端（JS `\w` 是 ASCII-only）仍然补全 → 前后端规则漂移。
+
+前端对应：`TAG_TRIGGER_RE = /(^|[^#0-9A-Za-z_])#([\p{L}\p{N}_-]*)$/u`
+（正文用 `\p{L}\p{N}` 以支持 CJK 标签名如 `#采购`）
+
+另外 URL 里的 `#fragment` 不是标签——`extract_tags()` 先用 `URL_RE` 剥离 URL。
+
+改任何一侧都要同步另一侧，并跑 `python -m unittest discover -s tests`。
+
+### 36. 改名只重写 kind='link'，不能碰 tag
+
+```sql
+UPDATE refs SET target_name = ? WHERE target_name = ? AND kind = 'link'
+```
+
+标签来自**页面内容**（`#画画`），不是页面名。之前没加 `kind` 限定，改名时
+把标签也一起改写了 → 页面「画画」改名后，内容里的 `#画画` 变成幻影标签
+「绘画-练习日志」。
+
+### 37. MCP 传输选型：stdio vs HTTP
+
+- **stdio**（`python mcp_server.py`）：每个客户端拉起一份进程。适合本地
+  Claude Desktop、跨设备 over SSH。
+- **HTTP**（`python mcp_http.py`）：一份常驻服务多个客户端。**生产用这个**——
+  stdio 下本机一度同时有 4 份，各 ~80MB PSS。
+
+HTTP 端点**不鉴权**，所以必须绑 `127.0.0.1`（compose 里 `127.0.0.1:8092:8081`），
+对外只走 SSH / 受控代理。接入方式见 `MCP_REMOTE.md`。
 
 ## 修改流程
 

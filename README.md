@@ -20,15 +20,20 @@ kb/
 ├── database.py          # SQLite schema、连接池、FTS/版本触发器
 ├── routers/api.py       # REST API 端点
 ├── parse.py             # Markdown 解析：[[links]]、#tags、key:: value
-├── mcp_server.py        # MCP Server（stdio，17 个工具，供 AI agent 使用）
+├── search.py            # 共享搜索：jieba 分词、FTS OR 组合、名称重排、片段
+├── timeutil.py          # 时区固定（import 即 tzset，见「时区」章节）
+├── mcp_server.py        # MCP Server 工具定义（stdio / HTTP 共用，17 个工具）
+├── mcp_http.py          # MCP Server 的 Streamable HTTP 入口
 ├── backup.py            # 自动备份（VACUUM INTO 快照 + 保留策略，应用内后台任务）
 ├── export.py            # 导出 CLI（markdown / json / zip）
 ├── import_logseq.py     # 从 Logseq 文件版导入
-├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt）
-├── static/              # 静态资源（预留）
+├── tests/               # 单元测试（解析边界 / FK 级联 / 改名 / 孤儿 ref）
+├── scripts/             # 运维脚本（时区修复、reindex）
+├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt + mermaid）
+├── static/vendor/       # 自托管前端依赖（无 CDN）
+├── MCP_REMOTE.md        # MCP 远程接入指南
 ├── run.sh               # 启动脚本
 ├── data/kb.db           # SQLite 数据库（首次启动自动创建）
-└── venv/                # Python 虚拟环境
 ```
 
 ## 数据模型
@@ -220,7 +225,8 @@ p1 2024-01-15 [[相关页面]] 任务内容 due:2024-01-20 rec:1w done:2024-01-1
 
 ```python
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
-TAG_RE = re.compile(r"(?<![\w#])#(?!\+)([\w-]+)")
+TAG_RE = re.compile(r"(?<![0-9A-Za-z_#])#(?!\+)([\w-]+)")
+URL_RE = re.compile(r"(?i)\b(?:https?|ftp)://[^\s)\]\"'<>]+")
 PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 ```
 
@@ -229,10 +235,20 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 - `extract_properties()` → `dict[str, str|None]`
 - `parse()` → `{"links", "tags", "properties"}`
 
-标签解析规则(2026-10-24 收紧):
-- `#` 前必须是词边界——`foo#bar`、URL 锚点(`a#frag`)、`##` 标题都不再误判
-- 标签字符集限定 `[\w-]`(词字符含汉字 + 连字符)——全角/半角标点(`（）`、`,`、`。` 等)终止标签,不再被带进标签名
-- **跳过代码块(``` 围栏)与行内代码**——代码里的 `#注释`、`#include` 不登记为标签
+标签解析规则：
+
+- **左侧边界限 ASCII**：`(?!<[0-9A-Za-z_#])`。Python 的 `\w` 会匹配 CJK，若用
+  `(?<![\w#])` 则 `第12周#Monday` 会被后端拒而前端仍补全 → 前后端漂移。
+  写成 ASCII-only 后两边一致，且 CJK 标签名（`#采购`）照常工作
+- **URL 先剥离**：`https://x.com/#grid12` 的 `#grid12` 是 URL 片段，不是标签
+- 标签字符集 `[\w-]`（含汉字 + 连字符），尾部连字符剥离；全角/半角标点终止标签
+- **跳过代码块（``` 围栏）与行内代码**——代码里的 `#注释`、`#include` 不登记
+- `##` 标题、org 标记（`#+BEGIN_...`）不误判
+
+> 前端 `TAG_TRIGGER_RE` 必须与后端同步：
+> `/(^|[^#0-9A-Za-z_])#([\p{L}\p{N}_-]*)$/u`
+>
+> 改任何一侧都要跑 `python -m unittest discover -s tests`（32 例）。
 
 大小写去重：`casefold()` 字典归并，防止 `[[Foo]]` + `[[foo]]` 触发 UNIQUE 约束。
 
@@ -283,7 +299,16 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 
 ## MCP Server（AI Agent 接入）
 
-`mcp_server.py` 通过 stdio transport 暴露 17 个工具，供 Claude Desktop / Cursor 等 AI agent 直接读写知识库：
+`mcp_server.py` 暴露 17 个工具，供 Claude Desktop / Cursor / Hermes 等 AI agent 直接读写知识库。支持两种传输：
+
+| 传输 | 入口 | 适用场景 |
+|------|------|----------|
+| **stdio** | `python mcp_server.py` | 本地 Claude Desktop / 跨设备 over SSH |
+| **Streamable HTTP** | `python mcp_http.py` | 服务端常驻（推荐）：一份进程服务多个客户端 |
+
+> 为什么要有 HTTP 变体：stdio 下**每个 MCP 客户端都会拉起一份** `python mcp_server.py` 进程（本机一度同时有 4 份，各 ~80MB PSS）。HTTP 只有一份常驻，多客户端共享。
+
+### 工具清单
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -305,7 +330,9 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 | 保险 | `get_page_versions(name)` | 版本历史（已删除页面也可查） |
 | 保险 | `restore_page_version(name, id)` | 恢复旧版本 |
 
-Claude Desktop 配置（`claude_desktop_config.json`）：
+### stdio（Claude Desktop 等本地客户端）
+
+`claude_desktop_config.json`：
 
 ```json
 {
@@ -320,6 +347,26 @@ Claude Desktop 配置（`claude_desktop_config.json`）：
 ```
 
 > ⚠️ MCP SDK 只继承白名单环境变量（PATH、HOME 等），`KB_DB_PATH` **必须在客户端配置里显式设置**，否则回退到 `<脚本目录>/data/kb.db`。
+
+### Streamable HTTP（服务端常驻）
+
+```bash
+python mcp_http.py            # 默认 0.0.0.0:8081/mcp/
+# KB_MCP_HOST / KB_MCP_PORT / KB_MCP_PATH 可覆盖
+```
+
+客户端配置：
+
+```yaml
+mcp_servers:
+  kb:
+    url: http://127.0.0.1:8092/mcp/
+    timeout: 120
+    connect_timeout: 60
+    enabled: true
+```
+
+> ⚠️ MCP 端点**不鉴权**，所以必须绑 `127.0.0.1` 或经 SSH/受控代理访问——直接暴露到 tailnet 等于把 KB 读写开放给所有设备。跨设备接入方式见 [`MCP_REMOTE.md`](MCP_REMOTE.md)。
 
 ## 启动
 
@@ -340,6 +387,7 @@ services:
       args:
         KB_UID: ${KB_UID:-1000}
         KB_GID: ${KB_GID:-1000}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.ustc.edu.cn/pypi/simple}
     container_name: kb
     ports:
       - "127.0.0.1:8080:8080"
@@ -348,11 +396,33 @@ services:
     restart: unless-stopped
     environment:
       - KB_DB_PATH=/app/data/kb.db
+      # 容器必须跑在用户时区，否则 glibc 回落 UTC，SQLite 写入的
+      # localtime 会是 UTC 时刻，而浏览器按本地渲染 → 全站时间戳差 8 小时
+      - TZ=Asia/Shanghai
       - KB_IP_WHITELIST=1
-      - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,::1/128,fd7a:115c:a1e0::/48
+      - KB_ALLOWED_CIDRS=100.64.0.0/10,127.0.0.0/8,172.17.0.0/16,172.22.0.0/16,::1/128,fd7a:115c:a1e0::/48
       - KB_TRUSTED_PROXIES=127.0.0.0/8,::1/128,172.16.0.0/12
       # 自动备份（默认开启，data/backups/ 保留 30 份）
       # - KB_BACKUP_KEEP=30
+
+  # MCP server（Streamable HTTP）：一份进程服务多个客户端。
+  # 端点不鉴权 → 只绑 127.0.0.1。
+  kb-mcp:
+    build:
+      context: .
+      args:
+        KB_UID: ${KB_UID:-1000}
+        KB_GID: ${KB_GID:-1000}
+    container_name: kb-mcp
+    command: ["python3", "/app/mcp_http.py"]
+    ports:
+      - "127.0.0.1:8092:8081"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - KB_DB_PATH=/app/data/kb.db
+      - TZ=Asia/Shanghai
 ```
 
 ```bash
@@ -363,12 +433,28 @@ docker compose logs -f        # 查看日志
 docker logs kb --tail 20      # 查看容器日志
 ```
 
-数据库 `./data/kb.db` 挂载到宿主机，重建容器数据不丢。
+数据库 `./data/kb.db` 挂载到宿主机，重建容器数据不丢；两个服务共享同一份 SQLite（WAL 模式支持多进程并发读写）。
 
 > 容器使用 `USER ${KB_UID}:${KB_GID}` 降权运行（Dockerfile）。uid 不匹配时，
 > 启动自检会直接报错退出并提示正确命令，不会等到首次保存才报
 > “attempt to write a readonly database”。
->
+
+### 时区（重要）
+
+数据库存的是**无时区的本地时刻**（`datetime('now','localtime')`），前端按浏览器本地渲染。因此**进程时区必须与用户时钟一致**：
+
+```python
+import timeutil   # noqa: F401 — import 即固定时区
+```
+
+`timeutil.py` 在 import 时设置 `TZ` 并调 `time.tzset()`，让 Python 与 SQLite 的 `localtime` 一致；默认 `Asia/Shanghai`，可用 `KB_TZ` 覆盖。
+
+各入口（`database.py` / `export.py` / `import_logseq.py` / `mcp_server.py`）都 import 了它。容器里还需 `TZ=Asia/Shanghai`（compose 已配）——**两者缺一不可**：
+- 缺 `TZ`：容器 glibc 回落 UTC → 写入的本地时刻差 8 小时
+- 缺 `import timeutil`：即使 `TZ` 正确，进程内 SQLite 连接的 `localtime` 也可能不跟随
+
+实测：缺 `TZ` 时 SQLite 写 `06:53`，`import timeutil` 后写 `14:53`（= 真实 CST）。
+
 > 端口绑 `127.0.0.1` 而非 `0.0.0.0`：nginx 从本机反代，避免直接暴露后被
 > 伪造 `X-Forwarded-For` 绕过 IP 白名单。
 
@@ -531,6 +617,11 @@ static/vendor/
 - [x] 前端依赖自托管（vendor，零 CDN 依赖）
 - [x] PWA（可安装 + Service Worker 离线外壳 + 离线提示）
 - [x] 容器降权运行（非 root，uid 可通过 build args 对齐）
+- [x] 容器时区固定（`TZ` + `timeutil.py`，避免时间戳差 8 小时）
+- [x] MCP Streamable HTTP 传输（`mcp_http.py`，一份进程服务多个客户端）
+- [x] 标签解析边界修正（URL 片段不算标签 + 前后端 CJK 规则对齐）
+- [x] refs 一致性（改名只改 link、删页级联、孤儿 tag 不计入列表）
+- [x] 单元测试（32 例：解析边界 / FK 级联 / 改名 / 孤儿 ref）
 
 ### 待办
 
