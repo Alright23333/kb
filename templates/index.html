@@ -1427,19 +1427,19 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     <div id="todo-view">
       <div id="todo-header">
         <h2><svg class="icon" aria-hidden="true"><use href="#i-list-checks"/></svg> 任务</h2>
-        <select id="todo-page-switch" onchange="switchTaskPage(this.value)" title="切换任务来源页面"></select>
+        <select id="todo-page-switch" onchange="switchTaskPage(this.value)" title="切换任务来源页面" aria-label="切换任务来源页面"></select>
         <div id="todo-tabs">
-          <button id="tab-list" class="active" onclick="switchTodoTab('list')">列表</button>
-          <button id="tab-gantt" onclick="switchTodoTab('gantt')">甘特图</button>
+          <button id="tab-list" class="active" onclick="switchTodoTab('list')" aria-label="以列表视图显示任务">列表</button>
+          <button id="tab-gantt" onclick="switchTodoTab('gantt')" aria-label="以甘特图视图显示任务">甘特图</button>
         </div>
         <div id="gantt-view-modes">
-          <button data-mode="Day" onclick="setGanttMode('Day')">日</button>
-          <button data-mode="Week" onclick="setGanttMode('Week')">周</button>
-          <button data-mode="Month" class="active" onclick="setGanttMode('Month')">月</button>
+          <button data-mode="Day" onclick="setGanttMode('Day')" aria-label="甘特图按日显示">日</button>
+          <button data-mode="Week" onclick="setGanttMode('Week')" aria-label="甘特图按周显示">周</button>
+          <button data-mode="Month" class="active" onclick="setGanttMode('Month')" aria-label="甘特图按月显示">月</button>
           <button onclick="copyTasksAsMermaidGantt()" title="把当前任务页复制为 mermaid 甘特代码块，粘贴到任意页面即可渲染"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg> 复制代码</button>
-          <input type="date" id="gantt-date-from" onchange="updateGanttRange()" title="开始日期">
+          <input type="date" id="gantt-date-from" onchange="updateGanttRange()" title="开始日期" aria-label="甘特图开始日期">
           <span style="color:var(--muted)">—</span>
-          <input type="date" id="gantt-date-to" onchange="updateGanttRange()" title="结束日期">
+          <input type="date" id="gantt-date-to" onchange="updateGanttRange()" title="结束日期" aria-label="甘特图结束日期">
         </div>
       </div>
       <div id="todo-content"></div>
@@ -1467,7 +1467,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
         <h1 id="page-name-display"></h1>
         <div class="meta">
           <span id="page-date"></span>
-          <a href="#" id="edit-btn-link">编辑</a>
+          <a href="#" id="edit-btn-link" aria-label="编辑此页面">编辑</a>
         </div>
         <div class="tags-display" id="page-tags"></div>
         <div id="toc-bar" style="display:none">
@@ -1484,8 +1484,8 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
         <div id="editor-pane">
           <div id="draft-bar">
             <span id="draft-msg"></span>
-            <button class="draft-btn" onclick="draftRestore()">恢复</button>
-            <button class="draft-btn" onclick="draftDiscard()">丢弃</button>
+            <button class="draft-btn" onclick="draftRestore()" aria-label="恢复未保存的草稿">恢复</button>
+            <button class="draft-btn" onclick="draftDiscard()" aria-label="丢弃未保存的草稿">丢弃</button>
           </div>
           <div id="editor-header">
             <input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">
@@ -1518,10 +1518,10 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     <label>自定义 CSS <span style="font-weight:400;color:var(--muted);font-size:12px">（保存到 data/custom.css，实时预览）</span></label>
     <textarea id="setting-custom-css" placeholder="例如: body { font-family: 'Georgia', serif; }" oninput="previewCustomCSS(this.value)"></textarea>
     <div class="tpl-row">
-      <button onclick="insertCustomCSSTemplate('font')" class="tpl-btn">字体</button>
-      <button onclick="insertCustomCSSTemplate('spacing')" class="tpl-btn">间距</button>
-      <button onclick="insertCustomCSSTemplate('accent')" class="tpl-btn">强调色</button>
-      <button onclick="clearCustomCSS()" class="tpl-btn">清空</button>
+      <button onclick="insertCustomCSSTemplate('font')" class="tpl-btn" aria-label="插入字体模板">字体</button>
+      <button onclick="insertCustomCSSTemplate('spacing')" class="tpl-btn" aria-label="插入间距模板">间距</button>
+      <button onclick="insertCustomCSSTemplate('accent')" class="tpl-btn" aria-label="插入强调色模板">强调色</button>
+      <button onclick="clearCustomCSS()" class="tpl-btn" aria-label="清空自定义 CSS">清空</button>
     </div>
     <label>任务重复语法</label>
     <div class="rec-doc">
