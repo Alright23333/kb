@@ -1275,11 +1275,11 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     <button id="sidebar-toggle" title="收起侧边栏">◀</button>
   </div>
   <div id="nav">
-    <a class="nav-item" data-nav="home" title="首页"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
-    <a class="nav-item" data-nav="all" title="所有页面"><span class="nav-icon">📄</span><span class="nav-text">所有页面</span></a>
-    <a class="nav-item" data-nav="journal" title="日记"><span class="nav-icon">📓</span><span class="nav-text">日记</span></a>
-    <a class="nav-item" data-nav="graph" title="图谱"><span class="nav-icon">🕸️</span><span class="nav-text">图谱</span></a>
-    <a class="nav-item" data-nav="todo" title="任务"><span class="nav-icon">📋</span><span class="nav-text">任务</span></a>
+    <a class="nav-item" data-nav="home" href="/" title="首页"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
+    <a class="nav-item" data-nav="all" href="/all" title="所有页面"><span class="nav-icon">📄</span><span class="nav-text">所有页面</span></a>
+    <a class="nav-item" data-nav="journal" href="/journal" title="日记"><span class="nav-icon">📓</span><span class="nav-text">日记</span></a>
+    <a class="nav-item" data-nav="graph" href="/graph" title="图谱"><span class="nav-icon">🕸️</span><span class="nav-text">图谱</span></a>
+    <a class="nav-item" data-nav="todo" href="/todo" title="任务"><span class="nav-icon">📋</span><span class="nav-text">任务</span></a>
   </div>
   <div id="tags-section">
     <h3 class="nav-text">Tags</h3>
@@ -1668,7 +1668,14 @@ document.addEventListener('click', (e) => {
     return;
   }
   const navEl = e.target.closest('[data-nav]');
-  if (navEl) { navigate(navEl.dataset.nav); }
+  if (navEl) {
+    // The nav items carry real hrefs so they are keyboard reachable and
+    // support middle-click / "open in new tab". The SPA still routes them,
+    // so suppress the browser's own navigation.
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    navigate(navEl.dataset.nav);
+  }
 });
 
 // ── Keyboard list navigation (j/k + Enter, desktop only) ────────
@@ -4922,6 +4929,14 @@ document.addEventListener('keydown', (e) => {
 // Fix logo href for path-prefix deployments
 const logoLink = document.querySelector('.nav-text');
 if (logoLink) logoLink.href = BASE + '/';
+
+// Nav items carry real hrefs so they are keyboard reachable and support
+// middle-click / "open in new tab". The static markup uses root-relative
+// paths (correct for a subdomain deployment); rewrite them for the
+// deployment prefix (e.g. '/kb/all').
+document.querySelectorAll('#nav .nav-item[data-nav]').forEach((el) => {
+  el.href = routeToUrl(el.dataset.nav);
+});
 
 // ── Offline awareness ───────────────────────────────────────────
 // The service worker keeps the app shell available offline, but live data

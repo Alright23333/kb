@@ -49,7 +49,77 @@
 			"createdAt": "2026-10-07T15:04:02.167Z",
 			"updatedAt": "2026-10-07T15:08:31.612Z",
 			"blockedBy": null
+		},
+		{
+			"id": "T-045",
+			"text": "P6-1 侧边栏导航键盘可达：给 .nav-item 加 href（现有 click 委托已 preventDefault，不影响行为），顺带获得新标签打开能力",
+			"status": "done",
+			"priority": "high",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:01:40.062Z",
+			"updatedAt": "2026-11-17T03:10:52.396Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-046",
+			"text": "P6-2 对比度达标：--muted 实测 2.54–4.91:1（需 4.5）。调内置 dark/light 与 Tokyo Night 两套主题的 muted 值，保证 muted/bg 与 muted/card 均 ≥4.5",
+			"status": "pending",
+			"priority": "high",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:01:45.998Z",
+			"updatedAt": "2026-11-17T03:01:45.998Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-047",
+			"text": "P6-3 焦点可见：统一 :focus-visible 轮廓环（accent 2px + offset），移除现有 outline:none 无替代的写法",
+			"status": "pending",
+			"priority": "high",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:01:52.754Z",
+			"updatedAt": "2026-11-17T03:01:52.754Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-048",
+			"text": "P6-4 列表自适应数据规模：页面列表改多列网格 + max-width（对齐 #page-view 的 720px 约束），标签侧栏加折叠/过滤",
+			"status": "pending",
+			"priority": "medium",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:01:59.517Z",
+			"updatedAt": "2026-11-17T03:01:59.517Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-049",
+			"text": "P6-5 无障碍名称与播报：图标按钮加 aria-label（◀ ⚙️ 🌙 ＋ － 🗑️ 🕘 等）、toast 加 role=status + aria-live",
+			"status": "pending",
+			"priority": "medium",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:02:05.531Z",
+			"updatedAt": "2026-11-17T03:02:05.531Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-050",
+			"text": "P6-6 尊重减弱动效：加 @media (prefers-reduced-motion: reduce) 关闭 9 处 transition/animation",
+			"status": "pending",
+			"priority": "low",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:02:12.187Z",
+			"updatedAt": "2026-11-17T03:02:12.187Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-051",
+			"text": "P6-7 导航/头部图标去 emoji（约 50 处）：改为内联 SVG（Lucide/Feather 风格），统一线宽与尺寸 token",
+			"status": "pending",
+			"priority": "low",
+			"assignee": "Aurora",
+			"createdAt": "2026-11-17T03:02:23.956Z",
+			"updatedAt": "2026-11-17T03:02:23.956Z",
+			"blockedBy": null
 		}
 	],
-	"counter": 44
+	"counter": 51
 }
