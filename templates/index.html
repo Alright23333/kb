@@ -45,7 +45,7 @@
    布局 token 与主题 token 分离:
    主题色在 [data-theme] 上,间距/圆角/阴影/缓动恒定 */
 :root {
-  --accent: #7aa2f7;
+  --accent: #7aa2f7; --accent-hover: #8fb2ff; --on-accent: #16161e;
   --r-sm: 4px; --r-md: 8px; --r-lg: 12px;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
   --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
@@ -55,38 +55,48 @@
 [data-theme="dark"] {
   /* Tokyo Night */
   --bg: #1a1b26; --bg-soft: #16161e;
-  --fg: #c0caf5; --muted: #565f89;
+  --fg: #c0caf5; --muted: #8b92b0;   /* WCAG AA: 5.06–5.85:1 on bg/card/hover */
   --accent: #7aa2f7; --accent-dim: rgba(122, 162, 247, 0.14);
+  /* dark accent is a light blue → dark text on it (7.1:1). White would be 2.5:1 */
+  --on-accent: #16161e; --accent-hover: #8fb2ff;
   --border: #292e42; --border-soft: #1f2335;
   --card: #16161e; --hover: #1f2335;
   --tag: #bb9af7; --tag-dim: rgba(187, 154, 247, 0.12);
   --overdue: #ff757f;
+  /* pastel badges → dark label (6.9–9.8:1); white would be 1.8–2.6:1 */
   --p1: #ff757f; --p2: #ff9e64; --p3: #e0af68; --p4: #9ece6a;
+  --on-priority: #16161e;
   --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
 [data-theme="light"] {
   --bg: #f6f7f9; --bg-soft: #ffffff;
-  --fg: #24292f; --muted: #6e7781;
+  --fg: #24292f; --muted: #5f6771;   /* WCAG AA: 5.02–5.73:1 on bg/card/hover */
   --accent: #3b6ea5; --accent-dim: #e8f0fb;
+  --on-accent: #ffffff; --accent-hover: #325d8c;
   --border: #e2e6ea; --border-soft: #eef0f3;
   --card: #ffffff; --hover: #eef0f3;
   --tag: #8250df; --tag-dim: rgba(130, 80, 223, 0.08);
   --overdue: #cf222e;
-  --p1: #d73a49; --p2: #e67e22; --p3: #d4a72c; --p4: #2da44e;
+  /* darkened so the white badge label clears 4.5:1 (p2 2.85 / p3 2.24 / p4 3.22 before) */
+  --p1: #d73a49; --p2: #b25f0e; --p3: #8f6c08; --p4: #1b7d3b;
+  --on-priority: #ffffff;
   --shadow-1: 0 1px 3px rgba(140, 149, 159, 0.25);
   --shadow-2: 0 8px 28px rgba(140, 149, 159, 0.3);
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg: #f6f7f9; --bg-soft: #ffffff;
-    --fg: #24292f; --muted: #6e7781;
+    --fg: #24292f; --muted: #5f6771;   /* WCAG AA: 5.02–5.73:1 on bg/card/hover */
     --accent: #3b6ea5; --accent-dim: #e8f0fb;
+  --on-accent: #ffffff; --accent-hover: #325d8c;
     --border: #e2e6ea; --border-soft: #eef0f3;
     --card: #ffffff; --hover: #eef0f3;
     --tag: #8250df; --tag-dim: rgba(130, 80, 223, 0.08);
     --overdue: #cf222e;
-    --p1: #d73a49; --p2: #e67e22; --p3: #d4a72c; --p4: #2da44e;
+    /* darkened so the white badge label clears 4.5:1 (p2 2.85 / p3 2.24 / p4 3.22 before) */
+    --p1: #d73a49; --p2: #b25f0e; --p3: #8f6c08; --p4: #1b7d3b;
+    --on-priority: #ffffff;
     --shadow-1: 0 1px 3px rgba(140, 149, 159, 0.25);
     --shadow-2: 0 8px 28px rgba(140, 149, 159, 0.3);
   }
@@ -111,9 +121,28 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
-/* Keyboard focus */
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-input:focus-visible, textarea:focus-visible { outline: none; }
+/* ═══════════════ Icons ═══════════════
+   Inline SVG sprite (Lucide, ISC). Emoji were used before: glyphs differ per
+   platform, cannot be tinted by a design token, and mix filled/outline styles.
+   <use href="#i-home"> inherits currentColor and scales with font-size. */
+.icon { display: inline-block; vertical-align: -0.15em; flex-shrink: 0;
+        width: 1em; height: 1em; stroke-width: 2; }
+.icon-sm { width: 0.88em; height: 0.88em; }
+.icon-lg { width: 1.15em; height: 1.15em; }
+
+/* Keyboard focus — one ring for everything (WCAG 2.4.7 / 2.4.11) */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+/* Inputs get an inner ring instead of a 2px halo: the border colour already
+   changes on focus, and an outer outline would clip against adjacent fields. */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+/* CodeMirror's own textarea must never show the ring — the wrapper gets it. */
+.CodeMirror textarea:focus-visible { outline: none; }
+.editor-wrap:focus-within { box-shadow: 0 0 0 2px var(--accent-dim); border-radius: var(--r-md); }
+/* Never suppress the ring without a visible substitute */
+:focus:not(:focus-visible) { outline: none; }
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
@@ -169,14 +198,28 @@ code {
   transition: border-color 0.15s var(--ease), color 0.15s var(--ease), background 0.15s var(--ease);
 }
 .hbtn:hover { border-color: var(--accent); color: var(--accent); }
-.hbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.hbtn.primary:hover { filter: brightness(1.08); color: #fff; }
+.hbtn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.hbtn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 #theme-toggle { padding: 6px 9px; font-size: 15px; }
 #content { flex: 1; overflow-y: auto; padding: var(--sp-6) var(--sp-5) 96px; }
 #content.graph-active { padding: var(--sp-4); display: flex; flex-direction: column; }
 
-/* Narrow reading column shared by list views */
+/* Narrow reading column shared by list/sidebar views */
 .list-col { max-width: 720px; margin: 0 auto; }
+/* Dense directory-style lists opt into the full width (see .dense) */
+.list-col.dense { max-width: 1180px; }
+
+/* Dense list: many short, uniform rows. A 720px single column turns 500 pages
+   into ~18000px of scrolling; auto-fill columns keep them on one screen-ish. */
+#all-pages-list.dense {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: 0 var(--sp-5);
+  align-items: start;
+}
+#all-pages-list.dense .page-list-item { border-bottom: 1px solid var(--border-soft); }
+#all-pages-list.dense .page-list-item .title { font-size: 13.5px; }
+#all-pages-list.dense .page-list-item .meta { font-size: 11.5px; }
 
 .view-title {
   font-size: 15px;
@@ -256,18 +299,39 @@ code {
 .nav-icon { flex-shrink: 0; font-size: 15px; }
 #tags-section {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 8px 0;
   border-top: 1px solid var(--border);
   margin-top: 8px;
 }
-#tags-section h3 {
+#tags-head { padding: 8px 14px 6px; }
+#tags-head h3 {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--muted);
-  padding: 8px 22px 4px;
+  margin: 0 0 6px;
+  display: flex;
+  justify-content: space-between;
 }
+#tags-head h3 #tags-count { font-weight: 400; }
+#tags-filter {
+  width: 100%;
+  padding: 5px 9px;
+  font-size: 12px;
+  border-radius: var(--r-sm);
+  background: var(--bg-soft);
+}
+#tags-list { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+#tags-more {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: left;
+  border-top: 1px solid var(--border-soft);
+}
+#tags-more:hover { background: var(--hover); color: var(--fg); }
 .tag-item {
   display: flex;
   justify-content: space-between;
@@ -391,9 +455,10 @@ code {
   margin: 16px 0;
   color: var(--muted);
 }
-#page-content a { color: var(--accent); }
-#page-content a:hover { text-decoration: underline; }
-#page-content a.wikilink.unresolved { color: var(--muted); text-decoration: underline dotted; }
+#page-content a, .kb-embed a, .dashboard a, .lp-card a { color: var(--accent); }
+#page-content a:hover, .kb-embed a:hover, .dashboard a:hover { text-decoration: underline; }
+#page-content a.wikilink.unresolved,
+.kb-embed a.wikilink.unresolved { color: var(--muted); text-decoration: underline dotted; }
 #page-content hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 #page-content table { border-collapse: collapse; margin: 16px 0; width: 100%; font-size: 14px; }
 #page-content th, #page-content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
@@ -416,7 +481,7 @@ code {
 .mermaid svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
 .mermaid-error { border-color: var(--overdue); }
 .mermaid-error::before {
-  content: '⚠ mermaid 语法错误，已保留原码';
+  content: 'mermaid 语法错误，已保留原码';
   display: block;
   color: var(--overdue);
   font-family: inherit;
@@ -595,7 +660,7 @@ code {
   border-radius: var(--r-sm);
   font-size: 12px;
 }
-.restore-btn:hover { background: var(--accent); color: #fff; }
+.restore-btn:hover { background: var(--accent); color: var(--on-accent); }
 
 /* ═══════════════ Journal nav ═══════════════ */
 .journal-nav { display: flex; gap: 8px; align-items: center; flex: 1; }
@@ -651,7 +716,7 @@ code {
   font-size: 12.5px;
 }
 .todo-stat:hover { border-color: var(--accent); color: var(--fg); }
-.todo-stat.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.todo-stat.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .todo-sort {
   margin-left: auto;
   background: var(--card);
@@ -682,13 +747,14 @@ code {
   justify-content: center;
   font-size: 10.5px;
   font-weight: 600;
-  color: #fff;
+  /* one label colour per theme; chosen so all four badge backgrounds clear 4.5:1 */
+  color: var(--on-priority);
   flex-shrink: 0;
 }
 .todo-list-item .priority.p1 { background: var(--p1); }
 .todo-list-item .priority.p2 { background: var(--p2); }
-.todo-list-item .priority.p3 { background: var(--p3); color: var(--bg); }
-.todo-list-item .priority.p4 { background: var(--p4); color: var(--bg); }
+.todo-list-item .priority.p3 { background: var(--p3); }
+.todo-list-item .priority.p4 { background: var(--p4); }
 .todo-list-item .task-info { flex: 1; min-width: 0; }
 .todo-list-item .task-title { font-weight: 500; font-size: 14px; }
 .todo-list-item .task-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -794,7 +860,7 @@ code {
   margin-left: auto;
 }
 #editor-footer input[type="checkbox"] { accent-color: var(--accent); }
-#save-btn, #fab-save { background: var(--accent); color: #fff; border: none; border-radius: var(--r-sm); padding: 7px 16px; font-size: 13px; font-weight: 500; }
+#save-btn, #fab-save { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r-sm); padding: 7px 16px; font-size: 13px; font-weight: 500; }
 #save-btn:hover { filter: brightness(1.08); }
 #divider {
   width: 6px;
@@ -900,7 +966,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 .panel-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: var(--sp-4); }
 .panel-btns .btn-cancel { border: 1px solid var(--border); color: var(--fg); padding: 7px 16px; border-radius: var(--r-sm); font-size: 13px; }
 .panel-btns .btn-cancel:hover { border-color: var(--accent); color: var(--accent); }
-.panel-btns .btn-primary { background: var(--accent); color: #fff; padding: 7px 16px; border-radius: var(--r-sm); font-size: 13px; font-weight: 500; }
+.panel-btns .btn-primary { background: var(--accent); color: var(--on-accent); padding: 7px 16px; border-radius: var(--r-sm); font-size: 13px; font-weight: 500; }
 .panel-btns .btn-primary:hover { filter: brightness(1.08); }
 
 #version-panel {
@@ -951,7 +1017,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 .vp-actions button {
   width: 100%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   padding: 8px;
   border-radius: var(--r-sm);
   font-size: 13px;
@@ -1161,7 +1227,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
     align-items: center;
     gap: 4px;
   }
-  #editor.preview-active #mobile-preview-tab { background: var(--accent); color: #fff; }
+  #editor.preview-active #mobile-preview-tab { background: var(--accent); color: var(--on-accent); }
   #fab-save {
     display: flex;
     position: fixed;
@@ -1265,39 +1331,94 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 </style>
 </head>
 <body>
-<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="width:0;height:0;overflow:hidden;position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+  <symbol id="i-files" viewBox="0 0 24 24"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" /> <path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z" /> <path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1" /></symbol>
+  <symbol id="i-book-open-text" viewBox="0 0 24 24"><path d="M12 5v16" /> <path d="M16 13h2" /> <path d="M16 9h2" /> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" /> <path d="M6 13h2" /> <path d="M6 9h2" /></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1" /> <rect x="2" y="16" width="6" height="6" rx="1" /> <rect x="9" y="2" width="6" height="6" rx="1" /> <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" /> <path d="M12 12V8" /></symbol>
+  <symbol id="i-list-checks" viewBox="0 0 24 24"><path d="M13 5h8" /> <path d="M13 12h8" /> <path d="M13 19h8" /> <path d="m3 17 2 2 4-4" /> <path d="m3 7 2 2 4-4" /></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 5h16" /> <path d="M4 12h16" /> <path d="M4 19h16" /></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /> <path d="M12 2v2" /> <path d="M12 20v2" /> <path d="m4.93 4.93 1.41 1.41" /> <path d="m17.66 17.66 1.41 1.41" /> <path d="M2 12h2" /> <path d="M20 12h2" /> <path d="m6.34 17.66-1.41 1.41" /> <path d="m19.07 4.93-1.41 1.41" /></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></symbol>
+  <symbol id="i-panel-left-close" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M9 3v18" /> <path d="m16 15-3-3 3-3" /></symbol>
+  <symbol id="i-panel-left-open" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M9 3v18" /> <path d="m14 9 3 3-3 3" /></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /> <path d="M12 7v5l4 2" /></symbol>
+  <symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></symbol>
+  <symbol id="i-link-2" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2" /> <path d="M15 7h2a5 5 0 1 1 0 10h-2" /> <line x1="8" x2="16" y1="12" y2="12" /></symbol>
+  <symbol id="i-file-pen-line" viewBox="0 0 24 24"><path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z" /> <path d="M14.487 7.858A1 1 0 0 1 14 7V2" /> <path d="M20 19.645V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l2.516 2.516" /> <path d="M8 18h1" /></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12" /> <path d="m17 8-5-5-5 5" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" /></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /> <path d="m15 5 4 4" /></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /> <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" /> <path d="M7 3v4a1 1 0 0 0 1 1h7" /></symbol>
+  <symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" /></symbol>
+  <symbol id="i-clipboard-list" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /> <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /> <path d="M12 11h4" /> <path d="M12 16h4" /> <path d="M8 11h.01" /> <path d="M8 16h.01" /></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5" /> <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z" /></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+  <symbol id="i-unlink" viewBox="0 0 24 24"><path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71" /> <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71" /> <line x1="8" x2="8" y1="2" y2="5" /> <line x1="2" x2="5" y1="8" y2="8" /> <line x1="16" x2="16" y1="19" y2="22" /> <line x1="19" x2="22" y1="16" y2="16" /></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v3" /> <path d="M16 2v3" /> <rect x="3" y="3" width="18" height="18" rx="2" /> <path d="M3 9h18" /></symbol>
+  <symbol id="i-book-copy" viewBox="0 0 24 24"><path d="M5 7a2 2 0 0 0-2 2v11" /> <path d="M5.803 18H5a2 2 0 0 0 0 4h9.5a.5.5 0 0 0 .5-.5V21" /> <path d="M9 15V4a2 2 0 0 1 2-2h9.5a.5.5 0 0 1 .5.5v14a.5.5 0 0 1-.5.5H11a2 2 0 0 1 0-4h10" /></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="m16 9-5.5 5.5L8 12" /></symbol>
+  <symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="m15 9-6 6" /> <path d="m9 9 6 6" /></symbol>
+  <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+  <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 5v16" /> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" /></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6" /> <path d="m8 6-6 6 6 6" /></symbol>
+  <symbol id="i-layout-dashboard" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1" /> <rect width="7" height="5" x="14" y="3" rx="1" /> <rect width="7" height="9" x="14" y="12" rx="1" /> <rect width="7" height="5" x="3" y="16" rx="1" /></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 6v6l4 2" /></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /> <circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z" /></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /> <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" /></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+  <symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></symbol>
+  <symbol id="i-grip-vertical" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1" /> <circle cx="9" cy="5" r="1" /> <circle cx="9" cy="19" r="1" /> <circle cx="15" cy="12" r="1" /> <circle cx="15" cy="5" r="1" /> <circle cx="15" cy="19" r="1" /></symbol>
+</svg>
 <!-- Sidebar scrim overlay (mobile) -->
 <div id="sidebar-scrim"></div>
 <!-- Sidebar -->
 <div id="sidebar">
   <div id="sidebar-header">
-    <a href="/" class="nav-text">📚 KB</a>
-    <button id="sidebar-toggle" title="收起侧边栏">◀</button>
+    <a href="/" class="nav-text" aria-label="KB 首页"><svg class="icon" aria-hidden="true"><use href="#i-book-open"/></svg> KB</a>
+    <button id="sidebar-toggle" title="收起侧边栏" aria-label="收起侧边栏" aria-expanded="true"><svg class="icon" aria-hidden="true"><use href="#i-panel-left-close"/></svg></button>
   </div>
   <div id="nav">
-    <a class="nav-item" data-nav="home" href="/" title="首页"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
-    <a class="nav-item" data-nav="all" href="/all" title="所有页面"><span class="nav-icon">📄</span><span class="nav-text">所有页面</span></a>
-    <a class="nav-item" data-nav="journal" href="/journal" title="日记"><span class="nav-icon">📓</span><span class="nav-text">日记</span></a>
-    <a class="nav-item" data-nav="graph" href="/graph" title="图谱"><span class="nav-icon">🕸️</span><span class="nav-text">图谱</span></a>
-    <a class="nav-item" data-nav="todo" href="/todo" title="任务"><span class="nav-icon">📋</span><span class="nav-text">任务</span></a>
+    <a class="nav-item" data-nav="home" href="/" title="首页"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg></span><span class="nav-text">首页</span></a>
+    <a class="nav-item" data-nav="all" href="/all" title="所有页面"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-files"/></svg></span><span class="nav-text">所有页面</span></a>
+    <a class="nav-item" data-nav="journal" href="/journal" title="日记"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-book-open-text"/></svg></span><span class="nav-text">日记</span></a>
+    <a class="nav-item" data-nav="graph" href="/graph" title="图谱"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-network"/></svg></span><span class="nav-text">图谱</span></a>
+    <a class="nav-item" data-nav="todo" href="/todo" title="任务"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-list-checks"/></svg></span><span class="nav-text">任务</span></a>
   </div>
   <div id="tags-section">
-    <h3 class="nav-text">Tags</h3>
+    <div id="tags-head" class="nav-text">
+      <h3>Tags <span id="tags-count"></span></h3>
+      <input type="search" id="tags-filter" placeholder="筛选标签…" aria-label="筛选标签" oninput="filterTags()">
+    </div>
     <div id="tags-list"></div>
+    <button id="tags-more" class="nav-text" onclick="toggleTagsFold()" hidden></button>
   </div>
   <div id="sidebar-settings">
-    <button id="sidebar-settings-btn" title="设置">⚙️ 设置</button>
+    <button id="sidebar-settings-btn" title="设置" aria-label="打开设置"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> 设置</button>
   </div>
 </div>
 
 <!-- Main -->
 <div id="main">
   <div id="header">
-    <button id="hamburger">☰</button>
-    <input type="text" id="search-input" placeholder="搜索... (或输入 [[页面名]] 直达)" onkeydown="if(event.key==='Enter')doSearch()">
-    <button id="search-btn" class="hbtn" onclick="doSearch()">搜索</button>
+    <button id="hamburger" aria-label="打开导航菜单"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
+    <input type="search" id="search-input" aria-label="搜索页面" placeholder="搜索... (或输入 [[页面名]] 直达)" onkeydown="if(event.key==='Enter')doSearch()">
+    <button id="search-btn" class="hbtn" onclick="doSearch()" aria-label="搜索">搜索</button>
     <button id="new-btn" class="hbtn primary" onclick="newPage()">+ 新页面</button>
-    <button id="theme-toggle" class="hbtn" title="切换主题">🌙</button>
+    <button id="theme-toggle" class="hbtn" title="切换主题" aria-label="切换主题"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
   </div>
 
   <div id="content">
@@ -1305,7 +1426,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 
     <div id="todo-view">
       <div id="todo-header">
-        <h2>📋 任务</h2>
+        <h2><svg class="icon" aria-hidden="true"><use href="#i-list-checks"/></svg> 任务</h2>
         <select id="todo-page-switch" onchange="switchTaskPage(this.value)" title="切换任务来源页面"></select>
         <div id="todo-tabs">
           <button id="tab-list" class="active" onclick="switchTodoTab('list')">列表</button>
@@ -1315,7 +1436,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
           <button data-mode="Day" onclick="setGanttMode('Day')">日</button>
           <button data-mode="Week" onclick="setGanttMode('Week')">周</button>
           <button data-mode="Month" class="active" onclick="setGanttMode('Month')">月</button>
-          <button onclick="copyTasksAsMermaidGantt()" title="把当前任务页复制为 mermaid 甘特代码块，粘贴到任意页面即可渲染">📋 复制代码</button>
+          <button onclick="copyTasksAsMermaidGantt()" title="把当前任务页复制为 mermaid 甘特代码块，粘贴到任意页面即可渲染"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg> 复制代码</button>
           <input type="date" id="gantt-date-from" onchange="updateGanttRange()" title="开始日期">
           <span style="color:var(--muted)">—</span>
           <input type="date" id="gantt-date-to" onchange="updateGanttRange()" title="结束日期">
@@ -1326,12 +1447,12 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 
     <div id="graph-view">
       <div class="toolbar">
-        <h2 style="margin:0;font-size:16px;font-weight:600">🕸️ 知识图谱</h2>
+        <h2 style="margin:0;font-size:16px;font-weight:600"><svg class="icon" aria-hidden="true"><use href="#i-network"/></svg> 知识图谱</h2>
         <span id="graph-stats"></span>
         <span class="spacer"></span>
-        <button id="graph-zoom-in" class="btn-imp" title="放大">＋</button>
-        <button id="graph-zoom-out" class="btn-imp" title="缩小">－</button>
-        <button id="graph-reset" class="btn-imp" title="重置视图">⟲</button>
+        <button id="graph-zoom-in" class="btn-imp" title="放大" aria-label="放大图谱"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+        <button id="graph-zoom-out" class="btn-imp" title="缩小" aria-label="缩小图谱"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+        <button id="graph-reset" class="btn-imp" title="重置视图" aria-label="重置图谱视图"><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg></button>
       </div>
       <div id="graph-container" class="graph-container">
         <svg id="graph-svg" width="100%" height="100%" style="cursor:grab">
@@ -1350,7 +1471,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
         </div>
         <div class="tags-display" id="page-tags"></div>
         <div id="toc-bar" style="display:none">
-          <button class="toc-toggle" onclick="toggleToc()">📖 目录 <span id="toc-toggle-hint" style="font-size:12px;color:var(--muted)">（展开）</span></button>
+          <button class="toc-toggle" onclick="toggleToc()"><svg class="icon" aria-hidden="true"><use href="#i-book-open-text"/></svg> 目录 <span id="toc-toggle-hint" style="font-size:12px;color:var(--muted)">（展开）</span></button>
           <div id="toc-list" style="display:none"></div>
         </div>
       </div>
@@ -1368,8 +1489,8 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
           </div>
           <div id="editor-header">
             <input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">
-            <button id="history-btn" class="ebtn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button>
-            <button id="delete-btn" class="ebtn" onclick="deleteCurrentPage()" title="删除页面（可在回收站恢复）" style="display:none">🗑️</button>
+            <button id="history-btn" class="ebtn" onclick="showVersionHistory()" title="版本历史" style="display:none"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> 历史</button>
+            <button id="delete-btn" class="ebtn" onclick="deleteCurrentPage()" title="删除页面（可在回收站恢复）" aria-label="删除页面（可在回收站恢复）" style="display:none"><svg class="icon" aria-hidden="true"><use href="#i-trash-2"/></svg></button>
           </div>
           <textarea id="cm-editor"></textarea>
           <div id="editor-footer">
@@ -1389,7 +1510,7 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 <!-- Settings Panel -->
 <div id="settings-panel">
   <div class="panel">
-    <h3>⚙️ 设置</h3>
+    <h3><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> 设置</h3>
     <label>任务来源页面 <span style="font-weight:400;color:var(--muted);font-size:12px">（多个用逗号分隔，任务视图可切换）</span></label>
     <input type="text" id="setting-task-page" placeholder="例如: Tasks, 工作, 树莓" value="Tasks">
     <label>首页看板页面 <span style="font-weight:400;color:var(--muted);font-size:12px">（首页顶部渲染该页内容，支持 ![[嵌入]] 与 mermaid；清空禁用）</span></label>
@@ -1422,8 +1543,8 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 <!-- Version history panel -->
 <div id="version-panel">
   <div class="vp-header">
-    <strong id="vp-title">🕘 版本历史</strong>
-    <button onclick="closeVersionHistory()">✕</button>
+    <strong id="vp-title"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> 版本历史</strong>
+    <button onclick="closeVersionHistory()" aria-label="关闭版本历史"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
   <div class="vp-list" id="vp-list"></div>
   <div class="vp-preview" id="vp-preview" style="display:none"></div>
@@ -1442,9 +1563,9 @@ body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
 <!-- Link hover preview -->
 <div id="link-preview-card"></div>
 <!-- Toast -->
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <!-- FAB save (mobile) -->
-<button id="fab-save" onclick="savePage()" style="display:none">💾 保存</button>
+<button id="fab-save" onclick="savePage()" style="display:none"><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg> 保存</button>
 
 <script>
 // Fail loudly (with an explanation) instead of a blank page when a vendored
@@ -1453,8 +1574,8 @@ if (typeof window.markdownit !== 'function' || typeof window.CodeMirror !== 'fun
   document.documentElement.innerHTML =
     '<body style="margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1a1b26;color:#c0caf5;display:flex;align-items:center;justify-content:center;height:100vh">' +
     '<div style="text-align:center;max-width:420px;padding:24px">' +
-    '<h1 style="font-size:20px;margin:0 0 12px">⚠️ KB 前端资源加载失败</h1>' +
-    '<p style="color:#565f89;font-size:14px;line-height:1.7">依赖库未能加载，可能原因：静态文件缺失、反向代理未透传 <code>/static/</code>。请刷新重试。</p>' +
+    '<h1 style="font-size:20px;margin:0 0 12px">KB 前端资源加载失败</h1>' +
+    '<p style="color:#8b92b0;font-size:14px;line-height:1.7">依赖库未能加载，可能原因：静态文件缺失、反向代理未透传 <code>/static/</code>。请刷新重试。</p>' +
     '</div></body>';
   throw new Error('KB: vendored assets failed to load');
 }
@@ -1790,13 +1911,13 @@ async function showHome() {
   const saved = getSavedSearches();
   if (saved.length) {
     html += `<div class="list-col saved-searches">` + saved.map(sv =>
-      `<button class="saved-chip" onclick="doSavedSearch(${JSON.stringify(sv.q).replace(/"/g, '&quot;')})" title="${escapeHtml(sv.q)}">🔎 ${escapeHtml(sv.q)}<span class="chip-x" onclick="event.stopPropagation();removeSavedSearch(event)">✕</span></button>`
+      `<button class="saved-chip" onclick="doSavedSearch(${JSON.stringify(sv.q).replace(/"/g, '&quot;')})" title="${escapeHtml(sv.q)}">${icon('search')} ${escapeHtml(sv.q)}<span class="chip-x" role="button" tabindex="0" aria-label="删除此保存的搜索" onclick="event.stopPropagation();removeSavedSearch(event)"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-x"/></svg></span></button>`
     ).join('') + `</div>`;
   }
   if (dash) {
     html += `<div class="list-col dashboard">
       <div class="dashboard-toolbar">
-        <button class="btn-imp" onclick="editDashboard()">✏️ 编辑看板</button>
+        <button class="btn-imp" onclick="editDashboard()"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> 编辑看板</button>
       </div>
       <div id="dashboard-content">${renderContent(dash.content)}</div>
     </div>`;
@@ -1884,8 +2005,8 @@ async function showAllPages() {
   header.innerHTML = `<div class="toolbar">
     <div class="view-title">所有页面 <span class="count">${pages.length}</span></div>
     <span class="spacer"></span>
-    <button class="btn-imp" onclick="document.getElementById('import-file-input').click()" title="导入 .md 或 .zip">📥 导入</button>
-    <button class="btn-imp" onclick="exportPages('zip')" title="导出为 zip（Markdown + front matter）">📤 导出</button>
+    <button class="btn-imp" onclick="document.getElementById('import-file-input').click()" title="导入 .md 或 .zip"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> 导入</button>
+    <button class="btn-imp" onclick="exportPages('zip')" title="导出为 zip（Markdown + front matter）"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> 导出</button>
   </div>
     <input type="text" id="all-pages-filter" placeholder="筛选页面名..." oninput="filterAllPages()">
     <input type="file" id="import-file-input" accept=".md,.zip" multiple style="display:none" onchange="handleImportFiles(this.files); this.value=''">`;
@@ -1893,7 +2014,7 @@ async function showAllPages() {
 
   const list = document.createElement('div');
   list.id = 'all-pages-list';
-  list.className = 'list-col';
+  list.className = 'list-col dense';
   for (const p of pages) {
     const el = document.createElement('div');
     el.className = 'page-list-item';
@@ -1908,7 +2029,7 @@ async function showAllPages() {
   const health = document.createElement('div');
   health.className = 'list-col';
   health.innerHTML = `
-    <button class="trash-toggle" onclick="toggleHealth()">🩺 体检 <span class="hint" id="health-toggle-hint">（点击展开）</span><span class="hint" id="health-summary" style="margin-left:auto"></span></button>
+    <button class="trash-toggle" onclick="toggleHealth()"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg> 体检 <span class="hint" id="health-toggle-hint">（点击展开）</span><span class="hint" id="health-summary" style="margin-left:auto"></span></button>
     <div id="health-box" style="display:none">
       <div id="health-list"></div>
     </div>`;
@@ -1917,7 +2038,7 @@ async function showAllPages() {
   const trash = document.createElement('div');
   trash.className = 'list-col';
   trash.innerHTML = `
-    <button class="trash-toggle" onclick="toggleTrash()">🗑️ 回收站 <span class="hint" id="trash-toggle-hint">（点击展开）</span></button>
+    <button class="trash-toggle" onclick="toggleTrash()"><svg class="icon" aria-hidden="true"><use href="#i-trash-2"/></svg> 回收站 <span class="hint" id="trash-toggle-hint">（点击展开）</span></button>
     <div id="trash-box" style="display:none">
       <div id="trash-list"></div>
     </div>`;
@@ -1932,7 +2053,7 @@ async function showAllPages() {
     if (!s2) return;
     s2.textContent = (h.orphans.length || h.broken.length)
       ? `${h.orphans.length} 孤立 · ${h.broken.length} 断链`
-      : '✓ 无问题';
+      : `${icon('circle-check')} 无问题`;
   }).catch(() => {});
 }
 
@@ -2012,7 +2133,7 @@ async function showVersionHistory() {
   preview.style.display = 'none';
   restoreBtn.disabled = true;
 
-  document.getElementById('vp-title').textContent = `🕘 ${vpPageName} 的历史`;
+  document.getElementById('vp-title').innerHTML = `${icon('history')} ${escapeHtml(vpPageName)} 的历史`;
 
   if (vpVersions.length === 0) {
     list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">暂无历史版本<br><span style="font-size:12px">保存内容修改后会自动记录</span></div>';
@@ -2070,7 +2191,7 @@ async function restoreSelectedVersion() {
       return;
     }
     closeVersionHistory();
-    showToast('已恢复到历史版本 ✓');
+    showToast('已恢复到历史版本');
     invalidateCache();
     // Reload the page in editor
     const pageResp = await fetch(`${API}/pages/${encodeURIComponent(vpPageName)}`);
@@ -2213,12 +2334,12 @@ async function loadHealth() {
     list.innerHTML = `<div class="empty-hint">体检失败: ${escapeHtml(e.message)}</div>`;
     return;
   }
-  let html = `<div class="health-overview">📊 ${h.stats.pages} 页 · ${h.stats.links} 条链接 · 近 7 天活跃 ${h.stats.active7} 页</div>`;
+  let html = `<div class="health-overview">${icon('activity')} ${h.stats.pages} 页 · ${h.stats.links} 条链接 · 近 7 天活跃 ${h.stats.active7} 页</div>`;
   if (h.stats.topTags.length) {
     html += `<div class="health-tags">` + h.stats.topTags.map(t2 =>
       `<span class="tag-chip" data-tag="${escapeHtml(t2.name)}">#${escapeHtml(t2.name)} ×${t2.count}</span>`).join('') + `</div>`;
   }
-  html += `<div class="time-group">🪺 孤立页（${h.orphans.length}）—— 没有任何页面链接到它们</div>`;
+  html += `<div class="time-group">${icon('unlink')} 孤立页（${h.orphans.length}）—— 没有任何页面链接到它们</div>`;
   if (!h.orphans.length) {
     html += '<div class="health-item src">无 —— 没有孤岛</div>';
   } else {
@@ -2228,7 +2349,7 @@ async function loadHealth() {
       </div>`;
     }
   }
-  html += `<div class="time-group">🔗 断链（${h.broken.length}）—— 指向不存在的页面</div>`;
+  html += `<div class="time-group">${icon('link-2')} 断链（${h.broken.length}）—— 指向不存在的页面</div>`;
   if (!h.broken.length) {
     html += '<div class="health-item src">无 —— 所有链接都有落点</div>';
   } else {
@@ -2259,7 +2380,7 @@ async function restoreFromTrash(name, versionId) {
       showToast(`恢复失败: ${err.detail || resp.status}`);
       return;
     }
-    showToast(`已恢复「${name}」 ✓`);
+    showToast(`已恢复「${name}」`);
     invalidateCache();
     await loadTrash();
     // Refresh page count
@@ -2270,14 +2391,49 @@ async function restoreFromTrash(name, versionId) {
   }
 }
 
+const TAGS_FOLD = 18;          // tags shown before "展开全部"
+let tagsAll = [];              // full list from the last render
+let tagsExpanded = false;
+
 function loadTags(tags) {
-  let html = '';
-  for (const t of tags) {
-    html += `<div class="tag-item" data-tag="${escapeHtml(t.name)}">
+  tagsAll = tags || [];
+  tagsExpanded = false;
+  const f = document.getElementById('tags-filter');
+  if (f) f.value = '';         // a stale filter would hide the new list
+  renderTags();
+}
+
+function renderTags() {
+  const q = (document.getElementById('tags-filter')?.value || '').trim().toLowerCase();
+  const list = document.getElementById('tags-list');
+  const more = document.getElementById('tags-more');
+  const countEl = document.getElementById('tags-count');
+  if (!list) return;
+
+  const visible = q
+    ? tagsAll.filter(t => t.name.toLowerCase().includes(q))
+    : tagsAll;
+  const folded = !tagsExpanded && !q && visible.length > TAGS_FOLD;
+  const shown = folded ? visible.slice(0, TAGS_FOLD) : visible;
+
+  list.innerHTML = shown.map(t => `<div class="tag-item" data-tag="${escapeHtml(t.name)}">
       <span>#${escapeHtml(t.name)}</span><span class="count">${t.count}</span>
-    </div>`;
+    </div>`).join('') || `<div class="tag-item empty" style="color:var(--muted);cursor:default">没有匹配的标签</div>`;
+
+  if (countEl) countEl.textContent = q ? `${visible.length}/${tagsAll.length}` : tagsAll.length;
+  if (more) {
+    if (folded) { more.hidden = false; more.textContent = `展开全部 ${tagsAll.length} 个标签`; }
+    else if (tagsExpanded && !q && tagsAll.length > TAGS_FOLD) { more.hidden = false; more.textContent = '收起'; }
+    else more.hidden = true;
   }
-  document.getElementById('tags-list').innerHTML = html;
+}
+
+function filterTags() { renderTags(); }
+
+function toggleTagsFold() {
+  tagsExpanded = !tagsExpanded;
+  renderTags();
+  if (!tagsExpanded) document.getElementById('tags-list').scrollTop = 0;
 }
 
 // ── Page loading ──────────────────────────────────────────────
@@ -2319,7 +2475,7 @@ async function loadPage(name) {
 
   let backlinksHtml = '';
   if (page.backlinks.length > 0) {
-    backlinksHtml = '<h3>🔗 反向链接</h3>';
+    backlinksHtml = `<h3>${icon('link-2')} 反向链接</h3>`;
     for (const b of page.backlinks) {
       backlinksHtml += `<div class="backlink-item" data-page="${escapeHtml(b.name)}">
         <div class="title">${escapeHtml(b.name)}</div>
@@ -2530,7 +2686,11 @@ function renderContent(content) {
   return md.render(content || '');
 }
 
-let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）"><button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">🕘 历史</button><button id="delete-btn" onclick="deleteCurrentPage()" title="删除页面（可在回收站恢复）" style="display:none">🗑️</button>';
+let originalHeaderHTML = '<input type="text" id="page-name" placeholder="页面名（即 [[链接目标]]）">'
+  + '<button id="history-btn" onclick="showVersionHistory()" title="版本历史" style="display:none">'
+  + icon('history') + ' 历史</button>'
+  + '<button id="delete-btn" onclick="deleteCurrentPage()" title="删除页面（可在回收站恢复）" style="display:none">'
+  + icon('trash-2') + '</button>';
 
 function newPage() {
   hideAll();
@@ -2613,9 +2773,9 @@ function checkDraft(base, keyOverride) {
   }
   bar._draft = draft;
   const label = currentSaveMode === 'journal'
-    ? `📝 ${draft.name} 的日记草稿（${_draftMinutes(draft.ts)} 分钟前未保存）`
-    : `📝 「${draft.name || '未命名'}」的草稿（${_draftMinutes(draft.ts)} 分钟前未保存）`;
-  document.getElementById('draft-msg').textContent = label;
+    ? `${icon('file-pen-line')} ${escapeHtml(draft.name)} 的日记草稿（${_draftMinutes(draft.ts)} 分钟前未保存）`
+    : `${icon('file-pen-line')} 「${escapeHtml(draft.name || '未命名')}」的草稿（${_draftMinutes(draft.ts)} 分钟前未保存）`;
+  document.getElementById('draft-msg').innerHTML = label;   // label carries an icon
   bar.style.display = 'flex';
 }
 
@@ -3037,7 +3197,7 @@ function saveSearch(q) {
   const list = getSavedSearches().filter(s => s.q !== q);
   list.unshift({ q, ts: Date.now() });
   localStorage.setItem('kb-saved-searches', JSON.stringify(list.slice(0, 8)));
-  showToast('已固定到首页 ✓');
+  showToast('已固定到首页');
 }
 
 function removeSavedSearch(e) {
@@ -3079,7 +3239,7 @@ async function doSearch() {
   pages.sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
 
   let html = `<div class="list-col"><div class="view-title">搜索 "${escapeHtml(q)}" <span class="count">${pages.length}</span>
-    <span class="spacer" style="flex:1"></span><button class="btn-imp" onclick="saveSearch(${JSON.stringify(q).replace(/"/g, '&quot;')})">📌 固定此搜索</button></div>`;
+    <span class="spacer" style="flex:1"></span><button class="btn-imp" onclick="saveSearch(${JSON.stringify(q).replace(/"/g, '&quot;')})">${icon('pin')} 固定此搜索</button></div>`;
   if (pages.length === 0) {
     html += '<div class="empty-hint">没有匹配的结果。<br>换个关键词，或直接输入 [[页面名]] 直达。</div>';
   } else {
@@ -3137,7 +3297,7 @@ async function saveCustomCSS() {
       body: css,
     });
     if (!resp.ok) { showToast('保存失败', 'error'); return; }
-    showToast('自定义 CSS 已保存 ✓');
+    showToast('自定义 CSS 已保存');
   } catch (e) {
     showToast('保存失败: ' + e.message, 'error');
   }
@@ -3220,7 +3380,7 @@ function populateTodoPageSwitch() {
   const pages = getTaskPages();
   const current = getTaskPage();
   sel.innerHTML = pages.map(p =>
-    `<option value="${escapeHtml(p)}"${p.toLowerCase() === current.toLowerCase() ? ' selected' : ''}>📄 ${escapeHtml(p)}</option>`
+    `<option value="${escapeHtml(p)}"${p.toLowerCase() === current.toLowerCase() ? ' selected' : ''}>${escapeHtml(p)}</option>`
   ).join('');
 }
 
@@ -3354,11 +3514,11 @@ async function toggleTaskDone(task) {
       if (!nextDue) { showToast('无法计算重复周期', 'error'); return; }
       const base = task.raw.replace(/\s+due:\S+/g, '').replace(/\s+rec:\S+/g, '').replace(/\s+done:\S+\s*$/i, '').trimEnd();
       newLine = base + ' due:' + nextDue + ' ' + task.rec;
-      showToast(`🔁 已滚动到 ${nextDue}`);
+      showToast(`已滚动到 ${nextDue}`);
     } else {
       // Complete: append done:today
       newLine = task.raw.replace(/\s+done:\S+\s*$/i, '').trimEnd() + ' done:' + today;
-      showToast('✓ 已完成');
+      showToast('已完成');
     }
 
     lines[idx] = newLine;
@@ -3498,7 +3658,7 @@ async function quickAddTask(text) {
     if (!putResp.ok) { showToast('保存失败', 'error'); return; }
     invalidateCache();
     renderTodo(todoCurrentView);
-    showToast('✓ 已添加');
+    showToast('已添加');
   } catch (e) {
     showToast('添加失败: ' + e.message, 'error');
   }
@@ -3515,10 +3675,10 @@ function renderList(tasks) {
   let html = `<input type="text" id="quick-add-input" class="todo-quickadd" placeholder="+ 新任务，回车添加（支持 p1 due:2026-09-30 rec:1w 完整语法，纯文本默认 p2 今天开始）" onkeydown="if(event.key==='Enter')quickAddTask(this.value)">`;
   const statItems = [
     { key: 'all', label: `全部 ${tasks.length}`, cls: '' },
-    { key: 'overdue', label: `🔴 逾期 ${stats.overdue}`, cls: '' },
-    { key: 'today', label: `🟠 今天 ${stats.today}`, cls: '' },
-    { key: 'week', label: `🔵 本周 ${stats.week}`, cls: '' },
-    { key: 'done', label: `✓ 已完成 ${stats.done}`, cls: '' },
+    { key: 'overdue', label: `逾期 ${stats.overdue}`, cls: '' },
+    { key: 'today', label: `今天 ${stats.today}`, cls: '' },
+    { key: 'week', label: `本周 ${stats.week}`, cls: '' },
+    { key: 'done', label: `已完成 ${stats.done}`, cls: '' },
   ];
   html += `<div class="todo-stats">`;
   for (const s of statItems) {
@@ -3546,7 +3706,7 @@ function renderList(tasks) {
         <div class="task-title">${escapeHtml(t.title)}</div>
         ${links ? `<div class="task-meta">${links}</div>` : ''}
       </div>
-      <div class="task-due${isOverdue ? ' overdue' : ''}">${t.dueDate || '—'}${t.rec ? ' <span class="rec-badge">🔁</span>' : ''}</div>
+      <div class="task-due${isOverdue ? ' overdue' : ''}">${t.dueDate || '—'}${t.rec ? ` <span class="rec-badge">${icon('rotate-ccw')}</span>` : ''}</div>
     </div>`;
   });
   content.innerHTML = html;
@@ -3698,11 +3858,11 @@ function renderGantt(tasks) {
         const links = task._links && task._links.length
           ? task._links.map(l => `<a href="#" data-page="${escapeHtml(l)}" style="color:var(--accent)">${escapeHtml(l)}</a>`).join(', ')
           : '';
-        const rec = task._rec ? `<br>🔁 ${escapeHtml(task._rec)}` : '';
+        const rec = task._rec ? `<br>${icon('rotate-ccw')} ${escapeHtml(task._rec)}` : '';
         return `<div style="padding:10px;background:var(--card);border:1px solid var(--border);border-radius:6px;min-width:180px">
           <div style="font-weight:600;margin-bottom:4px">${escapeHtml(task.name)}</div>
-          <div style="font-size:12px;color:var(--muted)">📅 ${task.start} → ${task.end}${rec}</div>
-          ${links ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">🔗 ${links}</div>` : ''}
+          <div style="font-size:12px;color:var(--muted)">${icon('calendar')} ${task.start} → ${task.end}${rec}</div>
+          ${links ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">${icon('link-2')} ${links}</div>` : ''}
           <div style="margin-top:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${ganttPriorityColor(p)};margin-right:4px"></span>优先级 ${p.slice(1)}</div>
         </div>`;
       },
@@ -4305,7 +4465,7 @@ async function fillEmbeds(root, depth = 0) {
       await markUnresolved(el);
     } catch (e) {
       el.classList.add('kb-embed-missing');
-      el.innerHTML = `<span class="kb-embed-create" data-create="${escapeHtml(name)}">📄 ${escapeHtml(name)} 不存在 — 点击创建</span>`;
+      el.innerHTML = `<span class="kb-embed-create" data-create="${escapeHtml(name)}">${icon('file-pen-line')} ${escapeHtml(name)} 不存在 — 点击创建</span>`;
     }
   }
 }
@@ -4339,6 +4499,11 @@ function timeGroupKey(s) {
   return '更早';
 }
 
+// Render a sprite symbol; inherits currentColor and the surrounding font-size.
+function icon(name, cls) {
+  return `<svg class="${cls || 'icon'}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+}
+
 function escapeHtml(s) {
   if (!s) return '';
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -4346,6 +4511,8 @@ function escapeHtml(s) {
 
 function showToast(msg, type) {
   const t = document.getElementById('toast');
+  // Errors use assertive so they cut in; success/info stay polite.
+  t.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
   t.textContent = msg;
   t.className = type === 'error' ? 'error' : '';
   t.style.display = 'block';
@@ -4464,7 +4631,8 @@ const themeToggle = document.getElementById('theme-toggle');
 function setTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('kb-theme', theme);
-  themeToggle.innerHTML = theme === 'dark' ? '🌙' : '☀️';
+  themeToggle.innerHTML = icon(theme === 'dark' ? 'moon' : 'sun');
+  themeToggle.setAttribute('aria-label', theme === 'dark' ? '切换到浅色主题' : '切换到深色主题');
   // Sync CodeMirror theme
   if (cm) {
     cm.setOption('theme', theme === 'dark' ? 'dracula' : 'default');
@@ -4569,17 +4737,17 @@ async function lpShow(linkEl) {
 
   if (!page) {
     lpCard.innerHTML = `
-      <div class="lp-title">📄 ${escapeHtml(name)}</div>
-      <div class="lp-missing lp-create" data-create="${escapeHtml(name)}">➕ 页面不存在——点击创建</div>`;
+      <div class="lp-title">${icon('files')} ${escapeHtml(name)}</div>
+      <div class="lp-missing lp-create" data-create="${escapeHtml(name)}">${icon('plus')} 页面不存在——点击创建</div>`;
   } else {
     const preview = page.content.length > 500
       ? page.content.slice(0, 500).replace(/\n\S.*$/s, '') + '\n…'
       : page.content;
     const backlinkCount = (page.backlinks || []).length;
     lpCard.innerHTML = `
-      <div class="lp-title lp-goto" data-goto="${escapeHtml(page.name)}">📄 ${escapeHtml(page.name)}</div>
+      <div class="lp-title lp-goto" data-goto="${escapeHtml(page.name)}">${icon('files')} ${escapeHtml(page.name)}</div>
       <div class="lp-body">${renderContent(preview)}</div>
-      <div class="lp-footer">🔗 ${backlinkCount} 个反向链接 · 更新于 ${formatDate(page.updated_at)}</div>`;
+      <div class="lp-footer">${icon('link-2')} ${backlinkCount} 个反向链接 · 更新于 ${formatDate(page.updated_at)}</div>`;
   }
   lpPosition(linkEl);
 }
@@ -4680,23 +4848,23 @@ function fuzzyScore(query, text) {
 }
 
 const paletteActions = [
-  { icon: '📄', label: '新建页面', hint: '编辑', run: () => newPage() },
-  { icon: '📅', label: '今日日记', hint: '日记', run: () => navigate('journal') },
-  { icon: '🗂', label: '所有页面', run: () => navigate('all') },
-  { icon: '🕸', label: '知识图谱', run: () => navigate('graph') },
-  { icon: '📋', label: '任务管理', run: () => navigate('todo') },
-  { icon: '🏠', label: '回到首页', run: () => navigate('home') },
-  { icon: '🌗', label: '切换深浅主题', run: () => {
+  { icon: 'file-pen-line', label: '新建页面', hint: '编辑', run: () => newPage() },
+  { icon: 'calendar', label: '今日日记', hint: '日记', run: () => navigate('journal') },
+  { icon: 'folder-open', label: '所有页面', run: () => navigate('all') },
+  { icon: 'network', label: '知识图谱', run: () => navigate('graph') },
+  { icon: 'list-checks', label: '任务管理', run: () => navigate('todo') },
+  { icon: 'home', label: '回到首页', run: () => navigate('home') },
+  { icon: 'sun', label: '切换深浅主题', run: () => {
       const cur = document.documentElement.getAttribute('data-theme') || 'dark';
       setTheme(cur === 'dark' ? 'light' : 'dark');
     } },
-  { icon: '◀', label: '收起/展开侧边栏', run: () => document.getElementById('sidebar-toggle').click() },
-  { icon: '📦', label: '导出 zip', hint: '备份', run: () => exportPages('zip') },
-  { icon: '📦', label: '导出 JSON', hint: '备份', run: () => exportPages('json') },
+  { icon: 'panel-left-close', label: '收起/展开侧边栏', run: () => document.getElementById('sidebar-toggle').click() },
+  { icon: 'download', label: '导出 zip', hint: '备份', run: () => exportPages('zip') },
+  { icon: 'download', label: '导出 JSON', hint: '备份', run: () => exportPages('json') },
   // Contextual: only when editing a page
-  { icon: '💾', label: '保存页面', ctx: 'editing', run: () => savePage() },
-  { icon: '🕘', label: '版本历史', ctx: 'editing', run: () => showVersionHistory() },
-  { icon: '🗑', label: '删除页面', ctx: 'editing', run: () => deleteCurrentPage() },
+  { icon: 'save', label: '保存页面', ctx: 'editing', run: () => savePage() },
+  { icon: 'history', label: '版本历史', ctx: 'editing', run: () => showVersionHistory() },
+  { icon: 'trash-2', label: '删除页面', ctx: 'editing', run: () => deleteCurrentPage() },
 ];
 
 let palItems = [];       // flat list of {icon, label, hint, section, run}
@@ -4723,7 +4891,7 @@ function renderPaletteEmpty() {
   const items = [];
   if (recent.length > 0) {
     for (const r of recent.slice(0, 5)) {
-      items.push({ icon: '📄', label: r.name, hint: timeAgo(r.ts), section: '最近', run: () => navigate('page', r.name) });
+      items.push({ icon: 'clock', label: r.name, hint: timeAgo(r.ts), section: '最近', run: () => navigate('page', r.name) });
     }
   }
   for (const a of paletteActions.filter(a => !a.ctx)) {
@@ -4759,7 +4927,7 @@ async function handlePaletteInput() {
     // Quick capture: create page with this name
     const name = query;
     if (name) {
-      items.push({ icon: '➕', label: `创建页面「${name}」`, hint: '快速捕获', section: '创建', run: () => {
+      items.push({ icon: 'plus', label: `创建页面「${name}」`, hint: '快速捕获', section: '创建', run: () => {
         newPage();
         document.getElementById('page-name').value = name;
         if (cm) cm.focus();
@@ -4786,7 +4954,7 @@ async function handlePaletteInput() {
     for (const p of pageCache) {
       const sc = fuzzyScore(q, p.name);
       if (sc > 0) {
-        items.push({ icon: '📄', label: p.name, hint: '', section: '页面', score: sc, run: () => navigate('page', p.name) });
+        items.push({ icon: 'files', label: p.name, hint: '', section: '页面', score: sc, run: () => navigate('page', p.name) });
       }
     }
     items.sort((a, b) => b.score - a.score);
@@ -4828,7 +4996,7 @@ async function handlePaletteInput() {
           for (const r of (Array.isArray(results) ? results : [])) {
             const rn = r.name;
             if (!rn || nameMatches.has(rn.toLowerCase())) continue;
-            ftsItems.push({ icon: '🔎', label: rn, hint: '内容匹配', section: '内容匹配', run: () => navigate('page', rn) });
+            ftsItems.push({ icon: 'search', label: rn, hint: '内容匹配', section: '内容匹配', run: () => navigate('page', rn) });
           }
           if (ftsItems.length > 0 && document.getElementById('palette-overlay').classList.contains('open')) {
             // Only add if input unchanged
@@ -4868,7 +5036,7 @@ function renderPaletteResults() {
     const active = i === palActiveIdx ? ' active' : '';
     const hint = item.hint ? `<span class="pal-hint">${escapeHtml(item.hint)}</span>` : '';
     html += `<div class="pal-item${active}" data-idx="${i}" onclick="executePaletteItem(${i})" onmouseenter="setPalActive(${i})">
-      <span class="pal-icon">${item.icon}</span>
+      <span class="pal-icon"><svg class="icon" aria-hidden="true"><use href="#i-${item.icon || 'files'}"/></svg></span>
       <span>${escapeHtml(item.label)}</span>${hint}
     </div>`;
   });
@@ -4951,7 +5119,7 @@ function updateOfflineBanner() {
   if (el) return;
   el = document.createElement('div');
   el.id = 'offline-banner';
-  el.textContent = '📴 离线模式 · 仅显示已缓存内容';
+  el.innerHTML = `${icon('alert-triangle')} 离线模式 · 仅显示已缓存内容`;
   document.body.appendChild(el);
 }
 window.addEventListener('online', updateOfflineBanner);

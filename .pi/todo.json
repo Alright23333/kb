@@ -63,11 +63,11 @@
 		{
 			"id": "T-046",
 			"text": "P6-2 对比度达标：--muted 实测 2.54–4.91:1（需 4.5）。调内置 dark/light 与 Tokyo Night 两套主题的 muted 值，保证 muted/bg 与 muted/card 均 ≥4.5",
-			"status": "pending",
+			"status": "in-progress",
 			"priority": "high",
 			"assignee": "Aurora",
 			"createdAt": "2026-11-17T03:01:45.998Z",
-			"updatedAt": "2026-11-17T03:01:45.998Z",
+			"updatedAt": "2026-11-17T03:12:24.962Z",
 			"blockedBy": null
 		},
 		{
