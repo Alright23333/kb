@@ -891,6 +891,10 @@ body .cm-s-dracula .CodeMirror-cursor { border-left: 2px solid var(--accent); }
 body .cm-s-dracula .CodeMirror-selected { background: var(--accent-dim) !important; }
 body .cm-s-dracula .CodeMirror-activeline-background { background: var(--card); }
 body .cm-s-dracula .CodeMirror-linenumber { color: var(--muted); }
+/* Light theme uses CodeMirror's "default" theme, whose #999 line numbers are
+   only 2.7:1. Override both themes so the gutter reads as muted text, not grey. */
+body .CodeMirror .CodeMirror-linenumber { color: var(--muted); }
+body .CodeMirror-gutters { background: var(--bg); border-right: 1px solid var(--border); }
 
 /* ═══════════════ Popovers & menus ═══════════════ */
 #slash-menu, #ref-autocomplete {
