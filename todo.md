@@ -73,14 +73,40 @@
 
 ## P6 前端可访问性与信息密度（[[2026-11-13]] ui-ux-pro-max review，实测发现）
 
-- [ ] **侧边栏导航键盘不可达**：`<a class="nav-item">` 无 `href`/`tabindex` → 5 个导航项 Tab 全部跳过，键盘用户无法离开首页（改法：加 `href`，现有 click 委托已 `preventDefault`，顺带获得新标签打开）
-- [ ] **次要文字对比度不达标**：`var(--muted)` 实测 2.54–4.91:1（要求 4.5）——内置 light 3.54/3.25、Tokyo Night dark 2.76/2.91、Tokyo Night light 2.54/3.28；被 63 处引用
-- [ ] **焦点样式被移除**：全文件仅 2 处 `:focus` 且都 `outline: none` 无替代，键盘用户看不到焦点位置（改法：统一 `:focus-visible` 环）
-- [ ] **列表不随数据规模扩展**：生产库 470 页 / 75 标签，但列表是全宽单列无 `max-width`（对比 `#page-view` 有 720px），470 页 ≈ 3.7 万像素滚动；标签侧栏无折叠/过滤
-- [ ] **图标按钮无无障碍名称**：0 处 `aria-label`，只有 `title`（`◀ ⚙️ 🌙 ＋ － 🗑️ 🕘` 等）
-- [ ] **toast 不播报**：无 `aria-live`/`role="status"`，保存成功/失败对读屏用户不可知
-- [ ] **未尊重减弱动效**：0 处 `prefers-reduced-motion`，但有 9 处 `transition`
-- [ ] **图标用 emoji**（约 50 处）：字形跨平台不一致、无法用设计 token 调色、同层级混用填充/线性风格（skill 明确列为反模式）
+> 本轮已完成 7/8（2026-11-17）。审计脚本实测两个主题 × 5 个路由：
+> 对比度不达标 0 处、残留 emoji 0、缺失 symbol 0、JS 错误 0。
+
+- [x] **侧边栏导航键盘不可达**：`<a class="nav-item">` 无 `href`/`tabindex` → Tab 全部跳过 ✅ `620b81f`
+  - 加 root-relative `href` + 启动时按部署前缀改写；`preventDefault` 后走 SPA，Ctrl/中键仍可新标签打开
+- [x] **次要文字对比度不达标**：`var(--muted)` 2.54–4.91:1 ✅ `bc4546b`
+  - dark `#565f89`→`#8b92b0`（5.06–5.85:1）、light `#6e7781`→`#5f6771`（5.02–5.73:1）
+  - 另外新增 `--on-accent`（dark 白字只有 2.52:1 → 深字 7.14:1）与 `--on-priority`
+    （dark 粉彩徽章配深字 6.9–9.8:1；light p2/p3/p4 压暗使白字达标）
+  - `.kb-embed` / `.dashboard` 里的 `<a>` 之前掉进 UA 默认蓝（1.82:1），改为全局着色
+  - light 主题 CodeMirror 行号 `#999` 只有 2.66:1 → 统一 `var(--muted)` ✅ `67be335`
+- [x] **焦点样式被移除** ✅ `bc4546b`
+  - 统一 `:focus-visible` 2px accent 环（offset 2px）；输入框用 offset:-1px 内环
+  - CodeMirror 内部 textarea 抑制，外层 `.editor-wrap:focus-within` 给柔光环
+  - 删除 `input:focus-visible { outline: none }` 这类无替代的抑制
+- [x] **列表不随数据规模扩展** ✅ `bc4546b`
+  - `#all-pages-list` 改 `auto-fill` 网格：1440px 4 列 / 1024px 2 列 / 手机 1 列
+  - 500 页从 18201px 单列 → 4523px
+  - 标签侧栏加筛选框 + 默认折叠 18 个（119 标签从一堵墙变成可导航）
+- [x] **图标按钮无无障碍名称** ✅ `bc4546b` `3e50171`
+  - 30 处 `aria-label`（图标按钮、短文本控件如「日/周/月」「恢复/丢弃」、日期区间）
+- [x] **toast 不播报** ✅ `bc4546b`
+  - `role="status" aria-live="polite" aria-atomic="true"`；错误切 `assertive`
+- [x] **未尊重减弱动效** ✅ 已在 `9f8aa79` 前端重写时加入，本轮实测确认生效
+  - `prefers-reduced-motion: reduce` 下 transition/animation 元素从 27 → 0
+- [x] **图标用 emoji**（约 50 处）✅ `bc4546b`
+  - Lucide 50 个符号内联进 `<body>`（10KB，零网络请求），`.icon` 继承 `currentColor`
+  - 导航/头部/任务/图谱/历史/回收站/命令面板全部换成 `<use href="#i-x">`
+  - 顺带修 `<body>` 重复标签、`:hover` 重复规则、`rec-badge` 模板串引号错误
+
+### 遗留（低优先级，未做）
+
+- [ ] 主按钮 `--accent-hover` 在 dark 下是更亮的蓝，hover 时页面对比度略降（4.5 边缘）
+- [ ] 边框 `--border` 对比度 1.17–1.34:1（装饰性分隔线，按设计保留，非 WCAG 要求）
 
 ## 工程习惯（源自 KB 页风险提示，保持）
 
