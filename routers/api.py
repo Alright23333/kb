@@ -281,6 +281,22 @@ async def list_page_names():
         await db.close()
 
 
+@router.get("/pages/count")
+async def count_pages():
+    """Total page count.
+
+    /pages caps at limit=500, so a client that renders `rows.length` as the
+    page count freezes at 500 once the KB grows past that. This gives the
+    real number.
+    """
+    db = await get_db()
+    try:
+        row = await _fetchone(db, "SELECT COUNT(*) AS n FROM pages")
+        return {"count": row["n"] if row else 0}
+    finally:
+        await db.close()
+
+
 # ── Page Versions ────────────────────────────────────────────────
 
 @router.get("/pages/{name:path}/versions")

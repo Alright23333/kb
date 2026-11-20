@@ -1990,12 +1990,19 @@ async function showAllPages() {
   view.innerHTML = '<div style="padding:20px;color:var(--muted)">加载中...</div>';
 
   let pages;
+  let total = null;
   try {
-    pages = await cachedFetch('allPages', `${API}/pages?limit=500`);
+    // /pages caps at limit=500 — the list itself is truncated, but the
+    // header must show the real page count, so fetch it separately.
+    [pages, total] = await Promise.all([
+      cachedFetch('allPages', `${API}/pages?limit=500`),
+      cachedFetch('pageCount', `${API}/pages/count`).then(r => r.count).catch(() => null),
+    ]);
   } catch (e) {
     pages = [];
   }
   if (token !== viewToken) return;
+  if (total === null) total = pages.length;
 
   // Fast sort: pre-compute lowercase names, use simple comparison
   pages.sort((a, b) => {
@@ -2009,7 +2016,7 @@ async function showAllPages() {
   const header = document.createElement('div');
   header.className = 'list-col';
   header.innerHTML = `<div class="toolbar">
-    <div class="view-title">所有页面 <span class="count">${pages.length}</span></div>
+    <div class="view-title">所有页面 <span class="count">${total}</span></div>
     <span class="spacer"></span>
     <button class="btn-imp" onclick="document.getElementById('import-file-input').click()" title="导入 .md 或 .zip"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> 导入</button>
     <button class="btn-imp" onclick="exportPages('zip')" title="导出为 zip（Markdown + front matter）"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> 导出</button>
@@ -2030,6 +2037,14 @@ async function showAllPages() {
     list.appendChild(el);
   }
   frag.appendChild(list);
+
+  // The API caps /pages at limit=500 — show the rest on demand.
+  if (total > pages.length) {
+    const more = document.createElement('div');
+    more.className = 'list-col';
+    more.innerHTML = `<button class="btn-imp" id="all-pages-more" onclick="loadMoreAllPages()">加载更多（还有 ${total - pages.length} 页）</button>`;
+    frag.appendChild(more);
+  }
 
   // Trash section (collapsed by default)
   const health = document.createElement('div');
@@ -2068,6 +2083,39 @@ function filterAllPages() {
   document.querySelectorAll('#all-pages-list .page-list-item').forEach(el => {
     el.style.display = (!q || el.dataset.nameLower.includes(q)) ? '' : 'none';
   });
+}
+
+// Fetch the next slice of pages (the API caps each request at limit=500).
+async function loadMoreAllPages() {
+  const btn = document.getElementById('all-pages-more');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '加载中…';
+  const list = document.getElementById('all-pages-list');
+  const have = list.querySelectorAll('.page-list-item').length;
+  try {
+    const rows = await fetch(`${API}/pages?limit=500&offset=${have}`).then(r => r.json());
+    for (const p of rows) {
+      const el = document.createElement('div');
+      el.className = 'page-list-item';
+      el.dataset.page = p.name;
+      el.dataset.nameLower = p.name.toLowerCase();
+      el.innerHTML = `<div class="row"><span class="title">${escapeHtml(p.name)}</span><span class="meta">${relativeDate(p.updated_at)}</span></div>`;
+      list.appendChild(el);
+    }
+    const total = (await cachedFetch('pageCount', `${API}/pages/count`).then(r => r.count)) || 0;
+    const now = list.querySelectorAll('.page-list-item').length;
+    if (now < total) {
+      btn.textContent = `加载更多（还有 ${total - now} 页）`;
+      btn.disabled = false;
+    } else {
+      btn.remove();
+    }
+    filterAllPages();
+  } catch (e) {
+    btn.textContent = '加载失败，重试';
+    btn.disabled = false;
+  }
 }
 
 function exportPages(fmt) {
