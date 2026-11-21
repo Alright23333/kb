@@ -1,0 +1,15 @@
+/* Catppuccin Frappe —— 深色，最柔和。只有官方色板（26 行），无额外覆盖。
+ * 语义别名与 CodeMirror 分组在 catppuccin.css 里，四个 flavour 共用。
+ * 加新 flavour 照这个格式写 26 行，再去 themes/index.js 登记一行即可。 */
+
+:root[data-scheme="catppuccin-frappe"] {
+  --rosewater:#f2d5cf; --flamingo:#eebebe; --pink:#f4b8e4; --mauve:#ca9ee6;
+  --red:#e78284; --maroon:#ea999c; --peach:#ef9f76; --yellow:#e5c890;
+  --green:#a6d189; --teal:#81c8be; --sky:#99d1db; --sapphire:#85c1dc;
+  --blue:#8caaee; --lavender:#babbf1; --text:#c6d0f5; --subtext1:#b5bfe2;
+  --subtext0:#a5adce; --overlay2:#949cbb; --overlay1:#838ba7; --overlay0:#737994;
+  --surface2:#626880; --surface1:#51576d; --surface0:#414559; --base:#303446;
+  --mantle:#292c3c; --crust:#232634;
+
+  /* 无需覆盖 */
+}

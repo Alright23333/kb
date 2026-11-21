@@ -223,6 +223,82 @@ git merge --no-ff ui-lazyvim
 | 合并预演 | `git merge-tree` 0 冲突标记；分支已包含 `main` 最新 commit |
 | 业务代码 | 12 个后端文件与 `main` **0 行差异**（逐文件 `git diff --quiet` 验证） |
 
+## 配色：Catppuccin 四口味 + 单一覆盖层（2026-11-22）
+
+用户要求「参考本机 nvim config 的 catppuccin」并「作为单独覆盖的东西，而非之前那种
+一步一个改颜色」。这两点决定了实现的形状。
+
+### nvim 是怎么做的
+
+`~/.local/share/nvim/lazy/catppuccin/` 是一个插件：**一套**高亮组
+（`lua/catppuccin/groups/syntax.lua`、`editor.lua` …），flavour 只是参数。
+`:colorscheme catppuccin-mocha` / `-macchiato` / `-frappe` / `-latte` 换的只是
+`palettes/<flavour>.lua` 里那 26 个色值，高亮逻辑一行没重写。
+
+顺带一个细节：nvim 里 `Comment = { fg = C.overlay2 }`，不是 overlay0 —— 这条
+被抄过来了，原来用 overlay0 时注释只有 3.36:1，糊。
+
+### 本仓库改成同构的三层
+
+```
+static/themes/
+  catppuccin.css              ← 结构层：语义别名 + CodeMirror 分组，只写一次
+  catppuccin-mocha.css        ← 参数层：26 行官方色板
+  catppuccin-macchiato.css    ← 同上
+  catppuccin-frappe.css       ← 同上
+  catppuccin-latte.css        ← 同上 + 浅色对比度修正 + 语法色压暗
+```
+
+- 选择器一律 `:root[data-scheme^="catppuccin"]` 前缀匹配 → 加第五个 flavour
+  **不需要动结构层**
+- `themes/index.js` 的 spec 里多了 `dep`（结构层）与 `group`（同一族）：
+  `loadTheme` 先挂 dep 再挂色板，`toggleTheme` 只在同组内轮转，
+  `:colorscheme catppuccin` 报这一族有哪几个
+- 没有 `dep` 的主题（以后接 tokyonight / kanagawa）仍是自包含单文件，
+  两种形式共存，不强制
+
+### 顺手修掉的三个真问题
+
+| 问题 | 之前 | 现在 |
+|---|---|---|
+| `--bg-mantle` **被引用 3 处但从未定义**（卡片背景是透明的） | undefined | 结构层定义，模板里补首帧回退值 |
+| `--bg-hover` / `--accent-soft` 只在插件里带 fallback，主题不给值 | 永远走 fallback | 结构层用 `color-mix` 派生，四口味自动跟随 |
+| 四个 flavour **各自抄 30 条硬编码色值的 CM 规则**，且已漂移（latte 缺 `cm-header-1/2/3`、缺 `formatting-header/link`、缺 `activeline-gutter`） | 改一次配色改四遍 | 结构层一套，颜色全走 `var()` |
+
+### 语法色独立成一层（`--syn-*`）
+
+Latte 的官方 pink/peach/yellow/sky/lavender 在 `#eff1f5` 上只有 **2.3–2.8:1**，
+在 CodeMirror 里等于看不见。所以高亮色不能直接吃 `--blue`/`--green` 这些色板名：
+
+- 结构层定义 `--syn-heading` / `--syn-strong` / `--syn-comment` … 共 15 个，
+  深色 flavour 直接映射到色板（`var(--blue)` 等）
+- `catppuccin-latte.css` 里把这 15 个压暗到 ≥4.5:1（每行注明实测对比度）
+- CM 规则只引用 `--syn-*`，不再出现色板名
+
+### 实测（Playwright + 系统 chromium）
+
+```
+注册表   mocha / macchiato / frappe / latte 四个都在
+变量     --bg-mantle --bg-hover --accent-soft 四口味均非空（之前 3 个是 undefined）
+CM 一套规则生效：
+  mocha      bg=#1e1e2e  gutter=#181825  h1=#b4befe
+  macchiato  bg=#24273a  gutter=#1e2030  h1=#b7bdf8
+  frappe     bg=#303446  gutter=#292c3c  h1=#babbf1
+  latte      bg=#eff1f5  gutter=#e6e9ef  h1=#5767c0
+对比度（正文/辅助/链接）
+  mocha 11.34 / 7.37 / 10.54        macchiato 9.92 / 6.62 / 9.14
+  frappe 8.06 / 5.55 / 7.33         latte     7.06 / 5.53 / 5.63
+语法色 15 个 token × 4 flavour：**全部 ≥4.5:1**（最低 frappe 4.53、latte 4.51）
+  （修前 mocha 有 4 个不达标，最低 2.46:1）
+四 flavour × 6 个视图（/ /all /todo /graph /page /search）全绿
+frappe 下插件：TOC 20 条 / health 50 条 / :Searches 面板 ✓
+which-key 面板在 frappe 下 bg=#292c3c fg=#c6d0f5，22 行
+0 console / page 错误，0 HTTP>=400
+```
+
+> 回归注意：`/edit/KB` 的 `#view` 是空的 —— 编辑器内容在 `#editor` 里，
+> 拿 `#view` 判空会误报。这是正交行为，不是 bug。
+
 ## 修掉的两个老 bug（2026-11-22）
 
 用户报：「主页可以 space 开快捷键，编辑页 normal 模式就不行」「[[ 补全有时候有、有时候没有」。

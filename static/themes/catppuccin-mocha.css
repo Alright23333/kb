@@ -1,67 +1,15 @@
-/* Catppuccin Mocha —— 一个主题就是「一组 CSS 变量 + 可选的 CodeMirror 分组」。
- *
- * 加主题 = 往 static/themes/ 放一个这样的文件，再在 themes/index.js 里登记一行。
- * 切主题 = :colorscheme <名字>（等价 nvim 的 :colorscheme）。
- * 变量名保持 Catppuccin 官方调色板名，语义别名（--bg/--fg/--accent…）在其后派生。
- */
+/* Catppuccin Mocha —— 最常青的深色。只有官方色板（26 行），无额外覆盖。
+ * 语义别名与 CodeMirror 分组在 catppuccin.css 里，四个 flavour 共用。
+ * 加新 flavour 照这个格式写 26 行，再去 themes/index.js 登记一行即可。 */
 
 :root[data-scheme="catppuccin-mocha"] {
   --rosewater:#f5e0dc; --flamingo:#f2cdcd; --pink:#f5c2e7; --mauve:#cba6f7;
-  --red:#f38ba8;      --maroon:#eba0ac; --peach:#fab387; --yellow:#f9e2af;
-  --green:#a6e3a1;    --teal:#94e2d5;   --sky:#89dceb;   --sapphire:#74c7ec;
-  --blue:#89b4fa;     --lavender:#b4befe;
-  --text:#cdd6f4;     --subtext1:#bac2de; --subtext0:#a6adc8;
-  --overlay2:#9399b2; --overlay1:#7f849c; --overlay0:#6c7086;
-  --surface2:#585b70; --surface1:#45475a; --surface0:#313244;
-  --base:#1e1e2e;     --mantle:#181825;  --crust:#11111b;
+  --red:#f38ba8; --maroon:#eba0ac; --peach:#fab387; --yellow:#f9e2af;
+  --green:#a6e3a1; --teal:#94e2d5; --sky:#89dceb; --sapphire:#74c7ec;
+  --blue:#89b4fa; --lavender:#b4befe; --text:#cdd6f4; --subtext1:#bac2de;
+  --subtext0:#a6adc8; --overlay2:#9399b2; --overlay1:#7f849c; --overlay0:#6c7086;
+  --surface2:#585b70; --surface1:#45475a; --surface0:#313244; --base:#1e1e2e;
+  --mantle:#181825; --crust:#11111b;
 
-  --bg: var(--base);
-  --bg-deep: var(--mantle);
-  --bg-deepest: var(--crust);
-  --fg: var(--text);
-  --muted: var(--subtext0);
-  --faint: var(--overlay2);   /* 5.81:1 on base；overlay0 只有 3.36，太暗 */
-  --line: var(--surface0);
-  --line-soft: #252536;
-  --accent: var(--blue);      /* 7.79:1 */
-  --accent2: var(--mauve);    /* 8.07:1 */
-  --link: var(--sky);         /* 10.54:1 */
-  --ok: var(--green);
-  --warn: var(--yellow);
-  --err: var(--red);
-  --p1bg: var(--red); --p2bg: var(--peach); --p3bg: var(--yellow);
-  --on-accent: var(--crust);      /* 浅底强调色 → 深色字 */
-  --on-solid: var(--crust);       /* 优先级徽章同理 */
-  --sel: rgba(137,180,250,.14);
+  /* 无需覆盖：官方色板在 #1e1e2e 上对比度都够 */
 }
-
-/* ── CodeMirror 分组（同一主题文件内自带，不需要另装 CM 主题）── */
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin.CodeMirror,
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror {
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-gutters {
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-linenumber { color: #45475a; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-cursor { border-left: 2px solid #89b4fa; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-selected { background: rgba(137,180,250,.16); }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin div.CodeMirror-selected { background: rgba(137,180,250,.16); }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-activeline-background { background: rgba(137,180,250,.055); }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-activeline-gutter { background: rgba(137,180,250,.04); }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-matchingbracket { color: #a6e3a1 !important; background: rgba(166,227,161,.10); }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .CodeMirror-nonmatchingbracket { color: #f38ba8 !important; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-header { color: #89b4fa; font-weight: 600; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-header-1 { color: #b4befe; font-size: 1.1em; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-header-2 { color: #89b4fa; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-header-3 { color: #74c7ec; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-strong { color: #fab387; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-em { color: #cba6f7; font-style: italic; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-link { color: #94e2d5; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-url { color: #6c7086; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-string { color: #a6e3a1; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-comment { color: #6c7086; font-style: italic; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-quote { color: #a6adc8; font-style: italic; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-variable-2 { color: #f9e2af; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-keyword { color: #cba6f7; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-number { color: #fab387; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-tag { color: #f5c2e7; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-formatting { color: #585b70; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-formatting-header { color: #6c7086; }
-:root[data-scheme="catppuccin-mocha"] .cm-s-catppuccin .cm-formatting-link { color: #585b70; }

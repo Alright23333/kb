@@ -1,0 +1,116 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Catppuccin —— 结构层（所有 flavour 共用），照 nvim 的 catppuccin 插件模型
+   ─────────────────────────────────────────────────────────────────────
+   nvim 里 catppuccin 是一个插件：只有**一套**高亮组，flavour 只是参数
+   （:colorscheme catppuccin-mocha / -frappe / -macchiato / -latte）。
+   换 flavour 不改高亮逻辑，只换那 26 个官方色值。
+
+   这里同构，把「结构」和「参数」拆成两层：
+     · 本文件 = 插件主体：语义别名 + CodeMirror 分组，**只写一次**；
+       颜色一律引用官方色板名（var(--blue) / var(--surface1) …），不写死色值
+     · catppuccin-<flavour>.css = 参数：26 行官方色板（+ 浅色对比度修正）
+     · 选择器一律用 [data-scheme^="catppuccin"] 前缀匹配，
+       所以加第五个 flavour 不需要动本文件
+
+   为什么这么拆：改之前四个 flavour 各自抄 30 条硬编码色值的 CM 规则，
+   改一处配色要改四遍，而且已经漂移了（latte 缺 cm-header-1/2/3、
+   缺 formatting-header/link、缺 activeline-gutter）。现在改一次 = 全口味生效。
+
+   加一个新 flavour（例如 catppuccin-frappe-light）：
+     1. 写 catppuccin-<名字>.css：26 行官方色板（+ 需要的话覆盖语义别名）
+     2. themes/index.js 的 THEMES 加一行，dep 指向本文件
+     3. :colorscheme <名字>
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── 语义别名（色板名 → 用途名）──────────────────────────────────── */
+:root[data-scheme^="catppuccin"] {
+  --bg: var(--base);
+  --bg-deep: var(--mantle);
+  --bg-mantle: var(--mantle);       /* 之前被引用但从未定义，卡片背景是透明的 */
+  --bg-deepest: var(--crust);
+  --bg-hover: color-mix(in srgb, var(--fg) 6%, transparent);
+  --fg: var(--text);
+  --muted: var(--subtext0);
+  --faint: var(--overlay2);         /* overlay0 在 base 上只有 3.36:1，太暗 */
+  --line: var(--surface0);
+  --line-soft: color-mix(in srgb, var(--fg) 10%, var(--bg));
+  --accent: var(--blue);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent2: var(--mauve);
+  --link: var(--sky);
+  --ok: var(--green);
+  --warn: var(--yellow);
+  --err: var(--red);
+  --p1bg: var(--red); --p2bg: var(--peach); --p3bg: var(--yellow);
+  --on-accent: var(--crust);        /* 亮底色板 → 深色字 */
+  --on-solid: var(--crust);
+  --sel: color-mix(in srgb, var(--blue) 14%, transparent);
+
+  /* ── 语法色（编辑器高亮用，与 UI 色分开）────────────────────────
+   * 为什么不直接用 --blue/--green 那些色板名：
+   * Latte 的粉/黄/橘/天蓝在 #eff1f5 上只有 2.3–2.8:1，CM 里等于看不见。
+   * 所以高亮色单独开一层 token，深色 flavour 直接映射到色板，
+   * 浅色 flavour 在自己的文件里把值压暗。改这里一次 = 四个 flavour 都生效。 */
+  --syn-heading: var(--blue);
+  --syn-heading-1: var(--lavender);
+  --syn-heading-3: var(--sapphire);
+  --syn-strong: var(--peach);
+  --syn-em: var(--mauve);
+  --syn-link: var(--teal);
+  --syn-url: var(--overlay2);
+  --syn-string: var(--green);
+  /* Comment/Delimiter 在 nvim 的 catppuccin 里就是 overlay2（5.81:1 on base），
+     用 overlay0 只有 3.36:1，注释会糊。 */
+  --syn-comment: var(--overlay2);
+  --syn-quote: var(--muted);
+  --syn-keyword: var(--mauve);
+  --syn-number: var(--peach);
+  --syn-tag: var(--pink);
+  --syn-formatting: var(--overlay2);       /* markdown 标记符号，# ** ]] */
+  --syn-formatting-heading: var(--overlay2);
+}
+
+/* ── CodeMirror 分组（一套，四口味共用；颜色全走 var()）───────────── */
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin.CodeMirror,
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror {
+  background: var(--bg); color: var(--fg);
+}
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-gutters {
+  background: var(--bg-deep); border-right: 1px solid var(--line-soft);
+}
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-linenumber { color: var(--surface1); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-selected,
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin div.CodeMirror-selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-activeline-background {
+  background: color-mix(in srgb, var(--accent) 5.5%, transparent);
+}
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-activeline-gutter {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-matchingbracket {
+  color: var(--ok) !important; background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .CodeMirror-nonmatchingbracket { color: var(--err) !important; }
+
+/* markdown 高亮 */
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-header { color: var(--syn-heading); font-weight: 600; }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-header-1 { color: var(--syn-heading-1); font-size: 1.1em; }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-header-2 { color: var(--syn-heading); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-header-3 { color: var(--syn-heading-3); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-strong { color: var(--syn-strong); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-em { color: var(--syn-em); font-style: italic; }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-link { color: var(--syn-link); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-url { color: var(--syn-url); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-string { color: var(--syn-string); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-comment { color: var(--syn-comment); font-style: italic; }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-quote { color: var(--syn-quote); font-style: italic; }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-variable-2 { color: var(--syn-strong); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-keyword { color: var(--syn-keyword); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-number { color: var(--syn-number); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-tag { color: var(--syn-tag); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-formatting { color: var(--syn-formatting); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-formatting-header { color: var(--syn-formatting-heading); }
+:root[data-scheme^="catppuccin"] .cm-s-catppuccin .cm-formatting-link { color: var(--syn-formatting); }

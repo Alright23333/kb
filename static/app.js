@@ -194,15 +194,27 @@ function colorscheme(arg) {
   const reg = themesReg();
   if (!reg) return toast('主题注册表未加载', 'error');
   const name = (arg || '').trim();
+  const cur = currentTheme();
+
   if (!name) {
-    const cur = currentTheme();
+    // :colorscheme 不带参数 → 列出全部，当前项打 *
     toast('配色：' + reg.themeNames().map(n => n === cur ? '*' + n : n).join('  ') + '（:colorscheme <名字>）');
     return;
   }
-  // 支持缩写：:colorscheme latte → catppuccin-latte
-  const exact = reg.themeEntry(name);
-  const partial = exact || reg.themeNames().map(n => reg.themeEntry(n)).find(t => t.name.indexOf(name) >= 0);
+
+  // 解析：精确名 → 同组名（:colorscheme catppuccin = 这一族）→ 子串缩写（latte → catppuccin-latte）
+  const hit = reg.themeEntry(name);
+  if (hit && hit.group) {
+    // 用户报的是「组名」（catppuccin）→ 不动配色，只报这一族有哪几个
+    const members = reg.groupMembers(hit.name);
+    toast(hit.group + '：' + members.map(n => n === cur ? '*' + n : n).join('  '));
+    return;
+  }
+  const partial = hit || reg.themeNames().map(n => reg.themeEntry(n)).find(t => t.name.indexOf(name) >= 0);
   if (!partial) return toast('没有这个配色：' + name, 'error');
+  if (!partial.group) { applyTheme(partial.name); toast('配色 → ' + partial.label); return; }
+
+  // 组内缩写（latte/frappe/mocha/macchiato）本就命中 partial 了，直接切
   applyTheme(partial.name);
   toast('配色 → ' + partial.label);
 }
@@ -211,7 +223,10 @@ function toggleTheme() {
   const reg = themesReg();
   if (!reg) return;
   const cur = currentTheme();
-  const list = reg.themeNames();
+  // 有 group 的只在同组内轮转（catppuccin 四口味），否则全表轮转。
+  // nvim 里 :colorscheme 也是按 flavour 走，不会把无关配色卷进来。
+  let list = reg.groupMembers(cur);
+  if (list.length <= 1) list = reg.themeNames();
   const next = list[(list.indexOf(cur) + 1) % list.length];
   applyTheme(next);
 }

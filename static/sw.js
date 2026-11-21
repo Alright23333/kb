@@ -13,7 +13,7 @@
  * HTML/JS（这个坑踩过一次：app.js 改了但浏览器还在用缓存副本）。
  */
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
-const VERSION = 'kb-shell-v16';
+const VERSION = 'kb-shell-v17';
 
 const SHELL = [
   BASE + '/',
@@ -37,7 +37,10 @@ const SHELL = [
   BASE + '/static/vendor/mermaid/mermaid.min.js',
   BASE + '/static/app.js',
   BASE + '/static/themes/index.js',
+  BASE + '/static/themes/catppuccin.css',
   BASE + '/static/themes/catppuccin-mocha.css',
+  BASE + '/static/themes/catppuccin-macchiato.css',
+  BASE + '/static/themes/catppuccin-frappe.css',
   BASE + '/static/themes/catppuccin-latte.css',
   BASE + '/static/panel.js',
   BASE + '/static/plugin.js',

@@ -69,6 +69,9 @@
   --bg: #1e1e2e; --bg-deep: #181825; --bg-deepest: #11111b;
   --fg: #cdd6f4; --muted: #a6adc8; --faint: #9399b2;
   --line: #313244; --line-soft: #252536;
+  /* 这三个原来被引用、却从未定义（卡片背景是透明的、插件 hover 没反馈）。
+     这里是首帧回退值，具体配色由 static/themes/*.css 覆盖。 */
+  --bg-mantle: #181825; --bg-hover: rgba(205,214,244,.06); --accent-soft: rgba(137,180,250,.14);
   --accent: #89b4fa; --accent2: #cba6f7; --link: #89dceb;
   --ok: #a6e3a1; --warn: #f9e2af; --err: #f38ba8;
   --p1bg: #f38ba8; --p2bg: #fab387; --p3bg: #f9e2af;
