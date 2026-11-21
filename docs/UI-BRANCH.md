@@ -39,7 +39,13 @@ docs/*.md                  +3 篇（架构对比 / 移动端输入 / 插件模�
 ```sh
 cd /home/user/pi-working/kb-ui          # 分支 worktree，不是生产目录
 git pull --rebase origin main           # 把 main 的进展带进来
+./run-container.sh                      # 起/重建本地容器（端口 8099）
 ```
+
+分支自带 `run-container.sh`：复用生产镜像 `kb-docker-kb:latest`
+（Python 依赖没变，不必重建），源码只读挂载，数据用**本分支自己的
+`data/kb.db` 副本**（首次运行从生产库 `.backup` 快照）。它绝不会写入
+`~/services/kb-docker/data`。
 
 生产目录 `/home/user/services/kb-docker` 始终在 `main`，两边互不干扰
 （`git worktree list` 能看到）。
@@ -51,10 +57,12 @@ git pull --rebase origin main           # 把 main 的进展带进来
 - 预览 `https://fajita.tail117f80.ts.net:8447/`（tailnet 内）
 - 数据 `~/pi-working/kb-ui-test/data/kb.db`（独立副本，579 页）
 
-> 注意：`kb-ui-test` 容器挂的仍是 `~/pi-working/kb-ui-test` 的源码。
-> 若想让容器跑**这个 worktree** 的代码，把容器 volumes 指向
-> `/home/user/pi-working/kb-ui`，或者干脆在那儿起第二个容器。
-> 两者代码目前内容相同，合并前建议验证一次。
+`kb-ui-test` 容器现在挂的就是**这个 worktree** 的源码
+（`/home/user/pi-working/kb-ui`），所以改分支代码 = 刷新页面即可看到，
+不用重建镜像。
+
+旧的 `/home/user/pi-working/kb-ui-test/` 是开发时的临时副本，
+已不再被容器使用，可以随时删（它的 `data/` 有 459MB 备份，删前确认）。
 
 ## 加一个插件（不改 `app.js`）
 
@@ -119,7 +127,9 @@ git merge --no-ff ui-lazyvim
 | 主题 | `:colorscheme` 列全部/切换/缩写匹配，CM 配色随主题变 |
 | 面板 | dock 248px 可拖宽，宿主 `margin` 跟着让位，关闭归零；overlay Esc 关最上层 |
 | 移动端 | 390×844 无横向溢出，动作坞 18 键，数字盘 1–9，滑动切缓冲 |
-| 生产未受影响 | `kb` 仍 26h healthy / 579 页，`/static/app.js` 仍 404（旧模板内联） |
+| 生产未受影响 | `kb` 仍 27h healthy / 579 页，`/static/app.js` 仍 404（旧模板内联） |
+| 合并预演 | `git merge-tree` 0 冲突标记；分支已包含 `main` 最新 commit |
+| 业务代码 | 12 个后端文件与 `main` **0 行差异**（逐文件 `git diff --quiet` 验证） |
 
 ## 还没做的
 
