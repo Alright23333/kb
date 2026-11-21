@@ -2181,6 +2181,70 @@ const cmd = {
   open: false, prefix: ':',
 };
 
+/* ══════════════════════════════════════════════════════════
+   命令行历史 —— vim 的 cmdline history（↑ / ↓，等价 Ctrl-p / Ctrl-n）
+   ──────────────────────────────────────────────────────────
+   之前 `:` 里按 ↑ 只是浏览器原生的「上一格」，等于没有。
+   vim 里 ↑ 是「上一条命令」，反复按能一路翻回去。
+
+   ⚠ 一个老坑：命令行是「前缀状态机」。如果历史里存了裸 `/`
+   或 `search`（不带参数），选它回车会变成「Page not found」——
+   vim 在这里就是回显该行，而 vim 里裸 `/` 回车是「重复上一个搜索」。
+   vim 搜索历史如果只有一个 `/`，按上箭头会跳过它。
+   这里不跳，但把空搜索挡掉给出解释。
+   ══════════════════════════════════════════════════════════ */
+
+const CMDHIST_KEY = 'kb-cmdline-history';
+const CMDHIST_MAX = 200;
+
+let cmdHist = null;
+let cmdHistPos = -1;
+let cmdHistDraft = '';
+
+function cmdHistLoad() {
+  if (cmdHist) return cmdHist;
+  try {
+    const raw = JSON.parse(localStorage.getItem(CMDHIST_KEY) || '[]');
+    cmdHist = Array.isArray(raw) ? raw.filter(x => typeof x === 'string').slice(-CMDHIST_MAX) : [];
+  } catch (e) { cmdHist = []; }
+  return cmdHist;
+}
+
+function cmdHistPush(line) {
+  line = String(line || '').trim();
+  if (!line) return;
+  const h = cmdHistLoad();
+  // 连续重复的不再存（vim 同行为）
+  if (h[h.length - 1] !== line) h.push(line);
+  if (h.length > CMDHIST_MAX) h.splice(0, h.length - CMDHIST_MAX);
+  cmdHist = h;
+  try { localStorage.setItem(CMDHIST_KEY, JSON.stringify(h)); } catch (e) {}
+}
+
+function cmdHistReset(draft) {
+  cmdHistLoad();
+  cmdHistPos = cmdHist.length;      // 指向「历史末尾之后」= 当前草稿
+  cmdHistDraft = draft || '';
+}
+
+/* 方向键：dir=+1 往回翻（更早），dir=-1 往前翻（更近）
+ *
+ * 语义照 readline / vim：位置在「末尾之后」时保存当前已输入的内容，
+ * 走到末尾之外就恢复它 —— 否则按 ↓ 翻回来时只拿到空串，原始半条命令没了。 */
+function cmdHistMove(dir) {
+  const h = cmdHistLoad();
+  if (!h.length) return null;
+  if (cmdHistPos < 0) cmdHistReset($('cmdline-input').value);
+
+  let next = cmdHistPos + dir;
+  if (next < 0) next = 0;
+  if (next > h.length) next = h.length;
+
+  if (next === cmdHistPos) return null;              // 到头了，不动
+  cmdHistPos = next;
+  return cmdHistPos >= h.length ? cmdHistDraft : h[cmdHistPos];
+}
+
 function openCmdline(prefix) {
   const el = $('cmdline');
   el.classList.add('open');
@@ -2196,6 +2260,7 @@ function openCmdline(prefix) {
     ? '输入关键词搜索 · <span class="k">Enter</span> 执行'
     : '命令 · <span class="k">Tab</span> 补全 · <span class="k">Esc</span> 关闭';
   setMode('cmd');
+  cmdHistReset('');
   setTimeout(() => input.focus(), 10);
   if (prefix === '/') {
     setHintCmd('搜索标题与正文');
@@ -2208,6 +2273,17 @@ function setHintCmd(t) { $('cmdline-hint').innerHTML = t; }
 function closeCmdline() {
   $('cmdline').classList.remove('open');
   cmd.open = false;
+  // 焦点必须离开命令行输入框。否则后续按键（比如 Esc 后再按 `:`）
+  // 会被这个仍然聚焦的 input 吃掉，内容是「上一条 + 新输入的字符」。
+  /* 焦点必须离开命令行输入框 —— 无条件 blur，别指望「判断 activeElement」
+   * 那套（实测 Escape 之后焦点仍在 input 上，于是下次按 `:` 的冒号
+   * 被输入框吃掉，命令行里显示 ':xxx'）。 */
+  const input = $('cmdline-input');
+  if (input) {
+    input.blur();
+    // 编辑器里接着交还给 CodeMirror（normal 模式），阅读态交还给 body
+    if (state.editing && cm) setTimeout(() => cm.focus(), 0);
+  }
   setMode(cm && cm.state.vim ? (cm.state.vim.insertMode ? 'insert' : 'normal') : 'normal');
 }
 
@@ -2304,6 +2380,7 @@ function submitCmdline() {
   const prefix = cmd.prefix;
   closeCmdline();
   if (!raw) return;
+  cmdHistPush(raw);            // 进历史（vim 的行为：执行过就记）
   if (prefix === '/') {
     /* `/` 的语义按上下文分（和 vim 的直觉一致）：
      * - 正在读一篇正文 → 页内搜索（记 pattern，跳第一个命中，之后 n/N）
@@ -3586,7 +3663,24 @@ function pushCountDigit(ch) {
    让 CodeMirror 与输入框都收不到这些键。
    ══════════════════════════════════════════════════════════ */
 document.addEventListener('keydown', (e) => {
-  if (cmd.open) return;                       // 命令行自己处理
+  /* 命令行打开时，Escape 必须在这里关掉 —— 不能等冒泡阶段那个 handler。
+   *
+   * 实测（在 document 的 capture/bubble 各挂一个探针）：
+   *   capture key=Escape target=cmdline-input cmdOpen=true
+   *   （bubble 探针根本没被调用）
+   * 也就是按键在 capture 与 bubble 之间被某个监听者 stopPropagation 了。
+   * 结果 Escape 关不掉命令行、cmd.open 一直 true —— 之后再按 `:`，
+   * 冒泡 handler 认为「命令行还开着，其它键交给 input」，
+   * 于是冒号被当成普通字符打进输入框，显示成 ":xxx"。
+   * 在 capture 阶段处理最保险：此时一定还没被别人打断。 */
+  if (cmd.open) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCmdline();
+    }
+    return;                                  // 其它键交给命令行（冒泡处处理）
+  }
 
   /* Ctrl-o / Ctrl-i —— vim 的跳转历史，编辑器里也要能用（对标 nvim 默认键位）。
    * 放在 capture 且不等 leaderOpen，因为这个组合不可能是 vim 的普通动作。 */
@@ -3639,8 +3733,31 @@ document.addEventListener('keydown', (e) => {
   // ── 命令行 ──
   if (cmd.open) {
     const input = $('cmdline-input');
-    if (e.key === 'Escape') { e.preventDefault(); closeCmdline(); cm && cm.focus(); return; }
+    /* Escape 后 closeCmdline 已经 blur 输入框；这里再 cm.focus() 是多余的
+     * 而且会把焦点抢回编辑器 —— 阅读态没有编辑器，于是焦点悬空。
+     * 直接 return 即可。 */
+    if (e.key === 'Escape') { e.preventDefault(); closeCmdline(); return; }
     if (e.key === 'Enter') { e.preventDefault(); submitCmdline(); return; }
+    /* 历史翻页 —— vim 的 ↑ / ↓（也认 Ctrl-p / Ctrl-n）。
+     * 必须在 input 的文本框吃掉它们之前处理，所以这里 preventDefault。 */
+    if (e.key === 'ArrowUp' || ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'p')) {
+      e.preventDefault();
+      const v = cmdHistMove(-1);            // ↑ = 更早的一条
+      if (v === null) return;
+      input.value = v;
+      input.setSelectionRange(v.length, v.length);
+      updateCmdHint();
+      return;
+    }
+    if (e.key === 'ArrowDown' || ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'n')) {
+      e.preventDefault();
+      const v = cmdHistMove(1);             // ↓ = 更近的一条
+      if (v === null) return;
+      input.value = v;
+      input.setSelectionRange(v.length, v.length);
+      updateCmdHint();
+      return;
+    }
     if (e.key === 'Tab') {
       e.preventDefault();
       const raw = input.value, word = raw.split(/\s+/)[0];
@@ -4078,6 +4195,9 @@ function scrollView(dir, page) {
 if ($('ng-close')) $('ng-close').addEventListener('click', () => closeNumGrid());
 
 $('cmdline-input').addEventListener('input', () => {
+  /* 手动改了内容 → 历史游标回到「末尾之后」，把改后的内容当成新草稿。
+   * 否则「↑ 召回一条 → 编辑 → ↓」会跳回召回前那条的旧快照。 */
+  cmdHistReset($('cmdline-input').value);
   updateCmdHint();
   if (cmd.prefix === '/') {
     const q = $('cmdline-input').value.trim();
