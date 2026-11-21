@@ -55,6 +55,12 @@
 - [ ] 审链模式：全库扫可疑/冗余链接
 - [ ] 隐私数据流向说明：docs 补一节——哪些内容发给第三方 LLM、如何禁用
 
+### 前端重构分支 `ui-lazyvim`
+
+- [ ] **两个旧版缺口已补齐为插件**（[[2026-11-21]] 完成）：`health` 体检报告（`:health`/`space uh`，dock 面板，孤立页 290 / 断链 157，每组超 25 条折叠）+ `saved-search` 常用搜索（`:Searches`/`space uS`，存储键沿用 `kb-saved-searches`，两套 UI 切换不丢收藏）
+- [ ] **`ai-native` 的 776 行 AI 功能要迁到新架构**：它塞在旧单文件模板里，重构版拆成 `static/app.js` 后需重写才能迁（别硬合）
+- [ ] **重构版前端何时并入 `main`**：目前两套 UI 长期共存（`kb`:8080 旧 / `kb-ui-test`:8099 新）。见 `docs/UI-BRANCH.md`
+
 ### 路线图（README 里躺着，按需启动）
 
 - [ ] 插件系统（slash commands 注册制）— 中，写日记时可能最有用
@@ -251,3 +257,4 @@
 - [[2026-11-17]] — 待办重排：把散落在 P0/P3/P5' 下的未完成项抽成「当前未完成（16 条）」总表，按可动手程度分六档（小改动/待拍板/暂缓/AI-native 两档/路线图）；P3 与 P5' 里重复的改成指针，避免两处打勾状态漂移
 - [[2026-11-21]] — **P7 对外开放与稳定性 4/4 上线**（`ee99ea4`）：① MCP 搜索 SQL 列名拼错（`frowid` → `f.rowid`，此前一直静默走 LIKE 兜底）② `/api/pages/count` + 前端「加载更多」，页面数不再卡 500（568 → 579）③ `mcp_public.py` 公开只读子集（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / `mode=ro` 强制只读 / `kb-mcp-public` 容器 `127.0.0.1:8100`）④ 两个 MCP 端点改 `stateless_http=True`，服务端重启不再让客户端永久 404。本轮改动此前只存在于生产服务器工作区，已全部收编入仓库，三方（本地/fajita/GitHub）同 commit
 - [[2026-11-21]] — 立规矩：**部署目录只 `git pull`**。此前在 `kb-docker` 里改 `todo.md` 一行（P6→P7）把 HEAD 推走，虽无运行时影响但破坏了「部署目录内容 = 已发布版本」的不变量。规矩写进 `AGENT.md`「目录纪律」+ `README.md` 部署段 + 本页工程习惯三处；判据是「部署目录 `git status` 必须永远干净」
+- [[2026-11-21]] — **重构版前端 `ui-lazyvim` 补齐旧版最后两个缺口**（`4dcc9e0`）：① 体检报告 → `health` 插件（`:health`/`space uh`，dock 面板，孤立页 290 / 断链 157，断链按引用数排序，每组超 25 条折叠）② 保存搜索 → `saved-search` 插件（`:Searches`/`space uS`，存储键沿用 `kb-saved-searches`，两套 UI 切换不丢收藏）。同轮修掉三个 Playwright 实测的真 bug：TOC 遮罩层吃掉全页点击（打开有 ≥3 个标题的页面后正文全点不动）、MutationObserver 注入无限循环（浏览器卡死）、overlay 面板「创建即可见」导致 toggle 首次就 close 掉

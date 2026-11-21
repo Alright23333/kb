@@ -1,4 +1,25 @@
 {
-	"items": [],
-	"counter": 51
+	"items": [
+		{
+			"id": "T-052",
+			"text": "写 health 插件：体检报告（孤立页/断链/统计），dock 面板 + :health 命令",
+			"status": "done",
+			"priority": "high",
+			"assignee": "Ultron",
+			"createdAt": "2026-11-21T09:56:05.878Z",
+			"updatedAt": "2026-11-21T12:51:02.463Z",
+			"blockedBy": null
+		},
+		{
+			"id": "T-053",
+			"text": "修 TOC 插件遮罩层拦截全页点击的 bug（panel.js 加 scrim:false 选项）",
+			"status": "done",
+			"priority": "critical",
+			"assignee": "Ultron",
+			"createdAt": "2026-11-21T12:47:51.798Z",
+			"updatedAt": "2026-11-21T12:51:06.375Z",
+			"blockedBy": null
+		}
+	],
+	"counter": 53
 }
