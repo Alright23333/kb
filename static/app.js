@@ -52,16 +52,122 @@ function invalidateCache(prefix) {
   for (const k of _cache.keys()) if (k.startsWith(prefix)) _cache.delete(k);
 }
 
+/* ══════════════════════════════════════════════════════════
+   只读请求的本地镜像 —— 离线也能读已经看过的内容
+   ──────────────────────────────────────────────────────────
+   原来断网后整站只剩「读取失败：Failed to fetch」20 个字：
+   service worker 只缓存了静态壳（HTML/CSS/JS），API 数据没缓存。
+
+   做法：所有 GET 成功时把响应写进 localStorage（kb-api-mirror），
+   失败且「不像服务端明确拒绝」（无 status 或 5xx）时回落到镜像。
+   404/403 这种明确答案不回落 —— 否则删掉的页面会从缓存里诈尸。
+
+   只镜像 GET：写操作（POST/PUT/DELETE）永远走网络，绝不假装成功。
+   ══════════════════════════════════════════════════════════ */
+
+const MIRROR_KEY = 'kb-api-mirror';
+const MIRROR_MAX = 240;
+
+let mirror = null;
+let mirrorDirty = false;
+
+function mirrorLoad() {
+  if (mirror) return mirror;
+  try {
+    const raw = JSON.parse(localStorage.getItem(MIRROR_KEY) || '{}');
+    mirror = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  } catch (e) { mirror = {}; }
+  return mirror;
+}
+
+/* 镜像存的是 { ts, val } 包装，不往响应对象上挂 _ts ——
+ * 那会污染渲染（数组上加属性、页面对象多一个字段）和后续回写。 */
+function mirrorPut(url, val) {
+  const m = mirrorLoad();
+  if (!m[url]) {
+    const keys = Object.keys(m);
+    if (keys.length >= MIRROR_MAX) {
+      let oldest = keys[0], oldTs = Infinity;
+      for (const k of keys) {
+        const ts = (m[k] && m[k].ts) || 0;
+        if (ts < oldTs) { oldTs = ts; oldest = k; }
+      }
+      delete m[oldest];
+    }
+  }
+  m[url] = { ts: Date.now(), val };
+  mirrorDirty = true;
+  mirrorScheduleSave();
+}
+
+let mirrorSaveTimer = null;
+function mirrorScheduleSave() {
+  if (mirrorSaveTimer) return;
+  // 批量写：连续请求（首页一次并发 3~4 个）不该各写一次 localStorage
+  mirrorSaveTimer = setTimeout(() => {
+    mirrorSaveTimer = null;
+    if (!mirrorDirty || !mirror) return;
+    try {
+      localStorage.setItem(MIRROR_KEY, JSON.stringify(mirror));
+      mirrorDirty = false;
+    } catch (e) {
+      // 配额满了：砍一半再试一次
+      try {
+        const m = mirror;
+        const keys = Object.keys(m).sort((a, b) => ((m[a] && m[a].ts) || 0) - ((m[b] && m[b].ts) || 0));
+        for (const k of keys.slice(0, Math.ceil(keys.length / 2))) delete m[k];
+        localStorage.setItem(MIRROR_KEY, JSON.stringify(m));
+        mirrorDirty = false;
+      } catch (e2) {}
+    }
+  }, 250);
+}
+
+function mirrorGet(url) {
+  const m = mirrorLoad();
+  const hit = m[url];
+  return hit ? hit.val : undefined;
+}
+
+/* 从镜像取数时给用户一个明确信号，别让人以为数据是新的 */
+function noteOfflineData() {
+  state.offlineData = true;
+  const hint = STATUS.net && STATUS.net.querySelector('.sl-hint');
+  const dot = STATUS.net && STATUS.net.querySelector('.sl-dot');
+  if (hint) hint.textContent = 'offline·缓存';
+  if (dot) dot.classList.add('off');
+  // 也让用户知道「看到的是缓存」，别以为是最新的
+  if (typeof toast === 'function') toast('离线：显示的是本地缓存', 'error');
+}
+
 async function jfetch(url, opts) {
-  const resp = await fetch(url, opts);
+  const method = ((opts && opts.method) || 'GET').toUpperCase();
+  let resp;
+  try {
+    resp = await fetch(url, opts);
+  } catch (e) {
+    // 网络层失败（断网/超时）—— GET 可以回落镜像
+    if (method === 'GET') {
+      const hit = mirrorGet(url);
+      if (hit !== undefined) { noteOfflineData(); return hit; }
+    }
+    throw e;
+  }
   if (!resp.ok) {
     let detail = resp.status + ' ' + resp.statusText;
     try { const j = await resp.json(); if (j && j.detail) detail = j.detail; } catch (e) {}
     const err = new Error(detail);
     err.status = resp.status;
+    // 5xx 是服务端自身问题（容器挂了），可以回落；4xx 是明确答案，不能
+    if (method === 'GET' && resp.status >= 500) {
+      const hit = mirrorGet(url);
+      if (hit !== undefined) { noteOfflineData(); return hit; }
+    }
     throw err;
   }
-  return resp.json();
+  const val = await resp.json();
+  if (method === 'GET') mirrorPut(url, val);
+  return val;
 }
 
 async function cached(key, url) {
@@ -142,8 +248,15 @@ async function updatePageCount() {
 function updateNet() {
   const dot = STATUS.net.querySelector('.sl-dot');
   const hint = STATUS.net.querySelector('.sl-hint');
-  if (navigator.onLine) { dot.classList.remove('off'); hint.textContent = 'sync'; }
-  else { dot.classList.add('off'); hint.textContent = 'offline'; }
+  if (navigator.onLine) {
+    dot.classList.remove('off');
+    // 之前显示过「离线缓存」，恢复网络后要清标记，否则一直挂着
+    hint.textContent = state.offlineData ? 'sync·待刷新' : 'sync';
+    if (state.offlineData) state.offlineData = false;
+  } else {
+    dot.classList.add('off');
+    hint.textContent = 'offline';
+  }
 }
 
 /* ── 主题 ───────────────────────────────────────────────── */
@@ -1042,6 +1155,19 @@ async function showPage(name, token) {
     if (e.status === 404) {
       // 页面不存在 → 直接进编辑器，名字预填
       openEditor(name, '', ++navToken);
+      return;
+    }
+    /* 断网 + 这一页没缓存过 → 明确说清原因和出路，别甩一句
+     * 「Failed to fetch」（用户看不出是网断了还是服务挂了）。 */
+    const offline = !navigator.onLine || /failed to fetch|networkerror|load failed/i.test(e.message || '');
+    if (offline) {
+      showView(`<div class="empty">
+        <b>离线，这一页还没有本地缓存</b><br>
+        <span style="opacity:.7">联网后打开过一次的页面才能离线阅读。</span><br><br>
+        <button class="btn btn-sm" data-act="retry">重试</button>
+      </div>`, 'page');
+      const rb = document.querySelector('[data-act="retry"]');
+      if (rb) rb.addEventListener('click', () => showPage(name, ++navToken));
       return;
     }
     showView(`<div class="empty">读取失败：${escapeHtml(e.message)}</div>`);
