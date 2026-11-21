@@ -487,12 +487,64 @@ function parseRoute(path) {
 
 let navToken = 0;
 
+/* ══════════════════════════════════════════════════════════
+   跳转历史 —— vim 的 jumplist（Ctrl-o / Ctrl-i）
+   ──────────────────────────────────────────────────────────
+   之前点链接进下一页后回不去：浏览器的 back 只能一页一页退，而且
+   编辑器/列表光标状态全丢。vim 的做法是维护一条 jumplist，
+   Ctrl-o 往回、Ctrl-i 往前，各自独立于文件修改。
+
+   判据和 vim 一致：**只记「跳转」，不记「浏览」**。
+   - 从 A 点链接到 B      → 记一条
+   - 手动 /all 再点 B     → 不记（这是新浏览，不是跳转）
+   这里简化为「只要换了 target:arg 就记，但同一页面连续不重复记」。
+   ══════════════════════════════════════════════════════════ */
+
+const JUMP_MAX = 100;
+state.jumplist = state.jumplist || [];   // [{target, arg}]
+state.jumpIdx = typeof state.jumpIdx === 'number' ? state.jumpIdx : -1;
+
+function jumpKey(target, arg) {
+  return target + '\u0001' + (arg == null ? '' : arg);
+}
+
+function recordJump(target, arg) {
+  if (target === 'home' && !arg) return;         // 回首页不入栈
+  const key = jumpKey(target, arg);
+  // 回退/前进过程中触发的 dispatch 不算新跳转
+  if (state.jumpReplaying) return;
+  const list = state.jumplist;
+  if (state.jumpIdx >= 0 && list[state.jumpIdx] && jumpKey(list[state.jumpIdx].target, list[state.jumpIdx].arg) === key) {
+    return;                                       // 同一位置，不重复
+  }
+  // 从中间跳转时截断「未来」
+  if (state.jumpIdx < list.length - 1) list.splice(state.jumpIdx + 1);
+  list.push({ target, arg });
+  if (list.length > JUMP_MAX) list.shift();
+  state.jumpIdx = list.length - 1;
+}
+
+function jumpTo(delta) {
+  const list = state.jumplist;
+  if (!list.length) return toast('没有跳转记录');
+  const want = state.jumpIdx + delta;
+  if (want < 0 || want >= list.length) return toast(delta < 0 ? '已经是最早的位置' : '已经是最新的位置');
+  state.jumpIdx = want;
+  const { target, arg } = list[want];
+  state.jumpReplaying = true;
+  try { dispatch(target, arg); } finally { state.jumpReplaying = false; }
+  // URL 跟着走，但不新增历史条目（否则浏览器 back 会与 jumplist 打架）
+  const url = routeUrl(target, arg);
+  if (url && url !== location.pathname) history.replaceState({ target, arg }, '', url);
+}
+
 function navigate(target, arg, opts) {
   opts = opts || {};
   const url = routeUrl(target, arg);
   const go = () => {
     if (!opts.replace && url !== location.pathname) history.pushState({ target, arg }, '', url);
     else if (url !== location.pathname) history.replaceState({ target, arg }, '', url);
+    recordJump(target, arg);     // 记进 jumplist（Ctrl-o 能回得来）
     dispatch(target, arg);
   };
   // 有未保存改动 → 先问，避免误丢（pcall 保持同步语义：无改动时行为完全不变）
@@ -2061,6 +2113,8 @@ const BASE_LEADER_SPEC = [
   { lhs: 'uw', desc: '切换软换行', run: () => toggleLineWrapping() },
 
   /* g — 跳转视图 */
+  { lhs: 'bo', desc: '← 上一跳转（Ctrl-o）', run: () => jumpTo(-1) },
+  { lhs: 'bi', desc: '→ 下一跳转（Ctrl-i）', run: () => jumpTo(1) },
   { lhs: 'gg', desc: '知识图谱', run: () => navigate('graph') },
   { lhs: 'gd', desc: '首页看板', run: () => navigate('home') },
   { lhs: 'ga', desc: '所有页面', run: () => navigate('all') },
@@ -3104,6 +3158,16 @@ function pushCountDigit(ch) {
    ══════════════════════════════════════════════════════════ */
 document.addEventListener('keydown', (e) => {
   if (cmd.open) return;                       // 命令行自己处理
+
+  /* Ctrl-o / Ctrl-i —— vim 的跳转历史，编辑器里也要能用（对标 nvim 默认键位）。
+   * 放在 capture 且不等 leaderOpen，因为这个组合不可能是 vim 的普通动作。 */
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'i') && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    jumpTo(e.key === 'o' ? -1 : 1);
+    return;
+  }
+
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
   // which-key 已打开：所有键都归它，编辑器不许看
@@ -3470,6 +3534,10 @@ Object.defineProperties(window, {
   if (location.pathname === BASE + '/' || location.pathname === BASE) {
     history.replaceState({ target: 'home' }, '', location.pathname);
   }
+  /* 首屏这一页也要进 jumplist。否则清单里只有「点进去的那一页」一条，
+   * Ctrl-o 无处可退 —— 这就是第一版「Ctrl-o 按了没反应」的原因：
+   * boot 走的是 dispatch（不记），只有 navigate 才记。 */
+  recordJump(r.target, r.arg);
   dispatch(r.target, r.arg);
 
   window.addEventListener('resize', () => { if (cm) cm.refresh(); });
