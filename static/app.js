@@ -637,6 +637,7 @@ function addBuffer(name) {
 }
 
 function closeBuffer(name) {
+  if (typeof name !== 'string' || !name) return;
   state.buffers = state.buffers.filter(b => b.toLowerCase() !== name.toLowerCase());
   renderTabline();
 }
@@ -693,6 +694,47 @@ function closeAllBuffers() {
   state.buffers = [];
   renderTabline();
   toast('已关闭全部缓冲');
+}
+
+/* ══════════════════════════════════════════════════════════
+   关掉当前缓冲 —— vim 的 :bd / LazyVim 的 q
+   ──────────────────────────────────────────────────────────
+   原来 q 只是把名字从 tabline 数组里删掉，正文还留在屏幕上 ——
+   tab 少了一个，但你在看的还是那一页，等于「关了个寂寞」。
+   vim 的 :bd 语义是：删掉这个 buffer，然后切到另一个 buffer；
+   没有别的 buffer 就落到空/首页。这里照做。
+   ══════════════════════════════════════════════════════════ */
+
+function closeCurrentBuffer() {
+  // state.current 理应是字符串，但 navigate 被传数组/对象时会被污染 ——
+  // 这里统一收敛成字符串，否则 b.toLowerCase() 直接抛 TypeError，
+  // q 键表现为「按了完全没反应」。
+  const cur = Array.isArray(state.current) ? String(state.current[0] || '') : String(state.current || '');
+  if (!cur) { toast('没有当前页面'); return; }
+  const rest = state.buffers.filter(b => b.toLowerCase() !== cur.toLowerCase());
+  state.buffers = rest;
+  renderTabline();
+
+  // 编辑器里先退出编辑态（有改动要走保存确认，交给 closeEditor）
+  if (state.editing) {
+    const saved = cur;
+    closeEditor();
+    if (state.editing) return;   // closeEditor 弹了确认框，等用户决定
+  }
+
+  // 切到「最近访问过的另一个缓冲」，没有就回首页
+  let next = null;
+  try {
+    const recent = JSON.parse(localStorage.getItem('kb_recent') || '[]');
+    if (Array.isArray(recent)) {
+      next = recent.map(r => r && r.name).filter(n => typeof n === 'string'
+        && n.toLowerCase() !== cur.toLowerCase() && rest.some(b => b.toLowerCase() === n.toLowerCase()))[0] || null;
+    }
+  } catch (e) {}
+  if (!next && rest.length) next = rest[rest.length - 1];
+
+  if (next) { navigate('page', next); toast(`已关闭 ${cur} → ${next}`); }
+  else { navigate('home'); toast(`已关闭 ${cur}`); }
 }
 
 /* ── 最近访问 ──────────────────────────────────────────── */
@@ -1992,7 +2034,7 @@ const BASE_COMMANDS = [
   ['bprev', '上一个缓冲（同 [b）'],
   ['bfirst', '第一个缓冲'],
   ['blast', '最后一个缓冲'],
-  ['bdelete', '关闭当前缓冲'],
+  ['bd bdelete', '关闭当前缓冲（含退出该页）'],
   ['buffers', '列出打开的缓冲'],
   // 搜索/替换（vim 的 :noh / :%s 心智）
   ['noh', '清掉搜索高亮'],
@@ -2065,7 +2107,10 @@ function runCommand(name, args) {
   const arg = args.join(' ');
   switch (name) {
     case 'w': case 'write': return state.editing ? saveEditor() : toast('不在编辑状态');
-    case 'q': case 'quit': return state.editing ? closeEditor() : toast('不在编辑状态');
+    /* :q —— 有编辑器就关编辑器（vim :q 关窗口）；
+     * 阅读态没有「窗口」概念，等同 :bd：关掉当前这一页并切走。
+     * 之前这里直接 toast「不在编辑状态」，等于 q 键半残。 */
+    case 'q': case 'quit': return state.editing ? closeEditor() : closeCurrentBuffer();
     case 'q!': case 'qall':
       state.editing = false; editorDirty = false; return navigate('page', state.current || '');
     case 'wq': return state.editing ? saveEditor().then(closeEditor) : toast('不在编辑状态');
@@ -2109,7 +2154,7 @@ function runCommand(name, args) {
     case 'bprev': return cycleBuffer(-1);
     case 'bfirst': return state.buffers.length ? navigate('page', state.buffers[0]) : toast('没有打开的缓冲');
     case 'blast': return state.buffers.length ? navigate('page', state.buffers[state.buffers.length - 1]) : toast('没有打开的缓冲');
-    case 'bdelete': return state.current ? closeBuffer(state.current) : toast('没有当前页面');
+    case 'bd': case 'bdelete': return closeCurrentBuffer();
     case 'buffers':
       toast('缓冲 ' + state.buffers.length + ' 个：' + (state.buffers.join(' · ') || '(空)'));
       return;
@@ -2205,7 +2250,7 @@ const BASE_LEADER_SPEC = [
   { lhs: 'sg', desc: '全文搜索', run: () => openCmdline('/') },
 
   /* b — 缓冲 */
-  { lhs: 'bd', desc: '关闭当前缓冲', run: () => closeBuffer(state.current || '') },
+  { lhs: 'bd', desc: '关闭当前缓冲（含退出该页）', run: () => closeCurrentBuffer() },
   { lhs: 'bo', desc: '关闭其他缓冲', run: () => closeOtherBuffers() },
   { lhs: 'ba', desc: '关闭全部缓冲', run: () => closeAllBuffers() },
 
@@ -3501,7 +3546,7 @@ document.addEventListener('keydown', (e) => {
     cycleBuffer(dir);
     return;
   }
-  if (e.key === 'q') { if (state.current) closeBuffer(state.current); return; }
+  if (e.key === 'q') { closeCurrentBuffer(); return; }
   if (e.key === 'R') { invalidateCache(); navigate('home'); return; }
   /* 数字键 = 计数前缀（vim 的 3j / 5G）。放在最后，别抢前面的单键命令。
    * 1-9 起头；0 只在已有计数时追加（vim 里 0 单独按是行首）。 */
