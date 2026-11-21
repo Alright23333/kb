@@ -717,6 +717,7 @@ function enterView(mode) {
 }
 
 function showView(html) {
+  state.listIdx = -1;   // 换视图：列表光标归零
   enterView('content');
   $('view').innerHTML = html;
 }
@@ -3062,6 +3063,25 @@ function isMobile() { return window.innerWidth <= 760; }
 
 let lastKey = 0;
 
+/* vim 的计数前缀：按数字键先攒起来，下一个动作乘上去（3j / 5k / 2]b）。
+ * 只在非编辑器视图生效 —— 编辑器里数字属于 vim 自己。 */
+let pendingCount = 0;
+let pendingCountTs = 0;
+
+function takeCount() {
+  const n = pendingCount || 1;
+  pendingCount = 0;
+  return n;
+}
+
+function pushCountDigit(ch) {
+  const now = Date.now();
+  // 超过 1.5 秒算新的计数（与 vim 的 timeoutlen 类似）
+  if (now - pendingCountTs > 1500) pendingCount = 0;
+  pendingCount = Math.min(999, pendingCount * 10 + Number(ch));
+  pendingCountTs = now;
+}
+
 /* ══════════════════════════════════════════════════════════
    Leader（<space>）唯一出口 —— capture 阶段
    ──────────────────────────────────────────────────────────
@@ -3198,6 +3218,28 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/') { e.preventDefault(); openCmdline('/'); return; }
   // <space> 已在 capture 阶段处理（Leader 唯一出口）
 
+  /* 列表视图（/all、标签、搜索、首页卡片）：j/k 移动光标，Enter 打开。
+   * 正文页：保持原来的滚动语义（一整篇读下去不该被光标打断）。 */
+  if (isListView()) {
+    if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault(); listMove(-1, takeCount()); return;
+    }
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault(); listMove(1, takeCount()); return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault(); listOpen(); return;
+    }
+    if (e.key === 'G') {
+      e.preventDefault();
+      const n = pendingCount;                        // 5G = 第 5 行
+      pendingCount = 0;
+      setListCursor(n ? n - 1 : listRows().length - 1);
+      return;
+    }
+    if (e.key === 'g') { setListCursor(0); return; }
+  }
+
   if (e.key === 'k' || e.key === 'ArrowUp') { scrollView(-1); return; }
   if (e.key === 'j' || e.key === 'ArrowDown') { scrollView(1); return; }
   if (e.key === 'd') {   // dd 风格：连按两次跳到下一屏
@@ -3210,7 +3252,7 @@ document.addEventListener('keydown', (e) => {
     if (now - lastKey < 400) { scrollView(-1, true); lastKey = 0; return; }
     lastKey = now; return;
   }
-  if (e.key === 'G') { $('view').scrollTop = $('view').scrollHeight; return; }
+  if (e.key === 'G') { pendingCount = 0; $('view').scrollTop = $('view').scrollHeight; return; }
   if (e.key === 'g') {
     const now = Date.now();
     if (now - lastKey < 400) { $('view').scrollTop = 0; lastKey = 0; return; }
@@ -3226,6 +3268,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'q') { if (state.current) closeBuffer(state.current); return; }
   if (e.key === 'R') { invalidateCache(); navigate('home'); return; }
+  /* 数字键 = 计数前缀（vim 的 3j / 5G）。放在最后，别抢前面的单键命令。
+   * 1-9 起头；0 只在已有计数时追加（vim 里 0 单独按是行首）。 */
+  if (/^[1-9]$/.test(e.key)) { pushCountDigit(e.key); return; }
+  if (e.key === '0' && pendingCount) { pushCountDigit(e.key); return; }
 });
 
 /* ]b / [b：循环切换缓冲，与 vim/LazyVim 的 ]b [b 一致 */
@@ -3237,6 +3283,85 @@ function cycleBuffer(dir) {
   let idx = state.buffers.findIndex(n => n.toLowerCase() === cur);
   idx = (idx + dir + state.buffers.length) % state.buffers.length;
   navigate('page', state.buffers[idx]);
+}
+
+/* ══════════════════════════════════════════════════════════
+   列表光标 —— vim 的「行光标」概念搬到可点列表上
+   ──────────────────────────────────────────────────────────
+   /all、标签、搜索这些视图里的每一行是一个链接，但之前 j/k 只是滚动，
+   提示写着「j/k 移动 · Enter 打开」而 Enter 根本没绑定 —— 文案骗人。
+   这里给「可点行」一套统一光标：j/k 上下移动、Enter 打开、gg/G 首尾。
+   纯滚动视图（正文页）走原来的 scrollView，两条路径按视图类型分流。
+   ══════════════════════════════════════════════════════════ */
+
+/* 排除正文里的 [[wikilink]]：它们也带 data-page，但那是「文章内的链接」，
+ * 不是列表行。正文页不该被 j/k 当成列表来导航。 */
+const LIST_SEL = '[data-page]:not(a.wikilink), [data-pick]';
+
+function listRows() {
+  const v = $('view');
+  if (!v) return [];
+  // 只认「真有可跳转目标」的行，避免把装饰性 DOM 算进来
+  return [...v.querySelectorAll(LIST_SEL)].filter(el => {
+    const t = el.dataset.page || el.dataset.pick;
+    return !!t && el.offsetParent !== null;
+  });
+}
+
+function listCursor() {
+  const rows = listRows();
+  if (!rows.length) return -1;
+  return rows.findIndex(r => r.classList.contains('kb-cursor'));
+}
+
+function setListCursor(i, opts) {
+  const rows = listRows();
+  if (!rows.length) return -1;
+  const n = Math.max(0, Math.min(rows.length - 1, i));
+  rows.forEach((r, k) => r.classList.toggle('kb-cursor', k === n));
+  const el = rows[n];
+  // 只滚到刚好可见，不整页跳（与 vim 的 <C-e>/<C-y> 不同：这里保持上下文）
+  const v = $('view');
+  const r1 = el.getBoundingClientRect(), r2 = v.getBoundingClientRect();
+  const pad = 12;
+  if (!(opts && opts.noScroll)) {
+    if (r1.top < r2.top + pad) v.scrollTop -= (r2.top + pad - r1.top);
+    else if (r1.bottom > r2.bottom - pad) v.scrollTop += (r1.bottom - (r2.bottom - pad));
+  }
+  state.listIdx = n;
+  return n;
+}
+
+function listMove(dir, count) {
+  const rows = listRows();
+  if (!rows.length) return false;
+  const cur = listCursor();
+  const from = cur < 0 ? (dir > 0 ? -1 : 0) : cur;
+  setListCursor(from + dir * (count || 1));
+  return true;
+}
+
+function listOpen() {
+  const rows = listRows();
+  const cur = listCursor();
+  if (cur < 0 || !rows[cur]) return false;
+  const el = rows[cur];
+  const target = el.dataset.page || el.dataset.pick;
+  if (!target) return false;
+  el.click();
+  return true;
+}
+
+/* 列表视图里 j/k 的语义与正文页不同。
+ *
+ * 判据用「视图骨架」而不是「有多少个 data-page」：正文页底部也有反链
+ * （.bl-item[data-page]），按数量判会把正文页误当成列表 —— j/k 变成在
+ * 反链之间跳，正文反而读不下去。所以只认 .list-wrap（/all、标签、搜索、
+ * 回收站都是这个骨架），首页看板单独认 .dash。 */
+function isListView() {
+  const v = $('view');
+  if (!v) return false;
+  return !!v.querySelector(':scope > .list-wrap, :scope > .dash');
 }
 
 function scrollView(dir, page) {
