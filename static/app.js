@@ -2368,6 +2368,8 @@ const BASE_LEADER_SPEC = [
 
   /* f — 查找 */
   { lhs: 'ff', desc: '跳转页面', run: () => openPicker('跳转页面', 'f', '', 'page') },
+  /* gf —— 跟到视口里最靠上的链接（vim 的 gf）。gF 是「跟到最后一个」。 */
+  { lhs: 'gf', desc: '跟到本页的链接 (gf)', run: () => followLinkUnderCursor() },
   { lhs: 'fr', desc: '最近打开的页面', run: () => pickRecent() },
   { lhs: 'fb', desc: '切换缓冲', run: () => pickBuffer() },
   { lhs: 'ft', desc: '标签云', run: () => showTagCloud() },
@@ -3895,6 +3897,38 @@ function pageHitJump(dir) {
   if (Math.abs(target - v.scrollTop) > 4) v.scrollTop = target;
 
   toast(`第 ${idx + 1}/${total} 处「${pat}」${wrapped ? '（已回绕）' : ''}`);
+}
+
+/* ══════════════════════════════════════════════════════════
+   gf —— vim 的「跟到光标下的链接」
+   ──────────────────────────────────────────────────────────
+   vim 里光标停在文件名上按 gf 就跳过去。网页没有键盘光标，
+   这里取一个近似：**跟到视口里最靠上的那个链接**。
+   优先 wikilink，其次反向链接；列表视图则跟当前光标行。
+
+   为什么不做「精确光标」：正文是渲染出来的 HTML，没有字符级光标，
+   要做得精确就得给每个字加 caret 位置 —— 那不是这个前端该干的事。
+   「视口里第一个链接」这个语义在笔记场景里已经够用（读完一段就往下走）。
+   ══════════════════════════════════════════════════════════ */
+
+function followLinkUnderCursor() {
+  // 列表视图：跟当前光标行（Enter 已经有，但 gf 也该能用）
+  if (isListView()) {
+    const rows = listRows();
+    const cur = listCursor();
+    if (cur >= 0 && rows[cur]) { rows[cur].click(); return; }
+  }
+  const v = $('view');
+  if (!v) return toast('没有可打开的视图');
+  const links = [...v.querySelectorAll('a.wikilink[data-page], .bl-item[data-page]')]
+    .filter(el => (el.dataset.page || '').trim());
+  if (!links.length) return toast('本页没有链接可跟');
+
+  const vTop = v.getBoundingClientRect().top;
+  // 第一个「还没滚出视口上方」的链接
+  const hit = links.find(el => el.getBoundingClientRect().bottom > vTop + 4) || links[0];
+  hit.click();
+  toast('gf → ' + hit.dataset.page);
 }
 
 function scrollView(dir, page) {
