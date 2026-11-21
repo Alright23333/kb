@@ -1782,6 +1782,10 @@ function openCmdline(prefix) {
   const el = $('cmdline');
   el.classList.add('open');
   cmd.open = true;
+  /* 必须存下来：submitCmdline / updateCmdHint / 输入事件都靠 cmd.prefix
+   * 区分「搜索」和「命令」。原来这里只写进 DOM 不写进状态，于是按 /
+   * 打开后 cmd.prefix 仍是 ':'，输入关键词被当成未知命令执行。 */
+  cmd.prefix = prefix || ':';
   $('cmdline-prompt').textContent = prefix;
   const input = $('cmdline-input');
   input.value = '';
