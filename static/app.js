@@ -851,8 +851,9 @@ function restoreScrollPos(key, deadline) {
   setTimeout(() => restoreScrollPos(key, deadline), 100);
 }
 
-function showView(html) {
+function showView(html, kind) {
   state.listIdx = -1;   // 换视图：列表光标归零
+  state.viewKind = kind || null;
   enterView('content');
   $('view').innerHTML = html;
   // 换视图后还原「这一页上次读到哪」（内容异步长的，restore 内部会重试）
@@ -985,7 +986,7 @@ async function showPage(name, token) {
         <span class="spacer"></span>
         <button class="btn btn-sm" data-act="edit">编辑 (space e)</button>
       </div>
-      ${blHtml}`);
+      ${blHtml}`, 'page');
     const view = $('view');
     markUnresolved(view);
     fillEmbeds(view);
@@ -2038,7 +2039,23 @@ function submitCmdline() {
   const prefix = cmd.prefix;
   closeCmdline();
   if (!raw) return;
-  if (prefix === '/') { navigate('search', raw, { replace: true }); return; }
+  if (prefix === '/') {
+    /* `/` 的语义按上下文分（和 vim 的直觉一致）：
+     * - 正在读一篇正文 → 页内搜索（记 pattern，跳第一个命中，之后 n/N）
+     * - 在列表页（/all、首页） → 全库搜索（真正换页面）
+     * 全库搜索永远可以用 `space s` 或 `:search xxx`，所以正文页里
+     * 让出 `/` 给页内搜索不会丢功能。 */
+    if (!isListView() && state.current && state.viewKind === 'page') {
+      state.lastPattern = raw;
+      const n = buildPageHits(raw);
+      if (!n) { toast(`本页找不到「${raw}」`); return; }
+      pageHitJump(1);
+      toast(`页内搜索「${raw}」· ${n} 处 · n / N 跳转`);
+      return;
+    }
+    navigate('search', raw, { replace: true });
+    return;
+  }
   const parts = raw.split(/\s+/);
   runCommand(parts[0], parts.slice(1));
 }
@@ -3207,6 +3224,10 @@ let lastKey = 0;
 let pendingCount = 0;
 let pendingCountTs = 0;
 
+/* z 前缀（zz / zt / zb / z.）—— 和计数前缀同理，等第二个键 */
+let pendingZ = false;
+let pendingZTimer = null;
+
 function takeCount() {
   const n = pendingCount || 1;
   pendingCount = 0;
@@ -3389,6 +3410,71 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'g') { setListCursor(0); return; }
   }
 
+  /* vim 的阅读动作（正文页与列表页通用）—— 之前只有 j/k 单步和 G/gg 到首尾，
+   * 一屏一屏翻、居中、定位到屏幕首/中/尾都得靠鼠标拖滚动条。 */
+
+  // Ctrl-d / Ctrl-u：半屏滚动（vim 的 scroll 值默认是窗口一半）
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'd' || e.key === 'u')) {
+    e.preventDefault(); e.stopPropagation();
+    const n = pendingCount; pendingCount = 0;
+    const v = $('view');
+    if (n) { v.scrollTop += (e.key === 'd' ? 1 : -1) * n * 30; return; }  // 3<C-d> = 滚 3 行
+    v.scrollTop += (e.key === 'd' ? 1 : -1) * v.clientHeight * 0.5;
+    return;
+  }
+  // Ctrl-f / Ctrl-b：整屏（vim 的 page down/up）
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'b')) {
+    e.preventDefault(); e.stopPropagation();
+    $('view').scrollTop += (e.key === 'f' ? 1 : -1) * $('view').clientHeight * 0.9;
+    return;
+  }
+
+  // H / M / L —— 光标（或视口）到窗口首 / 中 / 尾
+  if (!isListView() && (e.key === 'H' || e.key === 'M' || e.key === 'L')) {
+    const v = $('view');
+    const h = v.clientHeight;
+    e.preventDefault();
+    if (e.key === 'H') v.scrollTop += -h * 0.15;
+    else if (e.key === 'M') v.scrollTop += h * 0.35;
+    else v.scrollTop += h * 0.75;
+    return;
+  }
+
+  /* z 前缀：zz / zt / zb。
+   *
+   * vim 的 z 系列是把「光标行」贴到屏幕中 / 顶 / 底。这里没有行光标，
+   * 近似为「把视口里当前的内容位置微调」：zt 往回 0.3 屏（内容视觉上贴顶）、
+   * zb 往前 0.3 屏（贴底）、zz 居中（不动）。
+   * 缺点是不如真正的 zz 精确，但比完全没有强 —— 至少三个键有反应且不误伤。 */
+  if (!isListView()) {
+    if (pendingZ) {
+      pendingZ = false;
+      if (e.key === 'z' || e.key === 't' || e.key === 'b') {
+        const v = $('view');
+        const h = v.clientHeight;
+        if (e.key === 't') v.scrollTop -= h * 0.3;
+        else if (e.key === 'b') v.scrollTop += h * 0.3;
+        e.preventDefault();
+        pendingZTimer && clearTimeout(pendingZTimer);
+        return;
+      }
+      // 不是 z/t/b → 当前键照常处理（不 return）
+    }
+    if (e.key === 'z') {
+      pendingZ = true;
+      pendingZTimer && clearTimeout(pendingZTimer);
+      pendingZTimer = setTimeout(() => { pendingZ = false; }, 1200);
+      return;
+    }
+  }
+
+  /* n / N —— 页内搜索的下一个 / 上一个命中（vim 语义） */
+  if (!isListView() && (e.key === 'n' || e.key === 'N')) {
+    e.preventDefault();
+    pageHitJump(e.key === 'n' ? 1 : -1);
+    return;
+  }
+
   if (e.key === 'k' || e.key === 'ArrowUp') { scrollView(-1); return; }
   if (e.key === 'j' || e.key === 'ArrowDown') { scrollView(1); return; }
   if (e.key === 'd') {   // dd 风格：连按两次跳到下一屏
@@ -3511,6 +3597,91 @@ function isListView() {
   const v = $('view');
   if (!v) return false;
   return !!v.querySelector(':scope > .list-wrap, :scope > .dash');
+}
+
+/* ══════════════════════════════════════════════════════════
+   页内搜索跳转 —— vim 的 n / N
+   ──────────────────────────────────────────────────────────
+   之前 `/` 在阅读视图打开的是「全库搜索」（跳到 /kb/search/xxx），
+   列表页里 n/N 完全没绑定。这里补「在正文里找词并跳过去」：
+
+   - 用 / 提交一次关键词后记下 pattern（state.lastPattern）
+   - n 下一个命中、N 上一个，命中处高亮
+   - 高亮用 CSS Custom Highlight API（不改 DOM，不破坏事件绑定）；
+     老浏览器没有这个 API 就只跳转不高亮
+   ══════════════════════════════════════════════════════════ */
+
+const hlRanges = [];
+
+function clearPageHits() {
+  hlRanges.length = 0;
+  if (window.CSS && CSS.highlights) CSS.highlights.delete('kb-hit');
+}
+
+function buildPageHits(pat) {
+  clearPageHits();
+  state.hitIdx = -1;
+  const v = $('view');
+  if (!v || !pat) return 0;
+  const needle = pat.toLowerCase();
+  const walker = document.createTreeWalker(v, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      // 跳过脚本/样式
+      const p = node.parentNode;
+      if (p && /^(SCRIPT|STYLE)$/.test(p.tagName)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let node;
+  while ((node = walker.nextNode())) {
+    const text = node.nodeValue;
+    const low = text.toLowerCase();
+    let from = 0;
+    while (true) {
+      const at = low.indexOf(needle, from);
+      if (at < 0) break;
+      const r = document.createRange();
+      r.setStart(node, at);
+      r.setEnd(node, at + needle.length);
+      hlRanges.push(r);
+      from = at + needle.length;
+    }
+  }
+  if (hlRanges.length && window.CSS && CSS.highlights) {
+    CSS.highlights.set('kb-hit', new Highlight(...hlRanges));
+  }
+  return hlRanges.length;
+}
+
+/* 命中游标（vim 的「当前位置」）。第一版靠「视口里有没有」判断下一个，
+ * 命中本来就在视口内时永远判成第 1 个 —— n 三次都停在第 1/10 处。 */
+function pageHitJump(dir) {
+  const pat = state.lastPattern;
+  if (!pat) return toast('没有搜索词（先用 / 搜索）');
+  if (!hlRanges.length) {
+    const n = buildPageHits(pat);
+    if (!n) return toast(`本页找不到「${pat}」`);
+  }
+  const total = hlRanges.length;
+  let idx = state.hitIdx;
+  if (typeof idx !== 'number' || idx < 0 || idx >= total) idx = dir > 0 ? -1 : total;
+  idx += dir;
+  let wrapped = false;
+  if (idx >= total) { idx = 0; wrapped = true; }
+  if (idx < 0) { idx = total - 1; wrapped = true; }
+  state.hitIdx = idx;
+
+  const v = $('view');
+  const rect = hlRanges[idx].getBoundingClientRect();
+  const vTop = v.getBoundingClientRect().top;
+  // 把命中放到窗口上 1/3 处；已经在合适位置就别抖（差值很小就不动）
+  const want = v.scrollTop + (rect.top - vTop) - v.clientHeight * 0.35;
+  const max = Math.max(0, v.scrollHeight - v.clientHeight);
+  const target = Math.max(0, Math.min(max, want));
+  if (Math.abs(target - v.scrollTop) > 4) v.scrollTop = target;
+
+  toast(`第 ${idx + 1}/${total} 处「${pat}」${wrapped ? '（已回绕）' : ''}`);
 }
 
 function scrollView(dir, page) {

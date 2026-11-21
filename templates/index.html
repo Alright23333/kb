@@ -273,6 +273,9 @@ body {
 /* 列表光标（j/k 移动）比 hover 更显眼一点：hover 只是过路，光标是「当前行」 */
 .row.kb-cursor { background: var(--sel); border-left-width: 3px; }
 .row.kb-cursor::before { content: '▎'; color: var(--accent); margin-right: -.4em; }
+
+/* 页内搜索命中高亮（CSS Custom Highlight API，不改 DOM） */
+::highlight(kb-hit) { background: var(--accent-soft, rgba(180,140,255,.35)); color: inherit; }
 .row .row-name { color: var(--fg); flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .row-date { color: var(--faint); font-size: 11.5px; flex: 0 0 auto; margin-left: auto; padding-left: .8em; }
 .row .row-snip { color: var(--muted); font-size: 11.5px; flex: 1 1 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
