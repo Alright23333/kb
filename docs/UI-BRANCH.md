@@ -223,6 +223,80 @@ git merge --no-ff ui-lazyvim
 | 合并预演 | `git merge-tree` 0 冲突标记；分支已包含 `main` 最新 commit |
 | 业务代码 | 12 个后端文件与 `main` **0 行差异**（逐文件 `git diff --quiet` 验证） |
 
+## 生产当前跑的就是这个分支（2026-11-22）
+
+用户决定：新前端接管生产端口 `8080`，旧 UI 不再对外。
+
+```
+kb-docker/docker-compose.override.yml  （本机覆盖，已 gitignore）
+  kb.volumes:
+    - ./data:/app/data                              ← 生产库不变
+    - /home/user/pi-working/kb-ui/main.py:ro        ← 本 worktree
+    - /home/user/pi-working/kb-ui/routers:ro
+    - /home/user/pi-working/kb-ui/static:ro
+    - /home/user/pi-working/kb-ui/templates:ro
+```
+
+- 端口不变（`127.0.0.1:8080`），nginx / Tailscale Serve / IP 白名单**全没动**
+- 数据目录仍是生产 `~/services/kb-docker/data`（测试副本没被用上）
+- MCP 两个容器（`kb-mcp` / `kb-mcp-public`）**没重启**，仍在跑镜像里的代码
+- 之前只挂 `templates/index.html` 单文件 —— 新前端资源在 `static/` 下，
+  必须整目录挂进去，否则 `/static/app.js` 404
+
+### ⚠️ 脆弱点：生产现在依赖 worktree 目录
+
+`kb` 容器挂的是 `/home/user/pi-working/kb-ui/`，**不是仓库 main 分支**。
+若该目录被删、被 `git worktree remove`、或被切到别的分支，生产会立刻挂掉。
+
+两种消除方式（择一）：
+
+1. **把 `ui-lazyvim` 合并进 `main`**，override 改成挂 `./main.py` 等仓库路径
+   —— 生产只依赖 git 仓库，最稳
+2. **把 worktree 钉死**：`git worktree lock ~/pi-working/kb-ui`（防误删）
+   —— 最小改动，但仍是「目录在才有服务」
+
+### 回滚
+
+```sh
+cd /home/user/services/kb-docker
+cp /tmp/override-backup-*.yml docker-compose.override.yml   # 旧版单文件挂载
+docker compose up -d --no-build kb
+```
+
+（备份在 `/tmp/override-backup-<时间>.yml`；`/tmp` 会随重启清空，
+长期建议把回滚步骤抄到本节而不是依赖那个文件。）
+
+### 部署前做的检查
+
+| 项 | 结果 |
+|---|---|
+| 生产 DB 备份 | `VACUUM INTO` → `data/manual-backup-pre-ui-deploy.db`（18.1M） |
+| `main.py` 差异 | 仅 2 处（no-cache 中间件 + `_SPA_ROUTE_WORDS` 加 `search`） |
+| `routers/api.py` | 与 main **同一 blob**（`3310da36`），零差异 |
+| `static/` 文件集 | ui-lazyvim 是 main 的**超集**（无旧版独有文件被删） |
+| `b2ea3cb..main` 是否动过 .py | 没动过（`git log --quiet`） |
+| `data/custom.css` | 0 字节 —— 无用户定制主题，不存在主题丢失风险 |
+
+### 部署后的实测
+
+```
+/kb/ /kb/page/KB /kb/all /kb/todo /kb/graph /kb/journal /kb/search/x
+  → 全 200，BASE 推导 = /kb，API = /kb/api
+/static/app.js /static/plugin.js /static/panel.js /static/themes/index.js
+/static/plugins/{index,health,toc,gantt,hint,sidebar}.js
+/static/vendor/mermaid/... /static/vendor/frappe-gantt/...
+/manifest.webmanifest /sw.js                       → 全 200
+/api/pages/count → 614        /api/graph /api/tags → 200
+插件 8 个加载正常；:health 面板 → 614 页 / 3229 链接 / 92 活跃
+写路径：:w → prompt 输名 → 落库 ✓  改名 ✓  删除 ✓（测试页已清理干净）
+MCP：8092 / 8100 握手 OK，search 实测有结果
+0 JS 错误
+```
+
+> 发现的坑：新前端编辑器默认 **vim keymap**，CodeMirror 里直接打字会被当命令吞掉
+> （测试时 "部署测试页 ui" 变成了 "-lazyvim"）。这不是 bug，是 nvim 式交互的
+> 代价 —— 但普通用户第一次用会被咬。移动端会自动切到 default keymap。
+
 ## 旧版功能补齐（2026-11-21 晚）
 
 旧版相对新版仅剩的两个缺口，现已全部以插件形式补齐：
