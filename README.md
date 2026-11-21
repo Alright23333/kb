@@ -686,6 +686,9 @@ static/vendor/
 - [x] 标签解析边界修正（URL 片段不算标签 + 前后端 CJK 规则对齐）
 - [x] refs 一致性（改名只改 link、删页级联、孤儿 tag 不计入列表）
 - [x] 单元测试（32 例：解析边界 / FK 级联 / 改名 / 孤儿 ref）
+- [x] 公开只读子集 MCP 端点（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / 只读连接）
+- [x] MCP HTTP `stateless_http=True`（服务端重启不再让客户端永久 404）
+- [x] 页面总数不受 `/api/pages` 的 500 上限影响（`/api/pages/count` + offset 分页）
 
 ### 待办
 

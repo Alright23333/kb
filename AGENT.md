@@ -78,6 +78,20 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - 行级修改用 `append_to_page`（追加）与 `delete_lines`（1-based 行号区间删除），减少全文覆盖风险
 - `_sync_refs()` 与 api.py 的 `_sync()` 逻辑对等，改解析逻辑时两边同步改
 - 注意陷阱 #12：环境变量白名单问题
+- **`frowid` ≠ `f.rowid`**：FTS5 表的行标识是 `f.rowid`，写成 `frowid` 会被当成不存在的列，`OperationalError` 被 LIKE 兜底静默吞掉（[[2026-11-20]] 真踩过，见陷阱 #38）
+
+### `mcp_public.py` — 公开只读子集（对外开放专用）
+
+- 8 个 `public_*` 工具，**没有任何写操作**；给 AI 机器人（QQ 群等）用的第二入口
+- 隔离三层，缺一不可：
+  1. **无写工具** —— 越权也改不了
+  2. **SQL 白名单** —— 每条查询追加 `AND p.id IN (SELECT source_id FROM refs WHERE kind='tag' AND lower(target_name)='public')`。不是靠 prompt 约束模型"不要看"
+  3. **统一话术** —— 私有页与不存在页都返回 `Page 'x' not found`，堵存在性探测
+- **元数据也要过筛**：`links` / `backlinks` / `tags` 每个都加同样子查询。曾实测私有页名从 `links` 泄露（`树莓-小组进阶` 链向 4 个私有页）
+- 只读性在**连接层**强制：`file:...?mode=ro` + `PRAGMA query_only=ON`
+- ⚠️ `data/` **不能**挂 `:ro`：KB 是 WAL 模式，SQLite 打开 WAL 库必须能创建/写 `-shm`，只读挂载直接 `unable to open database file`
+- 工具名一律带 `public_` 前缀 —— AstrBot 的 `FuncToolManager` 以工具名做 key，同名会互相覆盖
+- 标签名由 `KB_PUBLIC_TAG` 决定（默认 `public`）；网页给某页正文加 `#public` 后**立刻生效**，不需重启也不需重建索引（写入时 api.py / mcp_server.py 都会重算 refs）
 
 ### `timeutil.py` — 时区固定
 
@@ -419,6 +433,63 @@ UPDATE refs SET target_name = ? WHERE target_name = ? AND kind = 'link'
 
 HTTP 端点**不鉴权**，所以必须绑 `127.0.0.1`（compose 里 `127.0.0.1:8092:8081`），
 对外只走 SSH / 受控代理。接入方式见 `MCP_REMOTE.md`。
+
+三个端点共存（[[2026-11-20]] 起）：
+
+| 端点 | 端口 | 工具 | 用途 |
+|---|---|---|---|
+| `kb` (uvicorn) | `127.0.0.1:8080` | — | 网页 UI + REST |
+| `kb-mcp` (`mcp_http.py`) | `127.0.0.1:8092` | 17 读写 | 主人用（AstrBot admin） |
+| `kb-mcp-public` (`mcp_public.py`) | `127.0.0.1:8100` | 8 只读 | 给别人用（AstrBot member），只返回 `#public` 页 |
+
+### 38. `frowid` 不是列名（FTS5 的 rowid 要写成 `f.rowid`）
+
+```sql
+-- ✗ 报 no such column: frowid
+JOIN pages p ON p.id = frowid
+-- ✓
+JOIN pages p ON p.id = f.rowid
+```
+
+FTS5 虚拟表的隐式 `rowid` 必须带表别名限定。写错了会抛 `sqlite3.OperationalError`，
+而 `_search()` / MCP `search()` 都有 `except OperationalError → LIKE 兜底`，
+**错误被静默吞掉**，表现为「搜索能出结果但一直走慢路径、不走索引」。[[2026-11-20]] 实测得知。
+
+排查这一类"静默降级"的正确手法：单独建一个临时库跑原 SQL，看它到底抛不抛。
+
+### 39. FastMCP HTTP 必须 `stateless_http=True`
+
+```python
+mcp.run(transport="http", host=..., port=..., path=..., stateless_http=True)
+```
+
+默认**有状态**：服务端给每个客户端发 `mcp-session-id`，之后每个请求都要带它。
+服务端一重启，客户端手里的旧 id 就换来 `404 Session not found`。
+AstrBot 的 MCP 客户端只在 `anyio.ClosedResourceError` 时重连，404 被包成
+`McpError("Session terminated")` **不触发重连** → 工具永久坏掉，
+必须手动重启 AstrBot 才能恢复。
+
+即"改 KB 侧任何东西都要连带重启机器人"，耦合很蠢。
+
+改 stateless 后：`initialize` 不返回 session-id，带垃圾 id 或不带 id 都返回 200。
+回归测试：只重启 `kb-mcp-public`、不重启 AstrBot，公开工具 7 次 0 失败。
+
+### 40. 对外开放的只读端点：SQL 白名单，不是 prompt 约束
+
+`mcp_public.py` 的隔离必须落在 SQL 层，让模型**物理上查不到**私有页：
+
+```sql
+AND p.id IN (SELECT source_id FROM refs WHERE kind='tag' AND lower(target_name)=?)
+```
+
+不能只写一句「请不要读取私有页面」的 system prompt —— 换个模型就失效。
+
+另外 **`links` / `backlinks` / `tags` 三个元数据字段都要过同样的子查询**。
+只过滤 `content` 是不够的：曾实测 `树莓-小组进阶` 的 `links` 字段把 4 个
+私有页名全列出来了。页面作者授权的是内容，不是"它链向了谁"。
+
+话术也要统一：私有页与不存在页都返回 `Page 'x' not found`，
+否则这一端点就成了存在性探测接口。
 
 ## 修改流程
 
