@@ -2260,8 +2260,11 @@ const BASE_LEADER_SPEC = [
   { lhs: 'uw', desc: '切换软换行', run: () => toggleLineWrapping() },
 
   /* g — 跳转视图 */
-  { lhs: 'bo', desc: '← 上一跳转（Ctrl-o）', run: () => jumpTo(-1) },
-  { lhs: 'bi', desc: '→ 下一跳转（Ctrl-i）', run: () => jumpTo(1) },
+  /* g o / g i —— 与 Ctrl-o / Ctrl-i 同一动作（vim 里 jumplist 常挂 g 前缀）。
+   * 上一版这里误写成 `bo`，撞上了缓冲组的 `bo`（关闭其他缓冲）——
+   * 同一个 lhs 两条定义，后写的覆盖前写的，于是 space b o 变成了跳转。 */
+  { lhs: 'go', desc: '← 上一跳转（Ctrl-o）', run: () => jumpTo(-1) },
+  { lhs: 'gi', desc: '→ 下一跳转（Ctrl-i）', run: () => jumpTo(1) },
   { lhs: 'gg', desc: '知识图谱', run: () => navigate('graph') },
   { lhs: 'gd', desc: '首页看板', run: () => navigate('home') },
   { lhs: 'ga', desc: '所有页面', run: () => navigate('all') },
@@ -2270,6 +2273,18 @@ const BASE_LEADER_SPEC = [
   /* q — 退出 */
   { lhs: 'qq', desc: '退出编辑器', run: () => state.editing ? closeEditor() : toast('不在编辑状态') },
   { lhs: 'qd', desc: '丢弃改动并退出', run: () => discardAndClose() },
+
+  /* 其余全局视图（之前只有 :命令，没有 leader 键 —— which-key 里看不见） */
+  { lhs: 'a', desc: '所有页面 (:all)', run: () => navigate('all') },
+  { lhs: 'd', desc: '首页看板 (:home)', run: () => navigate('home') },
+  { lhs: 't', group: '任务/标签' },
+  { lhs: 'tt', desc: '任务列表 (:todo)', run: () => navigate('todo') },
+  { lhs: 'tl', desc: '标签云 (:tags)', run: () => showTagCloud() },
+  { lhs: 'c', group: '配色' },
+  { lhs: 'cc', desc: '切换配色 (:colorscheme)', run: () => toggleTheme() },
+  { lhs: 'K', desc: '按键说明 (:keys)', run: () => openHelp() },
+  { lhs: 'm', desc: '移动端 / 触摸 UI (:touchui)', run: () => runCommand('touchui') },
+  { lhs: 'D', desc: '草稿 (:draft)', run: () => runCommand('draft') },
 
   /* 顶层叶子 */
   { lhs: 'h', desc: '快捷键帮助', run: () => openHelp() },
@@ -2316,7 +2331,28 @@ function composeLeaderSpec() {
       out.push({ lhs: k.lhs, desc: k.desc, group: k.group, run: k.run, plugin: true });
     }
   }
-  return out;
+  /* 按 lhs 去重 —— 同一个键只能有一条定义，否则 which-key 里出现两行、
+   * 帮助页重复、后写的还会静默覆盖前写的（这正是 space b o 一度
+   * 变成「上一跳转」的原因）。
+   *
+   * 重复从哪来：插件可以「两处都声明」——spec 里写 keys（这样懒加载
+   * 前 which-key 就能看到键名），插件文件里再 api.keys() 一次
+   * （这样 disable 时能干净收回）。两处本来就该都有，只是合成时要去重。
+   *
+   * 合并规则：后写的 desc 覆盖前者，但 run 一旦有就不许被空值覆盖
+   * （spec 里通常只有 desc，没有 run）。 */
+  const byLhs = new Map();
+  for (const item of out) {
+    const prev = byLhs.get(item.lhs);
+    if (!prev) { byLhs.set(item.lhs, Object.assign({}, item)); continue; }
+    const merged = Object.assign({}, prev);
+    if (item.desc) merged.desc = item.desc;
+    if (item.group) merged.group = item.group;
+    if (item.run) merged.run = item.run;
+    if (item.plugin) merged.plugin = true;
+    byLhs.set(item.lhs, merged);
+  }
+  return [...byLhs.values()];
 }
 
 let LEADER_SPEC = composeLeaderSpec();
@@ -2546,7 +2582,13 @@ function openHelp() {
     sec('浏览（非编辑器）', [
       ['j / k  ↓ / ↑', '上下滚动'],
       ['dd / uu', '翻一屏 / 回一屏（连按两次，懒人版 Ctrl-D）'],
-      ['gg / G', '回到顶部 / 跳到底部'],
+      ['gg / G', '顶/底（列表里 G 到末行）'],
+      ['Ctrl-d / Ctrl-u', '半屏下 / 上（3<C-d> = 3 行）'],
+      ['Ctrl-f / Ctrl-b', '整屏下 / 上'],
+      ['H / M / L', '视口到窗口首 / 中 / 尾'],
+      ['n / N', '页内搜索下一个 / 上一个命中'],
+      ['Ctrl-o / Ctrl-i', '跳转历史 上一跳 / 下一跳'],
+      ['3j / 5G', '计数前缀：数字 + 动作'],
       [']b / [b', '下一个 / 上一个缓冲'],
       ['q', '关闭当前缓冲'],
       ['R', '清缓存并回首页'],
