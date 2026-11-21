@@ -577,8 +577,18 @@ async function guardDirtyNav(target, arg) {
   catch (e) { toast('保存失败：' + e.message, 'error'); return false; }
 }
 
+function routeKey(target, arg) {
+  return target + ':' + (arg == null ? '' : arg);
+}
+
 function dispatch(target, arg) {
   const token = ++navToken;
+
+  /* 阅读位置记忆：先把「旧这一页读到哪」存起来，再切到新路由。
+   * 顺序不能反 —— 一旦 scrollRouteKey 换成新的，旧页的位置就找不回来了。 */
+  saveScrollPos();
+  scrollRouteKey = routeKey(target, arg);
+
   // 离开编辑器（除了仍在编辑态的子路由）
   if (target !== 'edit' && target !== 'new') state.editing = false;
   // 上下文变了 → 动作坞要跟着换（touch 模式下才有可见效果）
@@ -619,7 +629,7 @@ window.addEventListener('popstate', () => {
 /* ── buffer 管理 ────────────────────────────────────────── */
 
 function addBuffer(name) {
-  if (!name) return;
+  if (typeof name !== 'string' || !name) return;   // 非字符串（数组参数等）直接挡掉
   if (!state.buffers.some(b => b.toLowerCase() === name.toLowerCase())) {
     state.buffers.push(name);
   }
@@ -768,10 +778,85 @@ function enterView(mode) {
   STATUS.words.textContent = '';
 }
 
+/* ══════════════════════════════════════════════════════════
+   阅读位置记忆 —— vim 的 "''" 标记（回到上次离开的地方）
+   ──────────────────────────────────────────────────────────
+   之前离开页面再回来总是回到顶部：一篇长页面读到一半点个链接，
+   Ctrl-o 退回来又得从头往下滚。nvim 里同一个 buffer 的位置是记着的。
+
+   做法：每次 dispatch 前把当前 #view 的 scrollTop 存进
+   localStorage（按 route key 分开），视图渲染后按需还原。
+   用「重试几次」而不是单次设置：showPage 是先 showView 骨架、
+   再异步查 API 填内容，内容没到位时 scrollTop 设不上（会被 clamp）。
+   ══════════════════════════════════════════════════════════ */
+
+const SCROLL_KEY = 'kb-scroll-memo';
+const SCROLL_MAX = 80;
+
+let scrollMemo = null;
+let scrollRouteKey = null;
+
+function scrollMemoLoad() {
+  if (scrollMemo) return scrollMemo;
+  try {
+    const raw = JSON.parse(localStorage.getItem(SCROLL_KEY) || '{}');
+    scrollMemo = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  } catch (e) { scrollMemo = {}; }
+  return scrollMemo;
+}
+
+function scrollMemoSave() {
+  if (!scrollMemo) return;
+  try {
+    // 只留最近 SCROLL_MAX 条，避免 localStorage 无限长
+    const keys = Object.keys(scrollMemo);
+    if (keys.length > SCROLL_MAX) {
+      const surplus = keys.slice(0, keys.length - SCROLL_MAX);
+      for (const k of surplus) delete scrollMemo[k];
+    }
+    localStorage.setItem(SCROLL_KEY, JSON.stringify(scrollMemo));
+  } catch (e) {}
+}
+
+/* 记下当前视图的滚动位置（dispatch 前调用） */
+function saveScrollPos() {
+  if (!scrollRouteKey) return;
+  const v = $('view');
+  if (!v) return;
+  const m = scrollMemoLoad();
+  // 接近顶部就不记，免得「一打开就归零」的无效条目堆满
+  if (v.scrollTop < 40) delete m[scrollRouteKey];
+  else m[scrollRouteKey] = v.scrollTop;
+  scrollMemoSave();
+}
+
+/* 还原滚动位置。
+ *
+ * 两个坑：
+ * ① 内容异步长进来（showPage 先骨架后 API、showAll 先骨架后列表），
+ *    内容没到位时 scrollHeight 不够，设 scrollTop 会被浏览器 clamp。
+ *    所以按「时间」重试（最多 ~2s），而不是按帧数 —— 网络慢时
+ *    6 帧（100ms）根本等不到。
+ * ② 没有记忆时必须显式归零：innerHTML 换掉后浏览器不会重置 scrollTop，
+ *    上一页读到 1200 就会让新页从 1200 开始 —— 这是「点进新页面落在文章中段」。 */
+function restoreScrollPos(key, deadline) {
+  const want = scrollMemoLoad()[key];
+  const v = $('view');
+  if (!v) return;
+  if (!want) { v.scrollTop = 0; return; }                 // 没有记忆 → 顶部
+  if (deadline === undefined) deadline = Date.now() + 2000;
+  const max = v.scrollHeight - v.clientHeight;
+  if (max >= want - 8) { v.scrollTop = want; return; }    // 够高，设上
+  if (Date.now() > deadline) { v.scrollTop = 0; return; } // 等不到内容，宁可顶部
+  setTimeout(() => restoreScrollPos(key, deadline), 100);
+}
+
 function showView(html) {
   state.listIdx = -1;   // 换视图：列表光标归零
   enterView('content');
   $('view').innerHTML = html;
+  // 换视图后还原「这一页上次读到哪」（内容异步长的，restore 内部会重试）
+  if (scrollRouteKey) restoreScrollPos(scrollRouteKey);
 }
 
 /* ══════════════════════════════════════════════════════════
