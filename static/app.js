@@ -1257,13 +1257,8 @@ function initCM() {
     scrollPastEnd: 0.35,
     keyMap: 'vim',
     extraKeys: {
-      'Space': (c) => {
-        const v = c.state.vim;
-        if (v && (v.insertMode || v.visualMode)) return CodeMirror.Pass;
-        // normal 模式下 <space> 是 leader：弹 which-key，不执行任何其它动作
-        openWhichKey();
-        return true;
-      },
+      /* 注意：这里**不能**放 'Space'。leader 统一在 document 的 capture
+       * 阶段判定（见下面「Leader 唯一出口」）。 */
       'Tab': (c) => {
         const v = c.state.vim;
         if (v && v.insertMode) { c.replaceSelection('  '); return; }
@@ -3048,6 +3043,62 @@ function isMobile() { return window.innerWidth <= 760; }
 
 let lastKey = 0;
 
+/* ══════════════════════════════════════════════════════════
+   Leader（<space>）唯一出口 —— capture 阶段
+   ──────────────────────────────────────────────────────────
+   原来的写法有两份处理同一事件的代码，导致两个方向都坏：
+
+   ① <space> 在编辑器里由 CodeMirror 的 extraKeys 打开 which-key，
+      但同一个 keydown 会继续冒泡到 document，被下面 leaderOpen 分支
+      当成「leader 之后的第一个按键」→ 立刻 closeWhichKey()。
+      表现：编辑器 normal 模式按 space 什么都不发生。
+      （非编辑器视图没有 CodeMirror 抢键，所以那边一直是好的 ——
+       这就是「主页能开、编辑页不能」的原因，不是页面逻辑混乱，
+       是同一状态被两个 handler 争用。）
+
+   ② 反方向：which-key 打开时按键先到 CodeMirror（f 被当成 vim 的
+      find motion 吃掉），然后才到 leaderOpen 分支。
+
+   懒人包的做法是 <Space> 被映射掉，编辑器根本看不到它。所以这里在
+   capture 阶段一次判定「打开 / 后续按键」，并 stopPropagation，
+   让 CodeMirror 与输入框都收不到这些键。
+   ══════════════════════════════════════════════════════════ */
+document.addEventListener('keydown', (e) => {
+  if (cmd.open) return;                       // 命令行自己处理
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  // which-key 已打开：所有键都归它，编辑器不许看
+  if (state.leaderOpen) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { closeWhichKey(); return; }
+    if (e.key === 'ArrowDown') { wkSel = Math.min(wkRows.length - 1, wkSel + 1); renderWhichKey(); return; }
+    if (e.key === 'ArrowUp') { wkSel = Math.max(0, wkSel - 1); renderWhichKey(); return; }
+    if (e.key === 'Enter') {
+      const row = wkRows[wkSel];
+      if (row) wkPress(row.key);
+      return;
+    }
+    if (e.key.length === 1) {
+      if (!wkPress(e.key)) closeWhichKey();
+      return;
+    }
+    return;
+  }
+
+  if (e.key !== ' ') return;
+
+  // 输入框里的空格就是空格；编辑器只在 normal 模式把 space 当 leader
+  const inField = e.target && e.target.matches && e.target.matches('input, textarea, select');
+  const vimNormal = cm && cm.hasFocus() && cm.state.vim &&
+                    !cm.state.vim.insertMode && !cm.state.vim.visualMode;
+  if (inField && !vimNormal) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  openWhichKey();
+}, true);
+
 document.addEventListener('keydown', (e) => {
   const inFlyout = document.querySelector('.overlay.open');
   const inInput = e.target.matches('input, textarea, select');
@@ -3070,25 +3121,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   // ── which-key ──
-  if (state.leaderOpen) {
-    if (e.key === 'Escape') { e.preventDefault(); closeWhichKey(); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); wkSel = Math.min(wkRows.length - 1, wkSel + 1); renderWhichKey(); return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); wkSel = Math.max(0, wkSel - 1); renderWhichKey(); return; }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const row = wkRows[wkSel];
-      if (row) wkPress(row.key);
-      return;
-    }
-    // 普通字符键：直接在当前层下钻/执行（which-key 的真实交互）
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      const handled = wkPress(e.key);
-      if (!handled) closeWhichKey();
-      return;
-    }
-    return;
-  }
+  // <space> 与 which-key 打开后的按键都在 document 的 capture 阶段处理完了
+  // （见「Leader 唯一出口」），这里只是兜底，正常到不了。
+  if (state.leaderOpen) return;
 
   // ── 浮层 ──
   if (inFlyout) {
@@ -3140,7 +3175,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeAllTransient(); return; }
   if (e.key === ':') { e.preventDefault(); openCmdline(':'); return; }
   if (e.key === '/') { e.preventDefault(); openCmdline('/'); return; }
-  if (e.key === ' ') { e.preventDefault(); openWhichKey(); return; }
+  // <space> 已在 capture 阶段处理（Leader 唯一出口）
 
   if (e.key === 'k' || e.key === 'ArrowUp') { scrollView(-1); return; }
   if (e.key === 'j' || e.key === 'ArrowDown') { scrollView(1); return; }

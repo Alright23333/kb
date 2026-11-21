@@ -24,19 +24,23 @@ KB.define('hint', (api, opts) => {
     return qi === ql.length ? score : -1;
   }
 
-  /* 找光标前面是不是 [[ 或 #，决定候选类型和替换范围 */
+  /* 找光标前面是不是 [[ 或 #，决定候选类型和替换范围。
+   *
+   * 只看**光标之前**这一段：closebrackets 插件在输入 `[` 时就把 `[]` 补好了，
+   * 打完第二个 `[` 文档里已经是 `[[]]`（光标停在两个 `]` 之间）。
+   * 所以「整行里没有 ]]」这种判定永远失败 —— 原来的补全看起来「有时候能弹、
+   * 弹出来也没有候选」就是这个原因。 */
   function contextOf(c) {
     const cur = c.getCursor();
-    const line = c.getLine(cur.line).slice(0, cur.ch);
-    const openBracket = line.lastIndexOf('[[');
-    if (openBracket >= 0 && line.indexOf(']]', openBracket) === -1) {
-      return { kind: 'page', start: openBracket + 2, text: line.slice(openBracket + 2) };
+    const before = c.getLine(cur.line).slice(0, cur.ch);
+    const openBracket = before.lastIndexOf('[[');
+    if (openBracket >= 0 && before.slice(openBracket + 2).indexOf(']]') === -1) {
+      return { kind: 'page', start: openBracket + 2, text: before.slice(openBracket + 2) };
     }
-    const hash = line.lastIndexOf('#');
-    if (hash >= 0 && /\s/.test(line.slice(hash + 1))) {
-      const rest = line.slice(hash + 1);
-      if (/^[A-Za-z0-9_\-]*$/.test(rest)) return { kind: 'tag', start: hash + 1, text: rest };
-    }
+    // #标签：前面不能是 #（那是标题）或字母数字；# 之后只能是标签字符。
+    // 原来的判定是 /\s/.test(...) —— 要求 # 后面有空白，等于永远不匹配。
+    const m = /(^|[^\p{L}\p{N}_#])#([\p{L}\p{N}_-]*)$/u.exec(before);
+    if (m) return { kind: 'tag', start: cur.ch - m[2].length, text: m[2] };
     return null;
   }
 
@@ -56,15 +60,19 @@ KB.define('hint', (api, opts) => {
        * 所以我们把「补 [[ 的右括号」写进候选的 text，而不是靠回调。 */
       CodeMirror.showHint(c, function () {
         const cur = c.getCursor();
-        const line = c.getLine(cur.line).slice(0, cur.ch);
-        const q = line.slice(ctx.start);
+        const before = c.getLine(cur.line).slice(0, cur.ch);
+        const q = before.slice(ctx.start);
+        // closebrackets 已经把 ]] 补好了：光标后面若已经是 ]]，候选只放名字，
+        // 否则会变成 [[名字]]]]。
+        const alreadyClosed = ctx.kind === 'page' &&
+                              c.getLine(cur.line).slice(cur.ch, cur.ch + 2) === ']]';
         const items = list
           .map(x => ({ text: x, score: matchFuzzy(q, x) }))
           .filter(x => x.score > 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, 40)
           .map(x => ({
-            text: ctx.kind === 'page' ? x.text + ']]' : x.text,
+            text: (ctx.kind === 'page' && !alreadyClosed) ? x.text + ']]' : x.text,
             displayText: x.text,
           }));
         return {
@@ -87,15 +95,32 @@ KB.define('hint', (api, opts) => {
     c.__kbHint = true;
     installing = true;
 
-    /* 输入 [[ 自动弹（对应 LazyVim 的 cmp 在 markdown 里给链接补全）*/
-    c.on('inputRead', (instance, change) => {
-      if (change.origin !== '+input') return;
+    /* 输入 [[ 自动弹（对应 LazyVim 的 cmp 在 markdown 里给链接补全）
+     *
+     * 只挂 inputRead 是不够的：inputRead 只在文本经由隐藏 textarea 进来时
+     * 才触发（输入法组字、粘贴）。直接键入走的是 CodeMirror 的
+     * replaceSelection，只会发 change（origin = '+input'）。
+     * 结果就是「有时候能弹（用输入法打中文时）、有时候不弹（直接敲 ASCII）」。
+     * 两个事件都挂上，并去重。
+     */
+    function maybeComplete(instance, change) {
+      if (!change || change.origin !== '+input') return;
       const cur = instance.getCursor();
-      const line = instance.getLine(cur.line).slice(0, cur.ch);
-      if (line.endsWith('[[') || line.endsWith('#') || /\#[\w-]+$/.test(line)) {
-        setTimeout(() => { try { complete(instance); } catch (e) {} }, 60);
-      }
-    });
+      const before = instance.getLine(cur.line).slice(0, cur.ch);
+      const wantPopup = before.slice(-2) === '[[' ||
+                        /(^|[^\p{L}\p{N}_#])#[\p{L}\p{N}_-]*$/u.test(before);
+      if (!wantPopup) return;
+      if (instance.__kbHintTimer) clearTimeout(instance.__kbHintTimer);
+      instance.__kbHintTimer = setTimeout(() => {
+        instance.__kbHintTimer = null;
+        // 候选框已经开着：交给 show-hint 自己更新，别重开一个
+        if (document.querySelector('.CodeMirror-hints')) return;
+        try { complete(instance); } catch (e) {}
+      }, 80);
+    }
+
+    c.on('change', maybeComplete);      // 直接键入
+    c.on('inputRead', maybeComplete);   // 输入法 / 粘贴
 
     installing = false;
   }

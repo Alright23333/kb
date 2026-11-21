@@ -223,6 +223,75 @@ git merge --no-ff ui-lazyvim
 | 合并预演 | `git merge-tree` 0 冲突标记；分支已包含 `main` 最新 commit |
 | 业务代码 | 12 个后端文件与 `main` **0 行差异**（逐文件 `git diff --quiet` 验证） |
 
+## 修掉的两个老 bug（2026-11-22）
+
+用户报：「主页可以 space 开快捷键，编辑页 normal 模式就不行」「[[ 补全有时候有、有时候没有」。
+两个都是真的，根因都不在「页面逻辑混乱」，而是**同一件事有两份 code 在抢**。
+
+### ① leader（space）被两个 handler 争用
+
+原来 `<space>` 在 CodeMirror 的 `extraKeys` 里打开 which-key，同时
+document 上还有一个顶层 keydown listener 也在处理 leader。同一个事件：
+
+```
+编辑器聚焦 + normal 模式 + 按 space
+  → CodeMirror extraKeys['Space'] 执行 openWhichKey()   ✓ 面板开了
+  → 事件继续冒泡到 document
+  → 顶层 listener 看到 state.leaderOpen == true，
+     把它当成「leader 之后的第一个按键」→ closeWhichKey()  ✗ 面板立刻关了
+```
+
+**净效果：面板开了又关，肉眼看不见。** 非编辑器视图没有 CodeMirror 抢键，
+所以那边一直是好的 —— 这就是「主页能开、编辑页不能」的全部原因。
+
+懒人包（LazyVim）的做法相反：`<Space>` 被 Vim 的 keymap 吃掉，编辑器
+根本看不到它，leader 只有一个出口。所以现在改成：
+
+- 删掉 `extraKeys['Space']`，CodeMirror 不再碰这个键
+- 在 **document capture 阶段** 一次性判定：`state.leaderOpen` → 所有键归
+  which-key（含 Esc / 方向键 / Enter / 字符键），并 `stopPropagation()`
+- 未打开时，只有 `<space>` 且「不在输入框」且「不在 vim insert/visual 模式」
+  才 `openWhichKey()`
+- 冒泡阶段那份重复的 leaderOpen 分支改成一句兜底 `return`
+
+顺带修好的连带症状：which-key 打开后按键原来先到 CodeMirror
+（`f` 被当成 vim 的 find motion 吃掉），现在 capture 阶段就截住了。
+
+### ② `[[` 补全有三处独立缺陷，叠起来变成「时好时坏」
+
+`static/plugins/hint.js`：
+
+| # | 问题 | 为什么表现成「有时候」 |
+|---|---|---|
+| a | 只挂 `inputRead` | 该事件只在文本经隐藏 textarea 进来时触发（**输入法组字/粘贴**）。直接键入 ASCII/CJK 走 `replaceSelection`，只发 `change`。所以用输入法打中文时会弹，直接敲 `[[` 不弹 |
+| b | 判定写成「整行里没有 `]]`」 | `closebrackets` 插件在你打第一个 `[` 时就把 `[]` 补好了，打完第二个 `[` 文档里已经是 `[[]]`。整行永远含 `]]` → 判定恒失败 |
+| c | 选中时补 `]]` | 同上，`]]` 已经存在，补完变 `[[名字]]]]` |
+
+`#` 标签还有第 4 个独立 bug：触发判定是 `#` 后面**必须**有空白，等于永不匹配。
+
+现在的写法：`contextOf` 只看**光标之前**那一段；`change` 和 `inputRead`
+都挂（去重）；`alreadyClosed` 决定候选里要不要带 `]]`；标签触发用
+`/(^|[^\p{L}\p{N}_#])#([\p{L}\p{N}_-]*)$/u`。
+
+### 实测（Playwright + 系统 chromium，走真实 nginx `/kb/` 前缀）
+
+```
+space 开 which-key   首页 ✓  /page/KB ✓  /all 筛选框（不改输入）✓  编辑器 normal ✓
+which-key 下钻       space g → 4 行「跳转」 → d 执行 → 浏览器跳到首页 ✓
+space e → space p    预览 on → 再按 off ✓（用户报的那条链路）
+space w / space h    保存 ✓ / 帮助浮层 ✓
+insert 模式 space    仍是空格，不抢 ✓        visual 模式 ✓
+输入框 space         仍是空格 ✓（设置页实测 'a b'）
+[[ 自动弹            '[[' → 40 候选；再打「树」→ 9 候选（全是树莓系列）✓
+Enter 选中           [[树]] → [[树莓]]，只有一个 ]] ✓
+# 标签               '#' → 40 候选；'#周' → 1 候选「周记」✓
+普通文字 # + 空格     不误弹 ✓
+0 console / page 错误
+```
+
+> 为什么不能只测「主页 space 能开」：那是唯一本来就好用的路径。
+> 回归时要专门测**编辑器 normal 模式**，那才是坏的那条。
+
 ## 生产当前跑的就是这个分支（2026-11-22）
 
 用户决定：新前端接管生产端口 `8080`，旧 UI 不再对外。
