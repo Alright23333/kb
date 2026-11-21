@@ -7,13 +7,62 @@
 KB 是一个**人能用、AI 也能用**的双链笔记系统。
 核心设计：**Markdown 是唯一权威源，存储引擎只做「内容 → 结构化索引」。**
 
+## 仓库结构：两个 worktree，三个分支（2026-11-21 起）
+
+**关键：不是复制目录，是同一份 `.git` 的两个工作区。** 用 `git worktree` 实现，两边提交即时互通，不需要 push/pull。
+
+```
+/home/user/services/kb-docker     [main]        生产部署点。只做 git pull / docker compose，不在这里编辑文档
+/home/user/pi-working/kb-ui       [ui-lazyvim]  前端重构分支。日常开发在这里
+                    ↑ 同一个 .git（2.1M），kb-ui/.git 只是一个 4KB 的 gitdir 指针文件
+```
+
+| 分支 | 位置 | 内容 | 状态 |
+|---|---|---|---|
+| `main` | `~/services/kb-docker` | 生产代码（单文件前端 5234 行） | 线上跑这个 |
+| `ui-lazyvim` | `~/pi-working/kb-ui` | 前端重构（866 行模板 + 3317 行 `static/app.js` + 插件系统） | 已推 GitHub，未合并 |
+| `ai-native` | GitHub `origin/ai-native` | AI 功能（RAG 问答/划词/建链），基于**旧**单文件模板 | 未合并，与 `ui-lazyvim` **前端形态冲突** |
+
+### 分支边界（`ui-lazyvim` 是纯前端分支）
+
+逐文件 `git rev-parse main:FILE` vs `ui-lazyvim:FILE` 验过，**16 / 17 个后端文件共用同一 blob，零差异**：
+
+```
+数据层  routers/api.py · database.py · search.py · parse.py · timeutil.py
+运维层  export.py · backup.py · mcp_server.py · mcp_http.py · mcp_public.py
+构建    Dockerfile · requirements.txt
+```
+
+唯一有差异的后端文件是 `main.py`（+19/−3），只有两处**前端耦合**：
+
+1. `nocache_first_party_static` 中间件 —— `/static/` 非 vendor 发 `no-cache`，否则改了 `app.js` 浏览器还跑旧的
+2. `_SPA_ROUTE_WORDS` 加 `search` —— **`theme` 故意不加**，它只是命令词，加了会遮住同名页面；此列表必须与 `static/app.js` 的路由 regex 同步
+
+### 目录纪律
+
+- **`~/services/kb-docker` 是部署点，不是编辑点。** 改文档/改代码一律在 `~/pi-working/kb-ui` 或本地克隆做，然后 `git pull`
+- 两个目录**分支互斥**：`main` 只能在 `kb-docker`，`ui-lazyvim` 只能在 `kb-ui`（git 会拒绝第二个 worktree checkout 同一分支）
+- `kb-ui/data/` 是独立测试库（`.backup` 快照，inode 与生产不同），**已被 `.gitignore` 的 `data/` 挡住**，`git add -A` 不会带上 18MB 的 db
+- `kb-ui` 里 `todo.md` / `README.md` / `AGENT.md` **故意不跟 main 同步**（分支只搬前端文件，业务文档一律不碰），合并时由 main 自动带过来
+
+### 下游沿革（`kb-ui-test` 那个目录已废弃）
+
+原先 `~/pi-working/kb-ui-test` 是**脱离真实仓库的临时 git**，里面的 `AGENT.md`/`README.md`/`todo.md` 是 11-17 的陈旧版（缺 P7 记录）。`git add -A` 会把 main 上的 P7 记录退回去，所以建 `ui-lazyvim` 时只搬了 43 个前端文件。那个目录已不再使用。
+
+### 合并 `ui-lazyvim` → `main` 时
+
+- `git merge-tree --write-tree main ui-lazyvim` 预演 **exit=0，0 冲突**
+- 真正两边都改过的只有 **`templates/index.html`** 和 **`static/sw.js`**，其余全是新增文件
+- 回滚前端：`git checkout main -- templates/index.html static/sw.js`
+- **不要在部署目录里做合并**，先在一个本地克隆跑通再推
+
 ## 不可违背的设计原则
 
 1. **单一命名空间**：页面名 = 链接目标 = URL 键。不要引入 `slug`/`title` 分离。
 2. **大小写不敏感**：所有 `name` 和 `target_name` 查询必须 `COLLATE NOCASE`。Python 侧用 `casefold()` 去重。
 3. **FTS 触发器是自动同步的**：不要手动维护 `pages_fts`，插入/更新/删除 `pages` 后 SQLite 触发器会自动更新索引。
 4. **refs 写入必须 delete-then-insert**：不要只插不删，否则「删掉的引用」会残留在 `refs` 表里。
-5. **前端是单页应用**：所有视图切换靠 CSS `display`，不重新加载页面。
+5. **前端是单页应用**：不重新加载页面。`main` 分支靠 CSS `display` 切换 5 个常驻容器；`ui-lazyvim` 分支改成单个 `#view` 容器每次重渲（`navToken` 防竞态）。两版都满足「不重载页面」，但改视图机制时先看清自己在哪个分支。
 
 ## 各层职责
 
@@ -39,7 +88,10 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - 所有端点 try/finally 确保 `db.close()`
 - `update_page` 的改名逻辑：新名不存在才更新 name + 重写 refs.target_name
 
-### `templates/index.html` — 前端
+### `templates/index.html` — 前端（两版并存，看清分支）
+
+> `main` 是单文件内联版（5234 行）；`ui-lazyvim` 拆成 `templates/index.html`（866 行，只有 token + DOM 骨架）+ `static/app.js`（3317 行逻辑）+ `static/plugin.js` / `panel.js` / `plugins/` / `themes/`。下面这段描述的是 **main 版**；分支版的差异见 `docs/ARCHITECTURE.md` 与 `docs/PLUGIN-MODEL.md`（在 `ui-lazyvim` 分支上）。
+
 
 - CodeMirror 5（不是 6，CDN 6.65.7 实际是 5.65.7），连同 markdown-it / Frappe Gantt 都已 vendored 到 `static/vendor/`，不再走 CDN
 - markdown-it 自定义 `wikilink` 内联规则：`[[target]]` → `<a data-page="target">`
@@ -560,3 +612,7 @@ assert len(seen) == 1  # 归并后只有 1 个
 - ❌ 不要忘记新增面板的移动响应式（所有固定宽度面板都需要）
 - ❌ 不要直接修改 `_search()` 的 SQL（搜索逻辑在 `search.py` 的 `build_search_query()` 中，改了要同时改 API 和 MCP 两处调用者）
 - ❌ 不要在 `search.py` 里假设 jieba 一定存在（必须 try/except import，无 jieba 时降级）
+- ❌ **不要在 `~/services/kb-docker` 里编辑文件**（那是部署点，只做 `git pull`；曾因在部署目录改一行文档把 HEAD 推走）
+- ❌ **不要在部署目录里跑 `git merge`**（先本地克隆跑通再推）
+- ❌ **不要对 `ui-lazyvim` 分支 `git add -A` 后把业务文档一起提交**（分支只装前端文件，`todo.md`/`README.md`/`AGENT.md` 故意停在 merge-base）
+- ❌ **不要试图把 `ai-native` 直接合并到 `ui-lazyvim` 或反之**（一个塞进旧单文件模板，一个拆成 app.js，776 行 AI 功能需重写才能迁移）
