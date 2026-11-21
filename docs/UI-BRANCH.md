@@ -255,6 +255,14 @@ kb-docker/docker-compose.override.yml  （本机覆盖，已 gitignore）
 2. **把 worktree 钉死**：`git worktree lock ~/pi-working/kb-ui`（防误删）
    —— 最小改动，但仍是「目录在才有服务」
 
+### `kb-ui-test` 已停（2026-11-22）
+
+生产已接管 8080，测试容器 `kb-ui-test`（8099）已 `docker stop`。
+- 8099 不再监听，`tailscale serve` 的 `:8447` 映射保留但会 502
+  （8445/8446/8448 是别的服务，没动）
+- 省出约 50MB 内存
+- 要重新开测试环境：`cd ~/pi-working/kb-ui && ./run-container.sh`
+
 ### 回滚
 
 ```sh
