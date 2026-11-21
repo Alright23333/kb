@@ -1,0 +1,33 @@
+/* 侧栏导航面板样式（由 sidebar.js 通过 api.css 挂载） */
+
+.sb-wrap { padding: .7em .5em 1.5em; }
+.sb-sec { margin-bottom: 1.1em; }
+.sb-sec-h {
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); padding: 0 .55em .35em;
+}
+.sb-sec-b { display: flex; flex-direction: column; gap: 1px; }
+
+.sb-item {
+  background: none; border: 0; cursor: pointer; text-align: left;
+  font-family: var(--mono); font-size: 12.5px; color: var(--fg);
+  padding: .42em .55em; border-radius: var(--r-xs);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background .1s var(--ease), color .1s var(--ease);
+}
+.sb-item:hover { background: var(--sel); color: var(--accent); }
+
+.sb-kv { display: flex; justify-content: space-between; padding: .25em .55em; font-size: 12px; }
+.sb-k { color: var(--muted); }
+.sb-v { color: var(--fg); font-weight: 600; }
+
+.sb-tag {
+  display: flex; align-items: center; gap: .4em; width: 100%;
+  background: none; border: 0; cursor: pointer; text-align: left;
+  font-family: var(--mono); font-size: 12px; color: var(--link);
+  padding: .3em .55em; border-radius: var(--r-xs);
+}
+.sb-tag:hover { background: var(--sel); }
+.sb-tag-n { margin-left: auto; color: var(--faint); font-size: 10.5px; }
+
+.sb-dim { color: var(--faint); font-size: 12px; padding: .3em .55em; }

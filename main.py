@@ -143,13 +143,28 @@ async def strip_static_prefix(request: Request, call_next):
     return await call_next(request)
 
 
+# 一级静态资源（app.js / *.css）改一次就要立刻生效，不能让浏览器启发式缓存
+# 住旧版本。static/vendor/ 下的第三方库是版本固定的，继续走默认缓存。
+@app.middleware("http")
+async def nocache_first_party_static(request: Request, call_next):
+    response = await call_next(request)
+    raw = request.scope.get("raw_path") or b""
+    if raw.startswith(b"/static/") and b"/vendor/" not in raw:
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 # Route words that can occupy the first path segment — a request like
 # /page/sw.js names a page, not the service worker.
+# Frontend route words. Must stay in sync with the route regex in static/app.js
+# (BASE detection + parseRoute). 'theme' is a command word only — it is NOT a
+# URL route, so a page literally named "theme" keeps working at /page/theme.
 _SPA_ROUTE_WORDS = {
-    "api", "static", "page", "all", "graph", "todo", "journal", "tag", "edit", "new",
+    "api", "static", "page", "all", "graph", "todo", "journal", "tag", "search",
+    "edit", "new",
 }
 
 

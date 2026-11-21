@@ -1,0 +1,45 @@
+/* 甘特图插件样式：让 frappe-gantt 跟随主题变量 */
+
+.gantt-wrap {
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+}
+
+/* frappe-gantt 用 .gantt 里的 svg，覆盖它的默认配色 */
+.gantt-wrap .gantt .grid-background { fill: var(--bg); }
+.gantt-wrap .gantt .grid-header { fill: var(--bg-deepest); stroke: var(--line); }
+.gantt-wrap .gantt .grid-row { fill: var(--bg); }
+.gantt-wrap .gantt .grid-row:nth-child(even) { fill: var(--bg-deep); }
+.gantt-wrap .gantt .row-line { stroke: var(--line-soft); }
+.gantt-wrap .gantt .tick { stroke: var(--line-soft); }
+.gantt-wrap .gantt .tick.thick { stroke: var(--line); }
+.gantt-wrap .gantt .today-highlight { fill: var(--sel); }
+.gantt-wrap .gantt .arrow { stroke: var(--faint); }
+.gantt-wrap .gantt .bar {
+  fill: var(--accent);
+  stroke: none;
+  rx: 3;
+}
+.gantt-wrap .gantt .bar-progress { fill: var(--ok); opacity: .55; }
+.gantt-wrap .gantt .bar-label { fill: var(--on-accent); font-size: 11px; }
+.gantt-wrap .gantt .bar-label.big { fill: var(--fg); }
+.gantt-wrap .gantt .lower-text, .gantt-wrap .gantt .upper-text {
+  fill: var(--muted); font-size: 11px;
+}
+.gantt-wrap .gantt .handle { fill: var(--accent2); }
+.gantt-wrap .gantt-container .popup-wrapper {
+  background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.gantt-wrap .gantt-container .popup-wrapper .title { color: var(--fg); }
+.gantt-wrap .gantt-container .popup-wrapper .subtitle { color: var(--muted); }
+
+/* 优先级配色（custom_class 由 gantt.js 给） */
+.gantt-wrap .gantt .gantt-p1 .bar { fill: var(--p1bg); }
+.gantt-wrap .gantt .gantt-p2 .bar { fill: var(--p2bg); }
+.gantt-wrap .gantt .gantt-p3 .bar { fill: var(--p3bg); }
+.gantt-wrap .gantt .gantt-p4 .bar { fill: var(--line); }
+
+.gantt-wrap .gantt .bar-wrapper:hover .bar { filter: brightness(1.12); }

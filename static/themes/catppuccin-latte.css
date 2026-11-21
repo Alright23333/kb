@@ -1,0 +1,62 @@
+/* Catppuccin Latte —— 一个主题就是「一组 CSS 变量 + 可选的 CodeMirror 分组」。
+ *
+ * 加主题 = 往 static/themes/ 放一个这样的文件，再在 themes/index.js 里登记一行。
+ * 切主题 = :colorscheme <名字>（等价 nvim 的 :colorscheme）。
+ * 变量名保持 Catppuccin 官方调色板名，语义别名（--bg/--fg/--accent…）在其后派生。
+ */
+
+:root[data-scheme="catppuccin-latte"] {
+  --rosewater:#dc8a78; --flamingo:#dd7878; --pink:#ea76cb; --mauve:#8839ef;
+  --red:#d20f39;      --maroon:#e64553; --peach:#fe640b; --yellow:#df8e1d;
+  --green:#40a02b;    --teal:#179299;   --sky:#04a5e5;   --sapphire:#209fb5;
+  --blue:#1e66f5;     --lavender:#7287fd;
+  --text:#4c4f69;     --subtext1:#5c5f77; --subtext0:#6c6f85;
+  --overlay2:#7c7f93; --overlay1:#8c8fa1; --overlay0:#9ca0b0;
+  --surface2:#acb0be; --surface1:#bcc0cc; --surface0:#ccd0da;
+  --base:#eff1f5;     --mantle:#e6e9ef;  --crust:#dce0e8;
+
+  --bg: var(--base);
+  --bg-deep: var(--mantle);
+  --bg-deepest: var(--crust);
+  --fg: var(--text);
+  --muted: var(--subtext1);   /* 5.53:1 on base — 正文辅助色必须过 AA */
+  --faint: #5f6278;           /* 5.3:1 base / 4.53:1 crust；overlay0 只有 2.3，只能装饰 */
+  --line: var(--surface1);
+  --line-soft: var(--surface0);
+  /* 语义强调色在浅色主题下要压暗：
+     Catppuccin Latte 的原色（sky/green/peach）在 #eff1f5 上只有 2.3–3.3:1 */
+  --accent: #2a5db0;          /* 5.64:1 */
+  --accent2: #6d28d9;         /* 6.28:1 */
+  --link: #0b6b64;            /* 5.63:1 — wikilink */
+  --ok: #3d7a1f;              /* 4.64:1 */
+  --warn: #9c4306;            /* 5.77:1 — #b45309 只有 4.44，深底上不够 */
+  --err: #c0182f;             /* 5.44:1 */
+  --p1bg: #a01d2e; --p2bg: #8f4a06; --p3bg: #7a5c04;
+  --on-accent: #fff;              /* 深底强调色 → 白字 */
+  --on-solid: #fff;
+  --sel: rgba(30,102,245,.10);
+}
+
+/* ── CodeMirror 分组 ── */
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin.CodeMirror,
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror {
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-gutters {
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-linenumber { color: #bcc0cc; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-cursor { border-left: 2px solid #1e66f5; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-selected { background: rgba(30,102,245,.12); }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin div.CodeMirror-selected { background: rgba(30,102,245,.12); }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-activeline-background { background: rgba(30,102,245,.05); }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-matchingbracket { color: #40a02b !important; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .CodeMirror-nonmatchingbracket { color: #d20f39 !important; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-header { color: #1e66f5; font-weight: 600; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-strong { color: #fe640b; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-em { color: #8839ef; font-style: italic; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-link { color: #179299; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-url { color: #9ca0b0; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-string { color: #40a02b; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-comment { color: #9ca0b0; font-style: italic; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-quote { color: #6c6f85; font-style: italic; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-keyword { color: #8839ef; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-number { color: #fe640b; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-tag { color: #ea76cb; }
+:root[data-scheme="catppuccin-latte"] .cm-s-catppuccin .cm-formatting { color: #bcc0cc; }
