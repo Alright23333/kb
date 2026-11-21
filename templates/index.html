@@ -33,6 +33,10 @@
     '<script src="' + v + 'codemirror/search.js"><\/script>' +
     '<script src="' + v + 'codemirror/jump-to-line.js"><\/script>' +
     '<script src="' + v + 'codemirror/scrollpastend.js"><\/script>' +
+    /* dialog.js 必须在 vim.js 之前：vim 的 / ? : 都靠 cm.openDialog
+     * 弹底部单行输入框。此前只引了 dialog.css 没引这个脚本，
+     * cm.openDialog 是 undefined → vim 退化成原生 prompt()。 */
+    '<script src="' + v + 'codemirror/dialog.js"><\/script>' +
     '<script src="' + v + 'codemirror/show-hint.js"><\/script>' +
     '<script src="' + v + 'codemirror/vim.js"><\/script>' +
     '<script src="' + v + 'markdown-it.min.js"><\/script>'

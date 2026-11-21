@@ -13,7 +13,7 @@
  * HTML/JS（这个坑踩过一次：app.js 改了但浏览器还在用缓存副本）。
  */
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
-const VERSION = 'kb-shell-v17';
+const VERSION = 'kb-shell-v18';
 
 const SHELL = [
   BASE + '/',
@@ -21,6 +21,7 @@ const SHELL = [
   BASE + '/static/icons/icon-192.png',
   BASE + '/static/vendor/codemirror/codemirror.min.css',
   BASE + '/static/vendor/codemirror/dialog.css',
+  BASE + '/static/vendor/codemirror/dialog.js',
   BASE + '/static/vendor/codemirror/show-hint.css',
   BASE + '/static/vendor/codemirror/show-hint.js',
   BASE + '/static/vendor/codemirror/codemirror.min.js',

@@ -3182,9 +3182,11 @@ document.addEventListener('keydown', (e) => {
     if (!insert && e.key === ':') {
       e.preventDefault(); closeWhichKey(); openCmdline(':'); return;
     }
-    if (!insert && e.key === '/') {
-      e.preventDefault(); openCmdline('/'); return;
-    }
+    /* 编辑器里的 / 交给 vim 自己（= 页内搜索，与 nvim 一致）。
+     * 原来这里抢过来开全库搜索，但 CodeMirror 的 keydown 在 textarea 上、
+     * 比 document 冒泡更早，/ 已经被 vim 吃掉，这段根本没机会执行
+     * （而且 vim 那条路径因为缺 dialog.js 会抛 TypeError 把整个事件打断）。
+     * 全库搜索改用 space s 或 :search —— 与 vim 的 :grep 分工一致。 */
     return;
   }
 
