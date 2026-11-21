@@ -22,8 +22,9 @@ kb/
 ├── parse.py             # Markdown 解析：[[links]]、#tags、key:: value
 ├── search.py            # 共享搜索：jieba 分词、FTS OR 组合、名称重排、片段
 ├── timeutil.py          # 时区固定（import 即 tzset，见「时区」章节）
-├── mcp_server.py        # MCP Server 工具定义（stdio / HTTP 共用，17 个工具）
+├── mcp_server.py        # MCP Server 工具定义（stdio / HTTP 共用，17 个工具，读写）
 ├── mcp_http.py          # MCP Server 的 Streamable HTTP 入口
+├── mcp_public.py        # 公开只读子集（8 个 public_* 工具，只返回 #public 页面）
 ├── backup.py            # 自动备份（VACUUM INTO 快照 + 保留策略，应用内后台任务）
 ├── export.py            # 导出 CLI（markdown / json / zip）
 ├── import_logseq.py     # 从 Logseq 文件版导入
@@ -307,6 +308,69 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
 | **Streamable HTTP** | `python mcp_http.py` | 服务端常驻（推荐）：一份进程服务多个客户端 |
 
 > 为什么要有 HTTP 变体：stdio 下**每个 MCP 客户端都会拉起一份** `python mcp_server.py` 进程（本机一度同时有 4 份，各 ~80MB PSS）。HTTP 只有一份常驻，多客户端共享。
+
+### 公开子集端点（`mcp_public.py`，2026-11-20）
+
+`mcp_public.py` 是**只读、按标签过滤**的第二入口，用来把 KB 的一部分
+安全地开放给 AI 机器人（比如 QQ 群里给别人问答）。
+
+| 项 | 全量 `kb-mcp` | 公开 `kb-mcp-public` |
+|---|---|---|
+| 脚本 | `mcp_http.py` → `mcp_server.py` | `mcp_public.py` |
+| 工具数 | 17（读 + 写） | 8（**只读**） |
+| 过滤 | 无 | 强制 `#public` 标签 |
+| 宿主端口 | `127.0.0.1:8092` | `127.0.0.1:8100` |
+
+公开端点的工具都带 `public_` 前缀：`public_search` / `public_get_page` /
+`public_list_pages` / `public_get_tags` / `public_get_pages_by_tag` /
+`public_get_recent_pages` / `public_recently_changed` / `public_get_backlinks`。
+
+隔离三原则：
+
+1. **SQL 层白名单**，不是 prompt 约束。每条查询都追加
+   `AND p.id IN (SELECT source_id FROM refs WHERE kind='tag' AND lower(target_name)='public')`
+2. **无写工具** —— 越权也改不了 KB
+3. **统一话术** —— 私有页和不存在页都返回 `Page 'x' not found`，堵存在性探测
+
+**元数据也要过滤**：`public_get_page` 的 `links` / `backlinks` 字段做了同样的
+公开子查询 —— 曾有私有页名从 `links` 泄露出去（`树莓-小组进阶` 链向 4 个私有页）。
+内容过滤之外，links/backlinks/tags 每个都要过一遍。
+
+只读性在连接层强制（`mode=ro` URI + `PRAGMA query_only=ON`）。
+⚠️ `data/` **不能**挂 `:ro`：KB 是 WAL 模式，SQLite 打开 WAL 库必须能写 `-shm`，
+只读挂载会直接 `unable to open database file`。
+
+**在网页里给某页正文加 `#public` → 公开端点下一次请求立刻可见**
+（写入时 `routers/api.py` / `mcp_server.py::_sync_refs` 都会重算 `refs`）。
+
+标签名可用环境变量 `KB_PUBLIC_TAG` 改（compose 里固定为 `public`）。
+
+### 必须 `stateless_http=True`（2026-11-20 踩的坑）
+
+两个端点都在 `mcp.run(...)` 里传了 `stateless_http=True`：
+
+```python
+mcp.run(transport="http", host=host, port=port, path=path, stateless_http=True)
+```
+
+**不传会出事**：FastMCP 默认有状态，服务端给每个客户端发 `mcp-session-id`，
+之后每个请求都要带它。服务端一重启，客户端手里的旧 id 就换来
+`404 Session not found` → AstrBot 包成 `McpError("Session terminated")`，
+而它的重连逻辑只认 `anyio.ClosedResourceError`，**不重连** →
+工具永久坏掉，必须手动重启 AstrBot。
+
+即「改 KB 侧任何东西都要连带重启机器人」，耦合很蠢。
+
+改 stateless 后：`initialize` 不返回 session-id，带垃圾 id 或不带 id 都返回 200。
+回归测试：只重启 `kb-mcp-public`、不重启 AstrBot，公开工具成功 7 次 0 失败。
+
+这两个端点纯只读/无会话状态，stateless 完全安全。
+
+```sh
+# 首次部署：复用现有镜像，避免在手机上重建 449MB
+docker tag kb-docker-kb-mcp kb-docker-kb-mcp-public
+docker compose up -d --no-build kb-mcp-public
+```
 
 ### 工具清单
 

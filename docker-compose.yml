@@ -64,6 +64,9 @@ services:
     volumes:
       - ./data:/app/data
       - ./mcp_http.py:/app/mcp_http.py:ro
+      # mcp_server.py 原本在镜像里。挂出来是为了不用重建 449MB 镜像就能改
+      # 工具实现（例如 2026-11-20 修的 `p.id = frowid` → `f.rowid`）
+      - ./mcp_server.py:/app/mcp_server.py:ro
     restart: unless-stopped
     environment:
       - KB_DB_PATH=/app/data/kb.db
@@ -72,6 +75,50 @@ services:
       # Streamable HTTP 只接受 POST，GET /mcp/ 会返回 400 —— 必须用真实的
       # initialize 请求做探针，否则永远 unhealthy。
       test: ["CMD", "python", "-c", "import urllib.request,json; d=json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'hc','version':'1'}}}).encode(); r=urllib.request.Request('http://localhost:8081/mcp/',data=d,headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}); urllib.request.urlopen(r,timeout=5).read(64)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 公开只读子集：只返回打了 #public 标签的页面。
+  #
+  # 为什么单独一个容器而不是同容器跑两个进程：容器 command 只能有一个
+  # PID 1，用 sh -c "a & b" 会丢信号，healthcheck 也说不清该探谁。
+  # 与 kb-mcp 共用同一个 build context → 镜像层全部命中缓存，不重建。
+  #
+  # 与 kb-mcp 的关键差异：
+  #   - 工具集只读（8 个 public_* 工具，没有任何写操作）
+  #   - 每条 SQL 都强制追加 #public 标签子查询（见 mcp_public.py）
+  #   - data 以 :ro 挂载 —— 就算代码有 bug 也写不进 KB
+  kb-mcp-public:
+    build:
+      context: .
+      args:
+        KB_UID: ${KB_UID:-1000}
+        KB_GID: ${KB_GID:-1000}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.ustc.edu.cn/pypi/simple}
+    container_name: kb-mcp-public
+    command: ["python3", "/app/mcp_public.py"]
+    ports:
+      # 同样只绑回环：语义上是「对别人开放」，物理上仍只在本机
+      # （AstrBot 走 Docker 网络直连 kb-mcp-public 容器名，不经宿主端口）
+      - "127.0.0.1:8100:8082"
+    volumes:
+      - ./data:/app/data
+      - ./mcp_public.py:/app/mcp_public.py:ro
+      - ./mcp_server.py:/app/mcp_server.py:ro
+    restart: unless-stopped
+    environment:
+      - KB_DB_PATH=/app/data/kb.db
+      - TZ=Asia/Shanghai
+      - KB_PUBLIC_TAG=public
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,json; d=json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'hc','version':'1'}}}).encode(); r=urllib.request.Request('http://localhost:8082/mcp/',data=d,headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}); urllib.request.urlopen(r,timeout=5).read(64)"]
       interval: 30s
       timeout: 10s
       start_period: 15s

@@ -18,4 +18,15 @@ if __name__ == "__main__":
     host = os.environ.get("KB_MCP_HOST", "0.0.0.0")
     port = int(os.environ.get("KB_MCP_PORT", "8081"))
     path = os.environ.get("KB_MCP_PATH", "/mcp/")
-    mcp.run(transport="http", host=host, port=port, path=path)
+    # stateless_http=True：默认有状态，服务端发的 mcp-session-id 在服务端
+    # 重启后失效，客户端再带旧 id 就吃 404 "Session not found"。AstrBot 的
+    # MCP 客户端只在 anyio.ClosedResourceError 时重连，404 被包成
+    # McpError("Session terminated") 不触发重连 → 容器一重启，工具永久坏掉，
+    # 必须连带重启 AstrBot。改 stateless 后客户端无需重连、互不牵连。
+    mcp.run(
+        transport="http",
+        host=host,
+        port=port,
+        path=path,
+        stateless_http=True,
+    )

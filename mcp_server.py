@@ -148,7 +148,7 @@ def search(query: str, limit: int = 10) -> str:
             try:
                 rows = conn.execute(
                     "SELECT p.name, p.updated_at, p.content FROM pages_fts f "
-                    "JOIN pages p ON p.id = frowid "
+                    "JOIN pages p ON p.id = f.rowid "
                     "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?",
                     (fts_expr, limit),
                 ).fetchall()
