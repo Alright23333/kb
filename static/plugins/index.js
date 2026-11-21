@@ -87,6 +87,23 @@ KB.spec([
     opts: { fold: 25 },
   },
 
+  /* ── 常用搜索 ───────────────────────────────────────────────
+   * 旧版 saveSearch()/getSavedSearches() 的插件化移植。
+   * 存储键沿用 kb-saved-searches，两套 UI 之间切换不丢收藏。
+   */
+  {
+    name: "saved-search",
+    file: "saved-search.js",
+    desc: "常用搜索（固定/删除）",
+    priority: 47,
+    /* 必须常驻：它靠 MutationObserver 给每个页面注入固定按钮/卡片，
+     * 懒加载的话没人触发它，等于没装。文件只有 ~6KB。 */
+    lazy: false,
+    cmd: "Searches",
+    keys: [{ lhs: "uS", desc: "常用搜索" }],
+    opts: { max: 8 },
+  },
+
   /* ── 插件管理面板（同 :Lazy）────────────────────────────── */
   {
     name: 'manager',

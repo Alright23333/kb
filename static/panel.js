@@ -129,6 +129,11 @@ body.kbp-dock-right #tabline, body.kbp-dock-right #view, body.kbp-dock-right #ed
       scrim.style.display = 'none';
     }
 
+    /* 「创建」不等于「显示」。overlay 面板若默认可见，isOpen() 一创建
+     * 就返回 true，插件的 toggle 逻辑会把首次调用误判成「已打开」→
+     * 直接 close，面板永远出不来。初始一律隐藏，由 open() 决定。 */
+    el.style.display = 'none';
+
     document.body.appendChild(el);
 
     if (mode === 'dock') {
