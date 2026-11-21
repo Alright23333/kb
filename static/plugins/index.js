@@ -71,6 +71,22 @@ KB.spec([
     opts: { minHeadings: 3 },
   },
 
+  /* ── 知识库体检 ───────────────────────────────────────────
+   * 旧版 computeHealth()/loadHealth() 的插件化移植。
+   * dock 右侧面板，不挡正文；孤立页/断链按引用数排序，
+   * 超过 opts.fold 条折叠 —— 旧版 155 项直下 22880px 的教训。
+   */
+  {
+    name: "health",
+    file: "health.js",
+    desc: "知识库体检（孤立页/断链）",
+    priority: 48,
+    lazy: true,
+    cmd: "health",
+    keys: [{ lhs: "uh", desc: "知识库体检" }],
+    opts: { fold: 25 },
+  },
+
   /* ── 插件管理面板（同 :Lazy）────────────────────────────── */
   {
     name: 'manager',

@@ -64,6 +64,8 @@
   position: fixed; inset: 0; z-index: 89;
   background: rgba(0,0,0,.38); backdrop-filter: blur(1.5px);
 }
+/* scrim:false 的 overlay —— 只当背景用，不吃点击 */
+.kbp-scrim-pass { pointer-events: none; background: none; backdrop-filter: none; }
 
 /* dock：贴边，用 padding 把主视图挤窄而不是盖住 */
 .kbp-dock {
@@ -118,6 +120,10 @@ body.kbp-dock-right #tabline, body.kbp-dock-right #view, body.kbp-dock-right #ed
     if (mode === 'overlay') {
       scrim = document.createElement('div');
       scrim.className = 'kbp-scrim';
+      /* opts.scrim === false：面板只是浮在页角（如目录），不该拦住整页点击。
+       * 默认有 scrim —— 点空白关闭是 overlay 的常规语义。
+       * （TOC 曾用 overlay 却自己改了定位，scrim 仍在，全页点击被吃光。）*/
+      if (opts.scrim === false) scrim.classList.add('kbp-scrim-pass');
       document.body.appendChild(scrim);
       scrim.addEventListener('click', () => handle.close());
       scrim.style.display = 'none';

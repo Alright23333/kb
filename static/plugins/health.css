@@ -1,0 +1,47 @@
+/* health 插件 —— 全部走主题变量，自动跟随 data-scheme */
+.hp-loading { padding: 1em; color: var(--muted); font-size: 12px; }
+.hp-overview {
+  padding: .7em .9em; font-size: 12px; color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+}
+.hp-overview b { color: var(--fg); }
+.hp-tags {
+  display: flex; flex-wrap: wrap; gap: .35em; padding: .6em .9em;
+  border-bottom: 1px solid var(--line-soft);
+}
+.hp-tag {
+  font-size: 11px; padding: .12em .5em; border-radius: 99px;
+  background: var(--accent-soft, rgba(137,180,250,.12));
+  color: var(--accent); cursor: pointer; border: 1px solid transparent;
+}
+.hp-tag:hover { border-color: var(--accent); }
+.hp-body { padding: .35em 0; }
+.hp-group-head {
+  padding: .55em .9em .3em; font-size: 12px; font-weight: 600;
+  color: var(--fg); position: sticky; top: 0; background: var(--bg-deep);
+  border-bottom: 1px solid var(--line-soft);
+}
+.hp-item {
+  padding: .42em .9em; cursor: pointer; font-size: 12.5px;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex; align-items: center; gap: .5em; flex-wrap: wrap;
+}
+.hp-item:hover { background: var(--bg-hover, rgba(255,255,255,.04)); }
+.hp-name { color: var(--fg); flex: 1 1 auto; word-break: break-all; }
+.hp-date { color: var(--faint); font-size: 11px; }
+.hp-src {
+  flex-basis: 100%; color: var(--muted); font-size: 11px; line-height: 1.5;
+}
+.hp-create {
+  flex: 0 0 auto; font-size: 11px; padding: .1em .55em;
+  border: 1px solid var(--accent); color: var(--accent); background: none;
+  border-radius: 4px; cursor: pointer; font-family: var(--mono);
+}
+.hp-create:hover { background: var(--accent); color: var(--bg); }
+.hp-more {
+  display: block; width: 100%; padding: .5em; margin: 0;
+  background: none; border: 0; border-bottom: 1px solid var(--line-soft);
+  color: var(--accent); cursor: pointer; font-size: 11.5px; font-family: var(--mono);
+}
+.hp-more:hover { background: var(--bg-hover, rgba(255,255,255,.04)); }
+.hp-empty { padding: .4em .9em .7em; color: var(--faint); font-size: 11.5px; }

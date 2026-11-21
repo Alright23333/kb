@@ -36,6 +36,9 @@ KB.define('toc', (api, opts) => {
       panel = api.ui.panel({
         id: 'kb-toc',
         mode: 'overlay',
+        /* 目录是浮在页角的小块，不是模态：有 scrim 会把整页点击吃光，
+         * 正文里的链接和按钮全都点不动。 */
+        scrim: false,
         title: '目录',
         render: (body) => { body.appendChild(build() || document.createTextNode('')); },
       });
@@ -44,7 +47,8 @@ KB.define('toc', (api, opts) => {
       panel.el.style.top = '8vh';
       panel.el.style.bottom = 'auto';
       panel.el.style.maxHeight = '60vh';
-      panel.el.style.right = '1.2em';
+      /* 让开右侧 dock（如体检面板）：--kbp-dock-w 在 dock 关闭时归 0 */
+      panel.el.style.right = 'calc(var(--kbp-dock-w, 0px) + 1.2em)';
       panel.el.style.left = 'auto';
       panel.el.style.transform = 'none';
     }
