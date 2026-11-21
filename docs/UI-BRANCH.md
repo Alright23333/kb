@@ -5,6 +5,96 @@
 后端一行没改，前端整个重写。这个分支只动**前端 + 一个服务端缓存头**，
 `main` 上的业务随时可以合进来。
 
+## 两种 UI 长期共存（2026-11-21 决定）
+
+**不合并，两个分支各自独立部署，长期并存。**
+
+| | 旧 UI（`main`） | 新 UI（`ui-lazyvim`） |
+|---|---|---|
+| 形态 | 单文件 5234 行内联 | 866 行模板 + `static/app.js` 3317 行 + 插件 |
+| 容器 | `kb` | `kb-ui-test` |
+| 端口 | `127.0.0.1:8080`（经 nginx `/kb/`） | `127.0.0.1:8099`（经 tailscale serve :8447） |
+| 数据 | `~/services/kb-docker/data/kb.db` | `~/pi-working/kb-ui/data/kb.db`（独立副本） |
+| 后端 | 17 个业务文件**共用同一 blob**，零差异 | 同左 |
+| 镜像 | 共用 `kb-docker-kb:latest`（requirements.txt / Dockerfile 零差异） | 同左 |
+
+**为什么能共存**：后端完全一样，只有前端和入口不同。两个容器读两份独立
+的数据库（不同 inode），互不干扰；同一份 Docker 镜像因为依赖没变所以
+两边都能复用，不必重建。
+
+**数据是两份，会漂移**：新 UI 里的写入只进 `~/pi-working/kb-ui/data/`，
+生产看不到；反过来也一样。想让测试库追上生产：
+
+```sh
+sudo sqlite3 /home/user/services/kb-docker/data/kb.db \
+  ".backup '/home/user/pi-working/kb-ui/data/kb.db'"
+```
+
+（`.backup` 是 SQLite 官方在线一致快照，不会像 `cp` 那样漏 WAL 里没
+ checkpoint 的事务。想要两边看同一份数据就改 `run-container.sh` 的
+ 挂载指向生产 `data/`，但那样测试写入会进生产库，慎用。）
+
+## 切换前端的三种办法
+
+### 办法 A：临时切到新 UI 看一眼（不改任何东西）
+
+直接打开新 UI 的地址即可，生产容器不动：
+
+- tailnet 内：`https://fajita.tail117f80.ts.net:8447/`
+- 本机：`http://127.0.0.1:8099/`
+
+### 办法 B：把**生产入口**切到新 UI（换默认前端）
+
+生产容器 `kb` 通过 `docker-compose.override.yml` 挂载
+`./templates/index.html`，所以**换模板 = 换这个文件指向哪份源码**。
+注意：仅换模板是不够的，新 UI 还需要 `static/app.js` 等 44 个文件，
+而生产容器里的 `static/` 来自镜像（旧版内容）。所以正确步骤是：
+
+```sh
+cd /home/user/services/kb-docker
+
+# 1. 把新前端文件也挂进生产容器（只读，不动镜像）
+#    在 docker-compose.override.yml 的 kb.volumes 里加：
+#      - ./static:/app/static:ro
+#      - ./main.py:/app/main.py:ro   # 新 UI 的 no-cache 中间件 + /search 路由词
+
+# 2. 把 main 分支的模板换成新 UI 的（两种方式二选一）
+#    方式一（推荐，可随时回退）：worktree 挂载，不 commit
+#      git worktree add /tmp/lazy-ui ui-lazyvim
+#      # 然后把 override 里的挂载源改成 /tmp/lazy-ui/templates/index.html
+#    方式二（正式合并）：merge ui-lazyvim 进 main（见下面「合并」节）
+
+# 3. 重启生产容器
+docker compose up -d --no-build kb
+
+# 回退旧 UI：
+git checkout main -- templates/index.html static/sw.js
+docker compose up -d --no-build kb
+```
+
+### 办法 C：日常开发时在两个 UI 之间切换（不碰生产）
+
+在分支 worktree 里起停容器即可，**生产始终跑旧 UI**：
+
+```sh
+# 切到新 UI（已起的容器重建）
+cd /home/user/pi-working/kb-ui
+./run-container.sh                  # 容器 kb-ui-test → :8099
+
+# 切回旧 UI：停掉测试容器即可，生产 kb 一直在跑
+docker stop kb-ui-test
+```
+
+### 容器↔代码对应关系（`git worktree list` 一眼看清）
+
+```
+/home/user/services/kb-docker  758578f [main]        → 容器 kb（生产，旧 UI）
+/home/user/pi-working/kb-ui    4ffb7b8 [ui-lazyvim]  → 容器 kb-ui-test（新 UI）
+```
+
+两个目录共享同一份 `.git`（kb-ui/.git 只是 4KB gitdir 指针）。
+**分支互斥**：`main` 只能在 `kb-docker`，`ui-lazyvim` 只能在 `kb-ui`。
+
 ## 这个分支相对 `main` 动了什么
 
 ```
@@ -13,7 +103,7 @@ templates/index.html       -5234 行（旧内联单文件）
                              +866 行（新模板：只有设计 token + DOM 骨架）
 static/app.js              +3292 行（外置的 SPA 主程序）
 static/plugin.js           +474 行（插件内核，lazy.nvim 模型）
-static/panel.js            +236 行（面板容器 overlay / dock / full）
+static/panel.js           +236 行（面板容器 overlay / dock / full）
 static/themes/               +3 文件（Catppuccin Mocha / Latte + 注册表）
 static/plugins/             +12 文件（6 个插件）
 static/sw.js               重写（分策略缓存，VERSION → kb-shell-v16）
@@ -55,7 +145,7 @@ git pull --rebase origin main           # 把 main 的进展带进来
 
 - 容器 `kb-ui-test` → `127.0.0.1:8099`
 - 预览 `https://fajita.tail117f80.ts.net:8447/`（tailnet 内）
-- 数据 `~/pi-working/kb-ui-test/data/kb.db`（独立副本，579 页）
+- 数据 `~/pi-working/kb-ui/data/kb.db`（独立副本，579 页）
 
 `kb-ui-test` 容器现在挂的就是**这个 worktree** 的源码
 （`/home/user/pi-working/kb-ui`），所以改分支代码 = 刷新页面即可看到，
@@ -102,6 +192,8 @@ KB.define('<name>', (api, opts) => {
 切换只改 `<html data-scheme>` 一个属性，不重解析 CSS、不重建 CodeMirror。
 
 ## 合并回 `main` 的步骤（用户主导，勿擅自执行）
+
+> **当前决定是「不合并，长期共存」**——这一节留作将来改变主意的操作手册。
 
 ```sh
 # 在生产目录（main 分支）
