@@ -497,6 +497,20 @@ docker compose logs -f        # 查看日志
 docker logs kb --tail 20      # 查看容器日志
 ```
 
+> **部署目录只 `git pull`。** 这个目录是部署点，不是编辑点 —— 不要在这里
+> 改文件、`git add`、`commit` 或 `push`。任何改动都应在别处（本地克隆、
+> 或另一个 `git worktree`）完成并推到远端，这里只负责拉取。
+>
+> 理由：一旦这里出现未发布的改动，「部署目录内容 = 已发布版本」这个
+> 不变量就破了 —— 排障时 `git status` 不再可信，回滚时也判断不出哪个
+> commit 才是真正上线的那个。健康的部署目录 `git status` 永远是干净的。
+>
+> 需要在本机验证改动时，用 `git worktree add` 开一个平行目录：
+>
+> ```bash
+> git worktree add ~/kb-dev main   # 共享同一份 .git，不复制对象库
+> ```
+
 数据库 `./data/kb.db` 挂载到宿主机，重建容器数据不丢；两个服务共享同一份 SQLite（WAL 模式支持多进程并发读写）。
 
 > 容器使用 `USER ${KB_UID}:${KB_GID}` 降权运行（Dockerfile）。uid 不匹配时，

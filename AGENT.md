@@ -40,7 +40,21 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 ### 目录纪律
 
-- **`~/services/kb-docker` 是部署点，不是编辑点。** 改文档/改代码一律在 `~/pi-working/kb-ui` 或本地克隆做，然后 `git pull`
+> **首要规则：部署目录只 `git pull`，不编辑、不提交、不 push。**
+>
+> `~/services/kb-docker` 是**部署点**，不是编辑点。任何文档/代码改动都应在别处（`~/pi-working/kb-ui`、本地克隆、或任意 worktree）完成并推到 GitHub，部署目录只负责拉取。
+>
+> 违反后的代价虽然通常很小（改一行文档只影响 HEAD），但会破坏"部署目录内容 = 已发布版本"这个不变量：
+> - 生产目录工作区与 GitHub 不再一一对应，排障时 `git status` 不再是可靠信号
+> - 万一下次改的是代码文件，容器挂载就会读到未发布的内容
+> - 回滚时不知道该跳到哪个 commit 才是"真正上线的那个"
+>
+> 历史上已经违过一次（在 `kb-docker` 里改 `todo.md` 的 P6→P7，把 HEAD 从 `b2ea3cb` 推到 `731c417`）。改动本身无害，但性质不对。
+
+- **部署目录的正确用法**：`git pull` → 需要时 `docker compose up -d`（或走 `--no-build` 挂载热更新）。**不执行 `git add` / `git commit` / `git push`**。
+- 改文档（`todo.md` / `README.md` / `AGENT.md` / `docs/`）：在本地克隆或 `kb-ui` 里改 → 推 GitHub → 部署目录 `pull`
+- 改代码：同上。若要在部署机上验证，用 worktree 或临时目录，不要直接改工作区
+- **部署目录的 `git status` 必须永远是干净的。** 出现 `M`/`??` 就是有人在错误的位置干活，先查清再处理，不要随手 `git add -A`
 - 两个目录**分支互斥**：`main` 只能在 `kb-docker`，`ui-lazyvim` 只能在 `kb-ui`（git 会拒绝第二个 worktree checkout 同一分支）
 - `kb-ui/data/` 是独立测试库（`.backup` 快照，inode 与生产不同），**已被 `.gitignore` 的 `data/` 挡住**，`git add -A` 不会带上 18MB 的 db
 - `kb-ui` 里 `todo.md` / `README.md` / `AGENT.md` **故意不跟 main 同步**（分支只搬前端文件，业务文档一律不碰），合并时由 main 自动带过来
@@ -612,7 +626,7 @@ assert len(seen) == 1  # 归并后只有 1 个
 - ❌ 不要忘记新增面板的移动响应式（所有固定宽度面板都需要）
 - ❌ 不要直接修改 `_search()` 的 SQL（搜索逻辑在 `search.py` 的 `build_search_query()` 中，改了要同时改 API 和 MCP 两处调用者）
 - ❌ 不要在 `search.py` 里假设 jieba 一定存在（必须 try/except import，无 jieba 时降级）
-- ❌ **不要在 `~/services/kb-docker` 里编辑文件**（那是部署点，只做 `git pull`；曾因在部署目录改一行文档把 HEAD 推走）
+- ❌ **不要在 `~/services/kb-docker` 里编辑文件 / `git add` / `commit` / `push`**（部署目录只做 `git pull`；曾因在部署目录改一行文档把 HEAD 推走。详见「目录纪律」）
 - ❌ **不要在部署目录里跑 `git merge`**（先本地克隆跑通再推）
 - ❌ **不要对 `ui-lazyvim` 分支 `git add -A` 后把业务文档一起提交**（分支只装前端文件，`todo.md`/`README.md`/`AGENT.md` 故意停在 merge-base）
 - ❌ **不要试图把 `ai-native` 直接合并到 `ui-lazyvim` 或反之**（一个塞进旧单文件模板，一个拆成 app.js，776 行 AI 功能需重写才能迁移）
