@@ -651,6 +651,102 @@ function jumpTo(delta) {
   if (url && url !== location.pathname) history.replaceState({ target, arg }, '', url);
 }
 
+/* ══════════════════════════════════════════════════════════
+   标记 —— vim 的 m{a-z} / `{a-z}
+   ──────────────────────────────────────────────────────────
+   jumplist 记的是「你路过哪」，mark 记的是「你特意标了哪」。
+   读一篇长文时看到关键段落按 ma，去别处转一圈后 ``a 直接回来 ——
+   jumplist 做不到这一点（它只按顺序退）。
+
+   记的是「路由 + 滚动位置」，所以能精确回到同一段。
+   跨会话保留（localStorage）—— vim 的 mark 在退出后是不留的，
+   但这是网页，留着更实用：昨天标的地方今天还想回去。
+   ══════════════════════════════════════════════════════════ */
+
+const MARKS_KEY = 'kb-marks';
+
+let marks = null;
+
+function marksLoad() {
+  if (marks) return marks;
+  try {
+    const raw = JSON.parse(localStorage.getItem(MARKS_KEY) || '{}');
+    marks = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  } catch (e) { marks = {}; }
+  return marks;
+}
+
+function marksSave() {
+  try { localStorage.setItem(MARKS_KEY, JSON.stringify(marks || {})); } catch (e) {}
+}
+
+/* 在当前位置打一个标记（只在阅读态；编辑器里归 vim 自己）*/
+function setMark(ch) {
+  if (!/^[a-z]$/.test(ch || '')) return toast('标记只能是 a-z');
+  if (state.editing) return toast('编辑器里标记归 vim（ma / `a）');
+  const key = ch;
+  const target = state.viewKind === 'page' ? 'page' : null;
+  const arg = target ? state.current : null;
+  if (!arg) return toast('这个视图没法打标记（只能标具体页面）');
+  const m = marksLoad();
+  m[key] = { target, arg, scroll: $('view').scrollTop, ts: Date.now() };
+  marksSave();
+  toast(`标记 ${key} → ${arg} @ ${Math.round(m[key].scroll)}px`);
+}
+
+/* 跳到标记（第二个键是 a-z）*/
+function jumpMark(ch) {
+  if (!/^[a-z]$/.test(ch || '')) return toast('标记只能是 a-z');
+  if (state.editing) return toast('编辑器里标记归 vim（ma / `a）');
+  const m = marksLoad();
+  const mark = m[ch];
+  if (!mark) return toast(`标记 ${ch} 未设置 —— 先按 m${ch} 打一个`);
+
+  const want = mark.scroll || 0;
+  state.jumpReplaying = true;
+  try {
+    if (state.viewKind === 'page' && (state.current || '').toLowerCase() === String(mark.arg).toLowerCase()) {
+      // 已经就在这一页 → 只调滚动位置
+      const v = $('view');
+      v.scrollTop = Math.max(0, Math.min(v.scrollHeight - v.clientHeight, want));
+    } else {
+      dispatch(mark.target, mark.arg);
+      // 内容异步长进来，等渲染稳住再落位置
+      const key = routeKey(mark.target, mark.arg);
+      const memo = scrollMemoLoad();
+      memo[key] = want;            // 借用阅读位置记忆的重试机制
+      scrollMemoSave();
+      scrollRouteKey = key;
+      restoreScrollPos(key);
+    }
+  } finally {
+    state.jumpReplaying = false;
+  }
+  const url = routeUrl(mark.target, mark.arg);
+  if (url && url !== location.pathname) history.replaceState({ target: mark.target, arg: mark.arg }, '', url);
+  toast(`跳到标记 ${ch} → ${mark.arg}`);
+}
+
+function listMarks() {
+  const m = marksLoad();
+  const keys = Object.keys(m).sort();
+  if (!keys.length) return toast('还没有标记（ma 打一个）');
+  showView(`<div class="list-wrap">
+    <div class="list-head"><h2>标记</h2><span class="t">${keys.length} 个</span></div>
+    ${keys.map(k => `<div class="row" data-mark="${escapeHtml(k)}">
+      <span class="row-name"><b>${escapeHtml(k)}</b> · ${escapeHtml(m[k].arg)}</span>
+      <span class="t">${Math.round(m[k].scroll)}px</span>
+    </div>`).join('')}
+  </div>`, 'list');
+  /* 点击 / Enter 跳回去。data-page 那套是给「页面行」的，
+   * 标记行没有 page，所以单独绑（不进 listRows，避免 j/k 混进来）。 */
+  const v = $('view');
+  if (!v) return;
+  v.querySelectorAll('[data-mark]').forEach(row => {
+    row.addEventListener('click', () => jumpMark(row.dataset.mark));
+  });
+}
+
 function navigate(target, arg, opts) {
   opts = opts || {};
   const url = routeUrl(target, arg);
@@ -2156,6 +2252,7 @@ const BASE_COMMANDS = [
   ['fresh', '丢弃草稿'],
   ['reload', '重新拉取当前页'],
   // 缓冲（vim 命名：bnext / bprev / bdelete）
+  ['marks', '标记列表（m{a-z} 打 / `{a-z} 跳）'],
   ['bnext', '下一个缓冲（同 ]b）'],
   ['bprev', '上一个缓冲（同 [b）'],
   ['bfirst', '第一个缓冲'],
@@ -2280,6 +2377,7 @@ function runCommand(name, args) {
     case 'bprev': return cycleBuffer(-1);
     case 'bfirst': return state.buffers.length ? navigate('page', state.buffers[0]) : toast('没有打开的缓冲');
     case 'blast': return state.buffers.length ? navigate('page', state.buffers[state.buffers.length - 1]) : toast('没有打开的缓冲');
+    case 'marks': return listMarks();
     case 'bd': case 'bdelete': return closeCurrentBuffer();
     case 'buffers':
       toast('缓冲 ' + state.buffers.length + ' 个：' + (state.buffers.join(' · ') || '(空)'));
@@ -2411,6 +2509,10 @@ const BASE_LEADER_SPEC = [
   { lhs: 'c', group: '配色' },
   { lhs: 'cc', desc: '切换配色 (:colorscheme)', run: () => toggleTheme() },
   { lhs: 'K', desc: '按键说明 (:keys)', run: () => openHelp() },
+  /* 标记列表挂 g 组（space g m）。不能挂裸 `M` —— H/M/L 已经占了
+   * 裸 M（视口到屏幕中部），which-key 里的 M 会与它语义打架；
+   * 也不能挂 `mr` —— `m` 是「移动端」叶子，同一前缀不能既叶子又分组。 */
+  { lhs: 'gm', desc: '标记列表 (:marks)', run: () => listMarks() },
   { lhs: 'm', desc: '移动端 / 触摸 UI (:touchui)', run: () => runCommand('touchui') },
   { lhs: 'D', desc: '草稿 (:draft)', run: () => runCommand('draft') },
 
@@ -2717,6 +2819,8 @@ function openHelp() {
       ['n / N', '页内搜索下一个 / 上一个命中'],
       ['Ctrl-o / Ctrl-i', '跳转历史 上一跳 / 下一跳'],
       ['3j / 5G', '计数前缀：数字 + 动作'],
+      ['m{a-z} / `{a-z}', '打标记 / 跳回标记（跨会话保留）'],
+      ['space g f', '跟到本页的链接（gf）'],
       [']b / [b', '下一个 / 上一个缓冲'],
       ['q', '关闭当前缓冲'],
       ['R', '清缓存并回首页'],
@@ -3443,6 +3547,10 @@ let pendingCountTs = 0;
 let pendingZ = false;
 let pendingZTimer = null;
 
+/* 标记前缀（m{a-z} 打、`{a-z} 跳）—— 两个键序列，需要记第一个键 */
+let pendingMark = null;      // 'set' | 'jump' | null
+let pendingMarkTs = 0;
+
 function takeCount() {
   const n = pendingCount || 1;
   pendingCount = 0;
@@ -3601,6 +3709,36 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeAllTransient(); return; }
   if (e.key === ':') { e.preventDefault(); openCmdline(':'); return; }
   if (e.key === '/') { e.preventDefault(); openCmdline('/'); return; }
+
+  /* m{a-z} 打标记 / `{a-z} 跳标记 —— vim 的 mark（两个键序列，前缀状态机）。
+   *
+   * 必须放在所有单键动作**之前**：`z 里的 z 会被 z 前缀分支先吃掉，
+   * 于是「打标记」永远等不到第二个键 —— 这就是第一版 `z 报的还是上一条
+   * toast 的原因。前缀活着的时候，第二个键优先归它。 */
+  if (pendingMark && Date.now() - pendingMarkTs < 1500) {
+    const mode = pendingMark;
+    pendingMark = null;
+    if (/^[a-z]$/.test(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (mode === 'set') setMark(e.key);
+      else jumpMark(e.key);
+      return;
+    }
+    // 不是 a-z → 前缀作废，当前键照常往下走
+  }
+  if (e.key === 'm' && !e.shiftKey) {
+    pendingMark = 'set';
+    pendingMarkTs = Date.now();
+    e.preventDefault();
+    return;
+  }
+  if (e.key === '`' || e.key === "'") {
+    pendingMark = 'jump';
+    pendingMarkTs = Date.now();
+    e.preventDefault();
+    return;
+  }
   // <space> 已在 capture 阶段处理（Leader 唯一出口）
 
   /* 列表视图（/all、标签、搜索、首页卡片）：j/k 移动光标，Enter 打开。
