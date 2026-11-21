@@ -223,7 +223,37 @@ git merge --no-ff ui-lazyvim
 | 合并预演 | `git merge-tree` 0 冲突标记；分支已包含 `main` 最新 commit |
 | 业务代码 | 12 个后端文件与 `main` **0 行差异**（逐文件 `git diff --quiet` 验证） |
 
+## 旧版功能补齐（2026-11-21 晚）
+
+旧版相对新版仅剩的两个缺口，现已全部以插件形式补齐：
+
+| 功能 | 插件 | 命令 / 键位 | 说明 |
+|---|---|---|---|
+| 知识库体检报告 | `health` | `:health` / `space uh` | dock 右侧面板：孤立页 290 / 断链 157 / 统计；断链按引用数排序；每组超 25 条折叠 |
+| 保存搜索 | `saved-search` | `:Searches` / `space uS` | 存储键沿用 `kb-saved-searches`（两套 UI 切换不丢收藏）；搜索页注入「☆ 固定」；首页注入常用搜索卡片 |
+
+> `saved-search` 必须 `lazy: false` —— 它靠 MutationObserver 给每个页面注入，
+> 懒加载没人触发它，等于没装。
+
+### 顺手修掉的真 bug（Playwright 实测发现）
+
+1. **TOC 遮罩层吃掉全页点击**：`toc` 插件用 overlay 模式却自己改了定位成
+   页角浮块，scrim 仍在（z-index 89 + pointer-events auto 覆盖全屏）→
+   打开任何有 ≥3 个标题的页面后，正文链接和按钮**全部点不动**。
+   修法：`panel.js` 加 `opts.scrim === false`（`.kbp-scrim-pass` 不吃点击），
+   `toc.js` 传 `scrim:false`，并把 `right` 改成
+   `calc(var(--kbp-dock-w, 0px) + 1.2em)` 自动让开右侧 dock。
+
+2. **MutationObserver 无限循环**：注入改 DOM 又触发 observer → 浏览器卡死。
+   修法：注入必须幂等（内容签名不变就完全不碰 DOM）+ observer 回调用 rAF 节流。
+
+3. **overlay 面板「创建即可见」**：`isOpen()` 首次就返回 true，插件的 toggle
+   逻辑把首次调用误判成「已打开」→ 直接 close，面板永远出不来。
+   修法：`panel.js` 里创建一律 `display:none`，由 `open()` 决定。
+
 ## 还没做的
 
-- 旧版有、新版没有：知识库体检报告（`:health`）、保存搜索
-- 合并到 `main` 前需要决定这 2 项是「写成插件」还是「不做」
+- 合并到 `main` 前需要决定这 2 个新插件是「合并时一起带过去」还是
+  「先在分支上留着」
+- `ai-native` 分支的 776 行 AI 功能要迁到新架构（塞进旧单文件模板的，
+  拆成 `static/app.js` 后需重写）—— 见下节
