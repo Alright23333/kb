@@ -9,11 +9,20 @@
   部署前缀要在解析下面的资源 URL 之前确定，所以这里先算 base 再 document.write。
   应用侧只读 window.__KB_BASE__，不重复推导，两者永远不会不一致。
 -->
+<!--KB_BASE-->
 <script>
 (function () {
-  var p = location.pathname;
-  var m = p.match(/^(.*?)(?:\/(page|all|graph|todo|journal|tag|search|edit|new)(?:\/|$))/);
-  var base = m ? (m[1] || '') : (p === '/' || p === '' ? '' : p.replace(/\/+$/, ''));
+  /* 部署前缀由后端算好注入（单一来源：main.py 的 _base_for_path()）。
+   * 模板原先自己用正则猜，而那份词表不认识 theme / 插件路由，
+   * 访问 /kb/theme 时把 '/kb/theme' 整个当成前缀 —— manifest 与 sw.js
+   * 就被请求到错路径，后端回落成 HTML，浏览器报 unsupported MIME type。
+   * 兜底只留给「直接打开这个文件」的调试场景。 */
+  var base = window.__KB_BASE__;
+  if (typeof base !== 'string') {
+    var p = location.pathname;
+    var m = p.match(/^(.*?)(?:\/(page|all|graph|todo|journal|tag|search|edit|new|theme|health|searches|trash|gantt)(?:\/|$))/);
+    base = m ? (m[1] || '') : (p === '/' || p === '' ? '' : p.replace(/\/+$/, ''));
+  }
   window.__KB_BASE__ = base;
   var v = base + '/static/vendor/';
   document.write(

@@ -1,6 +1,7 @@
 """Main FastAPI application."""
 import asyncio
 import ipaddress
+import json as _json
 import os
 from urllib.parse import unquote
 
@@ -167,6 +168,35 @@ _SPA_ROUTE_WORDS = {
     "edit", "new",
 }
 
+# 也会占 URL 一级的视图词（前端 routeUrl 会生成这些路径，深链接直接打开时
+# 首屏必须算出正确的部署前缀）。只影响「猜前缀」，不影响其它行为：
+# 页面名仍然走 /page/<name>，'theme' 既作命令也作视图。
+_SPA_VIEW_WORDS = {"theme", "health", "searches", "trash", "gantt"}
+
+
+def _base_for_path(full_path: str) -> str:
+    """Deployment prefix for `full_path`, computed on the server.
+
+    The prefix is everything before the first known route word:
+        kb/page/Ideas -> '/kb'      page/Ideas -> ''
+        kb            -> '/kb'      ''         -> ''
+        kb/theme      -> '/kb'      theme      -> ''
+
+    Unknown first segments are NOT routes: they count as prefix, which is what
+    a subdomain deployment looks like. Single source of truth — the template no
+    longer guesses with its own partial word list (that bug sent manifest/sw.js
+    to /kb/theme/… where the SPA fallback answered with HTML).
+    """
+    p = full_path.strip("/")
+    if not p:
+        return ""
+    word_set = _SPA_ROUTE_WORDS | _SPA_VIEW_WORDS
+    segs = p.split("/")
+    for i, seg in enumerate(segs):
+        if unquote(seg) in word_set:
+            return "/" + "/".join(segs[:i]) if i else ""
+    return "/" + p
+
 
 def _is_app_root_file(full_path: str, filename: str) -> bool:
     """True for '<filename>' or '<base>/<filename>' where <base> is the
@@ -241,4 +271,10 @@ async def spa_catch_all(full_path: str):
 
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     with open(template_path, "r") as f:
-        return HTMLResponse(f.read(), headers={"Cache-Control": "no-cache"})
+        html = f.read()
+    # 部署前缀由后端注入（单一来源），模板不再自己猜词表。
+    base_js = '<script>window.__KB_BASE__ = %s;</script>' % _json.dumps(
+        _base_for_path(full_path)
+    )
+    html = html.replace("<!--KB_BASE-->", base_js, 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
