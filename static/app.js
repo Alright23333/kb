@@ -3902,15 +3902,36 @@ function openNumGrid(host) {
       if (item) { try { item.run(); } catch (e) { toast(String(e.message || e), 'error'); } }
     });
   });
-  $('ng-foot').innerHTML = '<span><span class="k">1-9</span> 选择</span><span><span class="k">Esc</span> 关闭</span><span>移动端替代 gg / 数字前缀</span>';
+  $('ng-foot').innerHTML = '<span><span class="k">1-9</span> 选择</span>'
+    + '<span><span class="k">Esc</span> 关闭</span>'
+    + '<span>轻点空白处也可关闭</span>';
   $('numgrid').classList.add('open');
+  document.body.classList.add('ng-open');
+  /* 触屏没有 Esc 键 —— 遮罩区、外面的空白处必须也能关，否则用户被
+   * 困在数字盘里（唯一的出口是右上角那个小 ×）。 */
+  renderNumGridBackdropGuard();
 }
 
 function ACTION_SPEC_BY_LHS_OR_KEY(k) {
   return ACTION_SPEC.find(a => a.lhs.replace(/[`<>]/g, '') === k);
 }
 
-function closeNumGrid() { $('numgrid').classList.remove('open'); }
+function closeNumGrid() {
+  $('numgrid').classList.remove('open');
+  document.body.classList.remove('ng-open');
+}
+
+/* 点数字盘 sheet 之外的遮罩区即关闭。只在真正点「遮罩」时关，
+ * 点 sheet 内部（含格子、×、foot）都不关 —— 否则点格子前就被关掉了。 */
+function renderNumGridBackdropGuard() {
+  const nx = $('numgrid');
+  if (!nx || nx.__kbGuard) return;
+  nx.__kbGuard = true;
+  nx.addEventListener('click', (e) => {
+    // sheet 以外的区域 = 遮罩
+    if (!e.target.closest('.ng-sheet')) closeNumGrid();
+  });
+}
 
 window.addEventListener('keydown', (e) => {
   if (!$('numgrid').classList.contains('open')) return;

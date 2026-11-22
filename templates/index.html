@@ -656,12 +656,19 @@ body {
 #fxdock.open .fx-toggle { transform: rotate(45deg); }
 
 /* ═══════════ 移动端数字盘（LazyVim 三方案）═══════════ */
+/* z-index 必须高于 KBPanel overlay(90) / scrim(89)：数字盘是触屏的
+ * 主跳转入口（替代 gg / 数字前缀），被目录面板压住就等于用不了。
+ * 实测 390×844 上 TOC 开着时它排在 z=70，命中测试被 toc 抢走。 */
 #numgrid {
-  position: absolute; inset: 0; z-index: 70; display: none;
+  position: absolute; inset: 0; z-index: 97; display: none;
   background: rgba(0,0,0,.42); backdrop-filter: blur(2px);
   align-items: flex-end;
 }
 #numgrid.open { display: flex; }
+/* 数字盘打开时锁住背景滚动：遮罩区与页面共用同一块区域，
+ * 不锁的话「在遮罩上滑动」会滚到下面的正文，手感很怪。 */
+body.ng-open { overflow: hidden; }
+body.ng-open #view, body.ng-open #editor { overflow: hidden; }
 .ng-sheet {
   width: 100%; background: var(--bg-deep); border-top: 1px solid var(--line);
   border-radius: var(--r-md) var(--r-md) 0 0; padding: .6em .7em calc(.8em + env(safe-area-inset-bottom));
