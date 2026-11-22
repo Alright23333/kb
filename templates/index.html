@@ -615,8 +615,13 @@ body {
   .row .row-snip { display: none; }
 }
 /* ═══════════ 移动端动作坞（只在 touch 输入模式显示）═══════════ */
+/* z-index 必须高于 KBPanel 的 overlay(90)/scrim(89)：
+ * 触屏上动作坞是**唯一**的命令入口，被任何面板盖住都等于入口没了。
+ * 实测 390×844 上 /page/KB 时目录面板（z=90、240×506）正好压在
+ * 动作坞展开区上 —— 12 个按钮里有 8 个点不动（elementFromPoint 全是
+ * .toc-item），Playwright 的 tap 直接超时。 */
 #fxdock {
-  position: absolute; right: 14px; bottom: 44px; z-index: 55;
+  position: absolute; right: 14px; bottom: 44px; z-index: 96;
   display: none; flex-direction: column; align-items: flex-end; gap: 8px;
 }
 #fxdock.on { display: flex; }

@@ -6,6 +6,12 @@
    ══════════════════════════════════════════════════════════════════════ */
 KB.define('toc', (api, opts) => {
   const MIN = (opts && opts.minHeadings) || 3;
+  /* 关掉之后要记住 —— 否则每切一页 `api.on('page')` 又把它弹出来，
+   * 用户在一个本来就不需要目录的页面上得反复关同一个东西。
+   * 浏览器里「用户手动关掉的东西不该自己回来」是一条基本约定。 */
+  const OFF_KEY = 'kb-toc-off';
+  const isOff = () => { try { return localStorage.getItem(OFF_KEY) === '1'; } catch (e) { return false; } };
+  const setOff = (v) => { try { v ? localStorage.setItem(OFF_KEY, '1') : localStorage.removeItem(OFF_KEY); } catch (e) { } };
   let panel = null;
 
   function build() {
@@ -30,6 +36,7 @@ KB.define('toc', (api, opts) => {
   }
 
   function refresh() {
+    if (isOff()) return;                 // 用户明确关过，就别再弹
     const list = build();
     if (!list) { if (panel) panel.close(); return; }
     if (!panel) {
@@ -51,6 +58,10 @@ KB.define('toc', (api, opts) => {
       panel.el.style.right = 'calc(var(--kbp-dock-w, 0px) + 1.2em)';
       panel.el.style.left = 'auto';
       panel.el.style.transform = 'none';
+      /* 点面板上的 × 也算「用户关掉了」—— 只在 close 时记，open 时不记，
+       * 免得把「用命令打开」也当成关闭。 */
+      const origClose = panel.close.bind(panel);
+      panel.close = function () { setOff(true); return origClose(); };
     }
     panel.body.innerHTML = '';
     panel.body.appendChild(list);
@@ -58,11 +69,15 @@ KB.define('toc', (api, opts) => {
   }
 
   api.css('plugins/toc.css');
+  /* 命令式开关是**显式用户意图**：关的时候记下来，开的时候清掉记忆。 */
   api.command('toc', '目录开关', () => {
-    if (panel && panel.isOpen()) return panel.close();
+    if (panel && panel.isOpen()) { setOff(true); return panel.close(); }
+    setOff(false);
     refresh();
   });
-  api.keys([{ lhs: 'uT', desc: '目录开关', run: () => { if (panel && panel.isOpen()) panel.close(); else refresh(); } }]);
+  api.keys([{ lhs: 'uT', desc: '目录开关', run: () => {
+    if (panel && panel.isOpen()) { setOff(true); panel.close(); } else { setOff(false); refresh(); }
+  } }]);
 
   api.on('page', () => setTimeout(refresh, 500));
 });
