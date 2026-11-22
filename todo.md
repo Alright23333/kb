@@ -35,6 +35,13 @@
 - **`/all`→KB 继承滚动位置 900**：`innerHTML` 换掉不重置 `scrollTop`，没有记忆时必须**显式归零**
 - **e2e 首跑抓到 3 个问题**：`5j` 预期写错（光标初始在首行之前，`5j` 到索引 4）；两个离线用例被自己的 `tearDown` 判红（断网必然产生 resource 加载失败，加白名单）
 
+### 本轮追加（2026-11-23 凌晨，折叠）
+
+| # | 修的是什么 | commit |
+|---|---|---|
+| 27 | **`za` 折叠整个不存在，而且是两层缺失** —— `static/vendor/codemirror/` 里躺着 `foldcode.js`/`brace-fold.js`/`markdown-fold.js` 三个 addon，`templates/index.html` **一个都没引**（`typeof cm.foldCode === 'undefined'`），`sw.js` 的 SHELL 也没有；同时 `vim.js` 的 defaultKeymap 里 `z` 前缀只有 `zz/zt/zb` 五条滚动，`za` 系列全无。补 3 个 addon + `defineAction`/`mapCommand` 注册 `za`/`zo`/`zc`/`zR`/`zM` + ex 层 `:fold`/`:unfold`；sw VERSION v18→v19 | `7af840e` |
+| 28 | **`zM` 计数谎报** —— `cm.foldCode` 在「这一行没有可折的 block」时**静默返回、不抛异常**，第一版拿「循环跑了几行」当处数，71 行的文档报出「已折叠 71 处」而实际只折了 10 处。改成数 `__isFold` 标记数量的变化（before/after delta） | `7af840e` |
+
 ### 本轮追加（2026-11-23 凌晨，注释与缓冲内跳转）
 
 | # | 修的是什么 | commit |
@@ -320,6 +327,12 @@
 - [[2026-11-17]] — 待办重排：把散落在 P0/P3/P5' 下的未完成项抽成「当前未完成（16 条）」总表，按可动手程度分六档（小改动/待拍板/暂缓/AI-native 两档/路线图）；P3 与 P5' 里重复的改成指针，避免两处打勾状态漂移
 - [[2026-11-21]] — **P7 对外开放与稳定性 4/4 上线**（`ee99ea4`）：① MCP 搜索 SQL 列名拼错（`frowid` → `f.rowid`，此前一直静默走 LIKE 兜底）② `/api/pages/count` + 前端「加载更多」，页面数不再卡 500（568 → 579）③ `mcp_public.py` 公开只读子集（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / `mode=ro` 强制只读 / `kb-mcp-public` 容器 `127.0.0.1:8100`）④ 两个 MCP 端点改 `stateless_http=True`，服务端重启不再让客户端永久 404。本轮改动此前只存在于生产服务器工作区，已全部收编入仓库，三方（本地/fajita/GitHub）同 commit
 - [[2026-11-22]] — **新前端接管生产 8080**（`570edda`）+ 停掉冗余测试容器（`eca1291`）；随后修 leader 双 handler 争用与 `[[` 补全四处缺陷（`7702967`）、配色重构为 Catppuccin 四口味且结构层/参数层拆开（`a83446f`）
+- [[2026-11-23]] — `7af840e` **`za` 折叠两层缺失**：三个 fold addon 一个都没引（`cm.foldCode`
+  是 undefined）+ vim 层 `z` 前缀只有滚动定位、没有 `za` 系列。补 addon 与 5 组键位 + `:fold`。
+  顺带抓到**计数谎报**：`cm.foldCode` 无块可折时静默返回、不抛异常，第一版拿行数当处数，
+  71 行文档报「已折叠 71 处」而实际 10 处 —— 改数 `__isFold` 标记的 delta。单测 88 全绿。
+- [[2026-11-23]] — `7077284` **e2e 临时页的 tearDown 漏删版本快照**，`/api/trash` 的条件正是
+  「有快照、没有对应页面」，于是每跑一轮 e2e 回收站就多 10 条 `__e2e-excmd-scratch`。
 - [[2026-11-23]] — `619d500` **`gcc`/`gc` 从未实现**（vim.js 只有键位声明、没有 operator），
   按 Markdown 语义自实现 `<!-- -->` 包围/取消；**第一次仍漏了 count**（`2gcc` 只注释一行 ——
   action 回调签名 `(cm, actionArgs, vim)` 被写成 `() =>`，这是第三次踩「参数到了、签名没接」）。
