@@ -1500,3 +1500,198 @@ class TestTocRemembersClose(Base):
         )
         self.assertFalse(r.get('missing'), '桌面上目录面板不见了')
         self.assertTrue(r['ok'], '目录项被别的东西盖住了: %r' % (r,))
+
+# ══════════════════════════════════════════════════════════
+# 16. 数字盘（#numgrid）—— 触屏的主跳转入口
+#
+# 动作坞里「数字跳转」打开的那个九宫格，是触屏上替代 `gg` / 数字前缀的
+# 唯一办法（没有键盘）。三处问题：
+#
+# ① z-index 70 < TOC 90 —— 目录开着时它被压住
+# ② 遮罩区点不动关不掉（触屏没有 Esc，唯一出口是右上角的小 ×）
+# ③ 打开时背景没锁，在遮罩上滑动会滚到下面的正文
+#
+# 顺带锁住「阅读态横滑切缓冲」这条已有的触屏手势 —— 它只有用真实
+# touch 事件序列才测得出来（keyboard 按不出来）。
+# ══════════════════════════════════════════════════════════
+
+MOBILE_UA2 = ('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36')
+
+
+class TestTouchNumGrid(Base):
+    """触屏数字盘：层级、关闭方式、背景锁。"""
+
+    def _touch_page(self, path='/page/KB'):
+        ctx = self._browser.new_context(**{
+            'viewport': {'width': 390, 'height': 844},
+            'has_touch': True, 'is_mobile': True,
+            'user_agent': MOBILE_UA2,
+        })
+        pg = ctx.new_page()
+        pg.goto(URL + path, wait_until='domcontentloaded')
+        pg.wait_for_timeout(3200)
+        return ctx, pg
+
+    OPEN_JS = (
+        '() => {'
+        '  const t = Array.from(document.querySelectorAll("#fx-panel .fx-btn"))'
+        '        .find(x => x.dataset.fx === "1-9");'
+        '  if (t) t.dispatchEvent(new MouseEvent("click", {bubbles: true}));'
+        '  return !!t; }'
+    )
+
+    def _open_grid(self, pg):
+        pg.locator('#fx-toggle').first.tap()
+        pg.wait_for_timeout(600)
+        ok = pg.evaluate(self.OPEN_JS)
+        pg.wait_for_timeout(900)
+        return ok
+
+    def test_numgrid_zindex_above_toc(self):
+        """数字盘层级必须高于目录面板，否则被压住就点不动。"""
+        ctx, pg = self._touch_page()
+        try:
+            self._open_grid(pg)
+            z = pg.evaluate(
+                '() => ({grid: getComputedStyle(document.getElementById("numgrid")).zIndex,'
+                '        toc: (document.getElementById("kb-toc")'
+                '              ? getComputedStyle(document.getElementById("kb-toc")).zIndex : null)})'
+            )
+            self.assertEqual(z['grid'], '97', '数字盘 z-index 不是 97: %r' % z)
+            if z['toc'] is not None:
+                self.assertGreater(int(z['grid']), int(z['toc']))
+        finally:
+            ctx.close()
+
+    def test_all_nine_cells_clickable_and_run(self):
+        """9 个格子都可点，且 tap 第 5 格真的跳过去。"""
+        ctx, pg = self._touch_page()
+        try:
+            self._open_grid(pg)
+            r = pg.evaluate(
+                '() => {'
+                '  const cells = Array.from(document.querySelectorAll("#numgrid .ng-key"));'
+                '  const blocked = cells.filter(c => {'
+                '    const rc = c.getBoundingClientRect();'
+                '    const el = document.elementFromPoint(rc.left + rc.width / 2, rc.top + rc.height / 2);'
+                '    return !(el && el.closest(".ng-key") === c);'
+                '  }).map(c => c.dataset.n);'
+                '  return {total: cells.length, blocked: blocked,'
+                '          names: cells.map(c => c.dataset.n)}; }'
+            )
+            self.assertEqual(r['total'], 9, '数字盘不是 9 格: %r' % r)
+            self.assertEqual(r['blocked'], [], '这些格子被盖住了: %r' % (r['blocked'],))
+            before = pg.evaluate('() => location.pathname')
+            pg.locator('#numgrid .ng-key').nth(4).tap(timeout=6000)
+            pg.wait_for_timeout(1200)
+            self.assertNotEqual(pg.evaluate('() => location.pathname'), before,
+                                'tap 第 5 格没跳转')
+            self.assertEqual(pg.evaluate('() => document.getElementById("numgrid").className'), '',
+                             '跳转后数字盘没关闭')
+        finally:
+            ctx.close()
+
+    def test_backdrop_tap_closes(self):
+        """点遮罩空白处必须关闭 —— 触屏没有 Esc 键。"""
+        ctx, pg = self._touch_page()
+        try:
+            self._open_grid(pg)
+            geo = pg.evaluate(
+                '() => { const sh = document.querySelector("#numgrid .ng-sheet");'
+                ' return {top: Math.round(sh.getBoundingClientRect().top)}; }'
+            )
+            self.assertGreater(geo['top'], 60, 'sheet 位置异常: %r' % geo)
+            pg.touchscreen.tap(195, max(20, geo['top'] - 100))
+            pg.wait_for_timeout(700)
+            self.assertEqual(pg.evaluate('() => document.getElementById("numgrid").className'), '',
+                             '点遮罩空白处没关闭数字盘')
+        finally:
+            ctx.close()
+
+    def test_background_scroll_locked_while_open(self):
+        """数字盘打开时背景滚动被锁（body.ng-open）。"""
+        ctx, pg = self._touch_page()
+        try:
+            self._open_grid(pg)
+            locked = pg.evaluate(
+                '() => ({cls: document.body.className,'
+                '        overflow: getComputedStyle(document.body).overflow})'
+            )
+            self.assertIn('ng-open', locked['cls'], '打开数字盘时没加 ng-open')
+            self.assertEqual(locked['overflow'], 'hidden')
+            pg.evaluate('() => closeNumGrid()')
+            pg.wait_for_timeout(300)
+            self.assertNotIn('ng-open',
+                             pg.evaluate('() => document.body.className'), '关闭后没解锁')
+        finally:
+            ctx.close()
+
+
+class TestTouchSwipeBuffers(Base):
+    """阅读态左右横滑 = 切缓冲；编辑器里不能误切。"""
+
+    def _touch_page(self, path):
+        ctx = self._browser.new_context(**{
+            'viewport': {'width': 390, 'height': 844},
+            'has_touch': True, 'is_mobile': True,
+            'user_agent': MOBILE_UA2,
+        })
+        pg = ctx.new_page()
+        cdp = ctx.new_cdp_session(pg)
+        pg.goto(URL + path, wait_until='domcontentloaded')
+        pg.wait_for_timeout(3000)
+        pg.evaluate('() => { const x = document.querySelector("#kb-toc .kbp-x"); if (x) x.click(); }')
+        pg.wait_for_timeout(400)
+        return ctx, pg, cdp
+
+    @staticmethod
+    def _swipe(cdp, x0, y0, x1, y1, steps=10):
+        cdp.send('Input.dispatchTouchEvent',
+                 {'type': 'touchStart', 'touchPoints': [{'x': x0, 'y': y0}]})
+        for i in range(1, steps + 1):
+            cdp.send('Input.dispatchTouchEvent',
+                     {'type': 'touchMove',
+                      'touchPoints': [{'x': int(x0 + (x1 - x0) * i / steps),
+                                       'y': int(y0 + (y1 - y0) * i / steps)}]})
+        cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+
+    def test_swipe_switches_buffer_in_reader(self):
+        """左滑 = 下一个缓冲，右滑 = 上一个（用真实 touch 序列）。"""
+        ctx, pg, cdp = self._touch_page('/page/KB')
+        try:
+            pg.evaluate('() => addBuffer("kb-issue")')
+            pg.wait_for_timeout(400)
+            self.assertEqual(pg.evaluate('() => location.pathname'), '/kb/page/KB')
+            self._swipe(cdp, 300, 400, 120, 400)
+            pg.wait_for_timeout(1200)
+            self.assertEqual(pg.evaluate('() => location.pathname'), '/kb/page/kb-issue',
+                             '左滑没切到下一个缓冲')
+            self._swipe(cdp, 120, 400, 320, 400)
+            pg.wait_for_timeout(1200)
+            self.assertEqual(pg.evaluate('() => location.pathname'), '/kb/page/KB',
+                             '右滑没切回上一个缓冲')
+        finally:
+            ctx.close()
+
+    def test_swipe_does_not_switch_buffer_in_editor(self):
+        """编辑器里横滑不能切缓冲 —— 正在打字时丢内容比手势失效糟糕得多。"""
+        ctx, pg, cdp = self._touch_page('/edit/KB')
+        try:
+            pg.locator('.CodeMirror').first.tap()
+            pg.wait_for_timeout(400)
+            pg.keyboard.type('QQ')
+            pg.wait_for_timeout(500)
+            pre_len = pg.evaluate('() => window.cm.getValue().length')
+            self._swipe(cdp, 300, 400, 120, 400)
+            pg.wait_for_timeout(1200)
+            st = pg.evaluate(
+                '() => ({path: location.pathname, editing: !!window.state.editing,'
+                '        len: window.cm ? window.cm.getValue().length : -1})'
+            )
+            self.assertEqual(st['path'], '/kb/edit/KB', '编辑器里横滑被误判成切缓冲')
+            self.assertTrue(st['editing'], '横滑把编辑态弄丢了')
+            self.assertEqual(st['len'], pre_len, '横滑之后缓冲内容变了')
+        finally:
+            ctx.close()
+
