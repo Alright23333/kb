@@ -1695,3 +1695,229 @@ class TestTouchSwipeBuffers(Base):
         finally:
             ctx.close()
 
+# ══════════════════════════════════════════════════════════
+# 17. 行操作 ex 命令族（:d / :g / :normal / :j / :y / :pu）
+#
+# CodeMirror 的 vim 把「行操作」这一族整个漏了：defaultExCommandMap 里
+# 没有 delete / normal / join / put。后果最严重的是 `:g/xxx/d` ——
+# global 的实现是「对每个匹配行拼一条 `:{行号}{cmd}` 再交给分发器」，
+# 于是 `:g/a/d` 会去执行 `:2d`，`d` 没注册 → **一个字符都不删**，
+# 只在状态区弹一句 `Not an editor command ":2d"`。
+#
+# 这一节全部落在真实缓冲区内容 / 页面 API 回读上，不看 toast。
+# ══════════════════════════════════════════════════════════
+
+EXLINE_SCRATCH = ('# 测试用' + chr(10) + 'alpha 行' + chr(10) + 'beta 行' + chr(10)
+                  + 'alpha 再一行' + chr(10) + 'gamma 行' + chr(10)
+                  + 'delta aa 行' + chr(10))
+
+
+class TestEditorExLineOps(Base):
+    """行操作 ex 命令族：删除 / 全局 / normal / 合并 / 复制粘贴。"""
+
+    PAGE = '__e2e-exlineops-scratch'
+
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  let listed = 200;'
+        '  if (r.status !== 200) {'
+        '    listed = (await fetch(window.__KB_BASE__ + "/api/pages/" + name)).status;'
+        '  }'
+        '  return {created: r.status, exists: listed}; }'
+    )
+
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+
+    EXISTS_JS = (
+        'async (name) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages/" + name);'
+        '  return r.status; }'
+    )
+
+    RESET_JS = (
+        '([text, cur]) => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  if (!w) return false;'
+        '  w.CodeMirror.setValue(text);'
+        '  w.CodeMirror.setCursor({line: cur, ch: 0});'
+        '  w.CodeMirror.focus();'
+        '  return true; }'
+    )
+
+    CURSOR_JS = (
+        '(line) => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  w.CodeMirror.focus(); w.CodeMirror.setCursor({line: line, ch: 0}); }'
+    )
+
+    READ_JS = (
+        '() => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  if (!w) return {text: "", lines: -1, msg: "no editor"};'
+        '  const m = w.querySelector(".cm-vim-message");'
+        '  return {text: w.CodeMirror.getValue(), n: w.CodeMirror.lineCount(),'
+        '          msg: m ? m.innerText.trim().slice(0, 80) : null}; }'
+    )
+
+    CONFIRM_JS = (
+        '() => {'
+        '  const o = document.getElementById("ov-pick");'
+        '  if (!o) return false;'
+        '  const st = getComputedStyle(o);'
+        '  return st.display !== "none" && st.visibility !== "hidden"; }'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        self.page.evaluate(self.PURGE_JS, self.PAGE)
+        st = self.page.evaluate(self.CREATE_JS, [self.PAGE, EXLINE_SCRATCH])
+        self.assertEqual(st['created'], 200, '临时页创建失败: %r' % (st,))
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(3000)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            left = self.page.evaluate(self.EXISTS_JS, self.PAGE)
+            self.assertEqual(left, 404, '临时页没清干净（HTTP %r）' % left)
+        finally:
+            super().tearDown()
+
+    # ── 工具 ──────────────────────────────────────────────
+    def _ex(self, cmd, cur=1, wait=1000, reset=True):
+        if reset:
+            self.page.evaluate(self.RESET_JS, [EXLINE_SCRATCH, cur])
+            self.page.wait_for_timeout(300)
+        self.page.keyboard.type(':')
+        self.page.wait_for_timeout(120)
+        self.page.keyboard.type(cmd)
+        self.page.wait_for_timeout(120)
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(wait)
+        return self.page.evaluate(self.READ_JS)
+
+    def _lines(self, r):
+        return r['text'].split(chr(10))
+
+    # ── ① 行删除：:d / :delete / :del 三者等价，杀的只是行 ────
+    def test_d_deletes_a_line_not_the_page(self):
+        """`:d`/`:delete`/`:del` 都删行 —— 页面必须还在。
+
+        `:del` 早先是「删除当前页」的自定义命令；补上 `:d`/`:delete` 之后
+        被前缀匹配抢到行删除上（`"delete".indexOf("del") === 0`）。
+        按「对齐真实 vim」的取舍：三个名字都删行，删页面改成 `:Delete`。
+        """
+        for cmd in ('d', 'delete', 'del'):
+            r = self._ex(cmd, cur=1)
+            self.assertIsNone(r['msg'], ':%s 报错了: %r' % (cmd, r['msg']))
+            self.assertEqual(r['n'], 6, ':%s 没删掉 1 行（剩 %d 行）' % (cmd, r['n']))
+            self.assertNotIn('alpha 行', r['text'], ':%s 删错了行' % cmd)
+            self.assertIn('# 测试用', r['text'], ':%s 把标题行也删了' % cmd)
+        st = self.page.evaluate(self.EXISTS_JS, self.PAGE)
+        self.assertEqual(st, 200, '临时页被删掉了（:del 又去删页面了）')
+
+    # ── ② 范围删除 ───────────────────────────────────────
+    def test_range_delete(self):
+        """`:2,4d` 删 3 行；`:2,3delete` 删 2 行。"""
+        r = self._ex('2,4d', cur=0)
+        self.assertIsNone(r['msg'], '范围删除报错: %r' % r['msg'])
+        self.assertEqual(r['n'], 4, '2,4d 应剩 4 行，实际 %d' % r['n'])
+        self.assertEqual(r['text'], '# 测试用' + chr(10) + 'gamma 行' + chr(10)
+                         + 'delta aa 行' + chr(10),
+                         '2,4d 删错行: %r' % r['text'])
+
+        r = self._ex('2,3delete', cur=0)
+        self.assertEqual(r['n'], 5, '2,3delete 应剩 5 行，实际 %d' % r['n'])
+        self.assertNotIn('alpha 行', r['text'])
+
+    # ── ③ :g/<pat>/d —— 真实 vim 里最常用，原先是死的 ──────
+    def test_global_delete_actually_deletes(self):
+        """`:g/alpha/d` 必须删掉两行 alpha（曾经一个字符都不删）。"""
+        r = self._ex('g/alpha/d', cur=0, wait=1200)
+        self.assertIsNone(r['msg'], 'global 仍然是死的: %r' % r['msg'])
+        self.assertEqual(r['n'], 5, ':g/alpha/d 应剩 5 行，实际 %d' % r['n'])
+        self.assertEqual(r['text'], '# 测试用' + chr(10) + 'beta 行' + chr(10)
+                         + 'gamma 行' + chr(10) + 'delta aa 行' + chr(10),
+                         ':g/alpha/d 结果不对: %r' % r['text'])
+
+    # ── ④ :v（反向全局）──────────────────────────────────
+    def test_inverse_global_deletes_non_matching(self):
+        """`:v/alpha/d` 只留匹配 alpha 的行。"""
+        r = self._ex('v/alpha/d', cur=0, wait=1200)
+        self.assertIsNone(r['msg'], ':v 报错: %r' % r['msg'])
+        self.assertEqual(r['n'], 2, ':v/alpha/d 应剩 2 行，实际 %d' % r['n'])
+        self.assertEqual(r['text'], 'alpha 行' + chr(10) + 'alpha 再一行',
+                         ':v/alpha/d 结果不对: %r' % r['text'])
+
+    # ── ⑤ :g/<pat>/normal dd —— range 必须作用到匹配行 ────
+    def test_global_normal_dd_hits_matched_line(self):
+        """`:g/beta/normal dd` 删的必须是 beta 行，不是光标那行。
+
+        第一版 :normal 没用 params.line，每次 dd 都作用在当前光标（第一行），
+        实测删掉的是 `# 测试用`，beta 行纹丝不动。
+        """
+        r = self._ex('g/beta/normal dd', cur=0, wait=1400)
+        self.assertIsNone(r['msg'], '报错: %r' % r['msg'])
+        self.assertNotIn('beta', r['text'], 'beta 行没被删掉: %r' % r['text'])
+        self.assertIn('# 测试用', r['text'], ':normal dd 删的是光标行而不是匹配行')
+        self.assertEqual(r['n'], 6, '应只删 1 行，实际剩 %d' % r['n'])
+
+    # ── ⑥ :j 合并行 ──────────────────────────────────────
+    def test_join_lines(self):
+        """`:j` 合并当前行与下一行；带范围一次并多行。"""
+        r = self._ex('j', cur=1)
+        self.assertIsNone(r['msg'], ':j 报错: %r' % r['msg'])
+        self.assertEqual(r['n'], 6, ':j 应少 1 行，实际 %d' % r['n'])
+        self.assertIn('alpha 行 beta 行', r['text'], '合并结果不对: %r' % r['text'])
+
+        r = self._ex('2,4j', cur=0)
+        self.assertEqual(r['n'], 5, '2,4j 应少 2 行，实际 %d' % r['n'])
+        self.assertIn('alpha 行 beta 行 alpha 再一行', r['text'],
+                      '2,4j 结果不对: %r' % r['text'])
+
+    # ── ⑦ :y + :pu ───────────────────────────────────────
+    def test_yank_and_put(self):
+        """`:2,4y` 复制 3 行，`:pu` 贴到指定行**下方**（vim 语义）。"""
+        r = self._ex('2,4y', cur=0)
+        self.assertIsNone(r['msg'], ':y 报错: %r' % r['msg'])
+        self.assertEqual(r['n'], 7, ':y 不该改行数')
+
+        # 光标挪到第 5 行（0 基 4），`:pu` 就插在第 6 行（0 基 5）之前
+        self.page.evaluate(self.CURSOR_JS, 4)
+        self.page.wait_for_timeout(250)
+        r = self._ex('pu', wait=900, reset=False)
+        self.assertIsNone(r['msg'], ':pu 报错: %r' % r['msg'])
+        self.assertEqual(r['n'], 10, ':pu 应插 3 行（7→10），实际 %d' % r['n'])
+        body = self._lines(r)
+        self.assertEqual(body[5], 'alpha 行', '粘贴位置不对，第 6 行是 %r' % body[5])
+        self.assertEqual(body[6], 'beta 行', '粘贴只贴了一行？第 7 行是 %r' % body[6])
+        self.assertEqual(body[7], 'alpha 再一行', '第 8 行是 %r' % body[7])
+        self.assertEqual(body[4], 'gamma 行', '原来第 5 行应被顶到第 5 行，实际 %r'
+                         % body[4])
+
+    # ── ⑧ :Delete 是删页面，必须走确认框（不静默删）──────────
+    def test_capital_Delete_asks_for_confirmation(self):
+        """`:Delete` 删的是**页面**，所以必须弹确认框，不能静默删。"""
+        r = self._ex('Delete', cur=1, wait=1400)
+        self.assertEqual(r['n'], 7, ':Delete 变成了删行（剩 %d 行）' % r['n'])
+        self.assertTrue(self.page.evaluate(self.CONFIRM_JS),
+                        ':Delete 没有弹确认框（会静默删页面）')
+        st = self.page.evaluate(self.EXISTS_JS, self.PAGE)
+        self.assertEqual(st, 200, '临时页在确认前就被删了')
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(400)
+
