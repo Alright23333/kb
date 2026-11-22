@@ -35,6 +35,15 @@
 - **`/all`→KB 继承滚动位置 900**：`innerHTML` 换掉不重置 `scrollTop`，没有记忆时必须**显式归零**
 - **e2e 首跑抓到 3 个问题**：`5j` 预期写错（光标初始在首行之前，`5j` 到索引 4）；两个离线用例被自己的 `tearDown` 判红（断网必然产生 resource 加载失败，加白名单）
 
+### 本轮追加（2026-11-22 晚，路由真实性）
+
+| # | 修的是什么 | commit |
+|---|---|---|
+| 14 | **`/kb/theme` `/kb/health` `/kb/searches` `/kb/trash` 静默坏掉** —— 路由词表存在三份（`main.py` / 模板正则 / `app.js` BUILTIN），模板那份只认识 9 个内置词，于是把整个路径当成部署前缀 → manifest 与 sw.js 请求到 `/kb/theme/…`，被后端回落成 HTML，浏览器报 `unsupported MIME type`（PWA 装不上、离线壳注册失败）。**页面自身看起来完全正常**，所以藏了很久 | `449e106` |
+| 15 | **深链接打开是空的** —— 插件只写 `routes` 不写 `api.view()`，影子视图 load 完又 dispatch 自己 → 空首页；`/kb/theme` 每次打开都翻转配色；`/kb/trash` 压根不在 `parseRoute` 里 | `2e3ba35` |
+| 16 | **空行按 `ciw` 抛 TypeError 并打断整个按键流** —— `expandWordUnderCursor` 返回 null，`vim.js` 末尾无条件读 `tmp.start`；之后所有按键都进不了编辑器（看着像卡死） | `3cd2bd2` |
+| 17 | 前端 e2e 补 7 个用例锁上述三处（`TestRoutes` 5 + `TestVimTextObjects` 2），**64 全绿** | `2c45a25` |
+
 ### 已知还差的（未开工，记在 `.pi/todo.json`）
 
 - `:wa`/`split` 分屏、`%` 括号跳转、搜索历史 `/` 复用上一条
@@ -287,4 +296,11 @@
 - [[2026-11-17]] — 待办重排：把散落在 P0/P3/P5' 下的未完成项抽成「当前未完成（16 条）」总表，按可动手程度分六档（小改动/待拍板/暂缓/AI-native 两档/路线图）；P3 与 P5' 里重复的改成指针，避免两处打勾状态漂移
 - [[2026-11-21]] — **P7 对外开放与稳定性 4/4 上线**（`ee99ea4`）：① MCP 搜索 SQL 列名拼错（`frowid` → `f.rowid`，此前一直静默走 LIKE 兜底）② `/api/pages/count` + 前端「加载更多」，页面数不再卡 500（568 → 579）③ `mcp_public.py` 公开只读子集（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / `mode=ro` 强制只读 / `kb-mcp-public` 容器 `127.0.0.1:8100`）④ 两个 MCP 端点改 `stateless_http=True`，服务端重启不再让客户端永久 404。本轮改动此前只存在于生产服务器工作区，已全部收编入仓库，三方（本地/fajita/GitHub）同 commit
 - [[2026-11-22]] — **新前端接管生产 8080**（`570edda`）+ 停掉冗余测试容器（`eca1291`）；随后修 leader 双 handler 争用与 `[[` 补全四处缺陷（`7702967`）、配色重构为 Catppuccin 四口味且结构层/参数层拆开（`a83446f`）
+- [[2026-11-22]] — **路由与 vim text object 三处静默失效**（`449e106` `2e3ba35` `3cd2bd2`）：
+  ① 路由词表三份不同步，模板把 `/kb/theme` 整段当部署前缀 → manifest/sw.js 变成 HTML
+  （浏览器报 unsupported MIME type，PWA 装不上）—— 页面本身完全正常，光看页面永远发现不了；
+  ② 前缀修好后深链接**第一次真的进入 dispatch**，于是暴露插件 routes 缺 `api.view()`
+  （影子视图递归自己）、`/kb/theme` 每次打开翻转配色、`/kb/trash` 不在路由表；
+  ③ 空行按 `ciw`，`vim.js` 读 `null.start` 抛 TypeError 打断整个 keydown（看着像编辑器卡死）。
+  三项各配 e2e 用例，单测 57 → **64 全绿**。
 - [[2026-11-22]] — **前端 Vim 真实性一整轮**（13 个 commit，逐项浏览器实测）：`/` 两处根因（`cmd.prefix` 不赋值 + `dialog.js` 没加载）· 列表光标与计数前缀 · `Ctrl-o`/`Ctrl-i` 跳转历史 · 阅读位置记忆 · `Ctrl-d/u/f/b`+`H/M/L`+`zz`+页内搜索 `n/N` · `q` 的 `:bd` 语义 · which-key 键位去重 · 断网 API 本地镜像 · `gf` · `m{a-z}` marks · 命令行历史。同时补 `tests/test_frontend.py`（25 例真浏览器），单测 32 → **57 全绿**
