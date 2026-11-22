@@ -35,6 +35,16 @@
 - **`/all`→KB 继承滚动位置 900**：`innerHTML` 换掉不重置 `scrollTop`，没有记忆时必须**显式归零**
 - **e2e 首跑抓到 3 个问题**：`5j` 预期写错（光标初始在首行之前，`5j` 到索引 4）；两个离线用例被自己的 `tearDown` 判红（断网必然产生 resource 加载失败，加白名单）
 
+### 本轮追加（2026-11-23 凌晨，行操作 ex 命令族）
+
+| # | 修的是什么 | commit |
+|---|---|---|
+| 35 | **`:g` / `:v` 是死的** —— `vim.js` 的 `defaultExCommandMap` 里根本没有 `delete`/`normal`/`join`/`put`。`global` 的实现是「逐行拼 `:{行号}{cmd}` 再分发」，所以 `:g/a/d` 去执行 `:2d` → 报 `Not an editor command`，一条都不删。`:g/pat/normal dd` 同样死 | `7852e69` |
+| 36 | **`:del` 语义冲突** —— 补上 `:d`/`:delete` 后 `'delete'.indexOf('del')===0`，`:del`（原「删当前页」）被前缀匹配抢到行删除，用户以为删页、实际只删一行。取舍：`:d`/`:delete`/`:del` 全删行（对齐 vim），删页改 `:Delete`（对齐 netrw），走确认框 | `7852e69` |
+| 37 | **`:normal` 不用 range** —— `exRange(p)` 算了却没挪光标，`:g/beta/normal dd` 每次 dd 都作用在光标行（第一行），实测删掉 `# 测试用`、beta 行不动 | `7852e69` |
+| 38 | **`defineEx` 只知道 `params.args`** —— 行号范围（`line`/`lineEnd`）、`argString` 全丢，带 range 的命令永远只能作用在光标行。改成透传整个 `params`，并加第三个 `prefix` 参数（`defineEx('delete', fn, 'd')` → `:d`/`:delete` 都命中） | `7852e69` |
+| 39 | **行操作 8 例落测** —— 全部断言真实缓冲区内容 + 页面 API 回读；`:pu` 断言第 6/7/8 行逐条、原来第 5 行被顶到第 5 行 | `3d4eae0` |
+
 ### 本轮追加（2026-11-23 凌晨，触屏数字盘）
 
 | # | 修的是什么 | commit |
@@ -345,6 +355,11 @@
 - [[2026-11-17]] — 待办重排：把散落在 P0/P3/P5' 下的未完成项抽成「当前未完成（16 条）」总表，按可动手程度分六档（小改动/待拍板/暂缓/AI-native 两档/路线图）；P3 与 P5' 里重复的改成指针，避免两处打勾状态漂移
 - [[2026-11-21]] — **P7 对外开放与稳定性 4/4 上线**（`ee99ea4`）：① MCP 搜索 SQL 列名拼错（`frowid` → `f.rowid`，此前一直静默走 LIKE 兜底）② `/api/pages/count` + 前端「加载更多」，页面数不再卡 500（568 → 579）③ `mcp_public.py` 公开只读子集（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / `mode=ro` 强制只读 / `kb-mcp-public` 容器 `127.0.0.1:8100`）④ 两个 MCP 端点改 `stateless_http=True`，服务端重启不再让客户端永久 404。本轮改动此前只存在于生产服务器工作区，已全部收编入仓库，三方（本地/fajita/GitHub）同 commit
 - [[2026-11-22]] — **新前端接管生产 8080**（`570edda`）+ 停掉冗余测试容器（`eca1291`）；随后修 leader 双 handler 争用与 `[[` 补全四处缺陷（`7702967`）、配色重构为 Catppuccin 四口味且结构层/参数层拆开（`a83446f`）
+- [[2026-11-23]] — `7852e69` **`:g`/`:v` 全局命令是死的**：`vim.js` 的 `defaultExCommandMap`
+  里没有 `delete`/`normal`/`join`/`put`，而 `global` 是「逐行拼 `:{行号}{cmd}` 再分发」——
+  `:g/a/d` 去执行 `:2d` → `Not an editor command`，一个字符都不删。连带修了三处：
+  `defineEx` 只知道 `params.args`（range 全丢）、`:normal` 算了 range 却没挪光标、
+  `:del` 被前缀匹配抢到行删除（改 `:Delete` 删页面）。全量 108 tests OK。
 - [[2026-11-23]] — `79e0355` **数字盘三处**：`#numgrid` 的 `z-index:70` 同样低于 KBPanel overlay
   的 90（上一轮只修了 `#fxdock` 的 55，**没顺手查同族浮层**）；遮罩区点不动关不掉（触屏无 Esc，
   唯一出口是 32px 的 ×）；打开时不锁背景滚动（遮罩上滑动会滚正文，0→650）。层级现在固定成
