@@ -1788,6 +1788,144 @@ function initCM() {
 
   defineEx('wq', () => { saveEditor().then(() => closeEditor()); });
   defineEx('x', () => { if (editorDirty) saveEditor().then(() => closeEditor()); else closeEditor(); });
+
+  /* ── 行操作：:t / :co / :copy 与 :m / :move ─────────────────────
+   * vim 里复制/移动行的两个主力命令。CodeMirror 的 vim 只实现了 :m（作为
+   * 「跳到第 N 行」的 range 语义，`move: function(cm, params)`），
+   * 并把 :m+1 这类行偏移当成参数丢了 —— 所以 `:m+1` 报 Not an editor command。
+   *
+   * 这里按字面语义实现，只处理最常见的三种写法：
+   *   :t.   复制当前行到下一行      :t$  复制到文末      :t0  复制到文首
+   *   :m+1  当前行下移一行          :m0  移到文首
+   * 完整 range 语法（:1,3t$）不支持 —— 网页里选中多行直接在 visual 模式按
+   * y/p 更快，命令行的 range 反而是给脚本的。 */
+  /* 把 ex 命令的行参数解析成「新行该插入到哪个 0 基行号」。
+   *
+   * vim 的坐标是 1 基，而 `:t<N>` / `:m<N>` 的语义都是「放到第 N 行**之后**」，
+   * 所以 :t3 的插入位置正好是 0 基行号 3 —— 直接就是我们要的插入索引。
+   *   . → cur+1（当前行下方）   $ → last+1（文末）   +n / -n → cur±n   N → N
+   *
+   * 第一版这里返回的是「锚点行号」，再在调用处 +1 / -1 换算出插入位置，
+   * 结果 :t0 落到了第二行（应该第一行）、:m+1 原地不动（应当与下一行互换）。
+   * 换算的方向在原行之前/之后不同，越算越乱 —— 直接返回插入索引才是对的。 */
+  function insertIndexFor(a, cur, last) {
+    const raw = String(a || '').trim();
+    if (!raw) return cur + 1;
+    if (raw === '$') return last + 1;
+    if (raw === '.') return cur + 1;
+    const m = /^([+-]?)(\d*)$/.exec(raw);
+    if (!m) return null;
+    /* `+n` 的锚点是「1 基行号 cur+1+n」，插入索引又要再 +1。
+     * 少加这一位的话 `:m+1` 算出来的索引正好等于「当前行下方」，
+     * 也就是原行删完再插回去 —— 看起来完全没动。 */
+    if (m[1] === '+') return cur + parseInt(m[2] || '1', 10) + 1;
+    if (m[1] === '-') return cur - parseInt(m[2] || '1', 10);
+    return parseInt(raw, 10);
+  }
+
+  /* 在 0 基行号 idx 处插入一整行；idx 越界时追加到文末。
+   * 边界那一路不能写成 replaceRange(text + '\n', {line: idx}) ——
+   * idx 越过 lastLine 时 CM 会先造出一个空行、再留下一个空行，
+   * 表现出来是「复制到文末之后多了一个空行」。 */
+  function insertLineAt(idx, text) {
+    const last = cm.lastLine();
+    if (idx > last) {
+      cm.replaceRange('\n' + text, { line: last, ch: null });
+      const at = last + 1;
+      cm.setCursor({ line: at, ch: 0 });
+      return at;
+    }
+    cm.replaceRange(text + '\n', { line: idx, ch: 0 });
+    cm.setCursor({ line: idx, ch: 0 });
+    return idx;
+  }
+
+  function copyLineTo(a) {
+    const cur = cm.getCursor().line;
+    const last = cm.lastLine();
+    const idx = insertIndexFor(a, cur, last);
+    if (idx === null) return toast('用法 :t. | :t<N> | :t$', 'error');
+    const at = insertLineAt(idx, cm.getLine(cur));
+    toast('已复制第 ' + (cur + 1) + ' 行 → 第 ' + (at + 1) + ' 行');
+  }
+
+  function moveLineTo(a) {
+    const cur = cm.getCursor().line;
+    const last = cm.lastLine();
+    const idx = insertIndexFor(a, cur, last);
+    if (idx === null) return toast('用法 :m+1 | :m-1 | :m0 | :m$', 'error');
+    if (idx === cur + 1 || idx === cur) return toast('已在原地');   // :m+0 / :m. 无操作
+    const text = cm.getLine(cur);
+    /* 删整行要删到「下一行行首」（含换行）；末行没有下一行，改成
+     * 从上一行行尾删到文末。早先写成 {line: cur, ch: null} 当「行尾」用，
+     * 只删了内容留下空行 —— 表现是 :m+1 之后文件长度 +1。 */
+    if (cur === last) {
+      if (cur === 0) return toast('只有一行，无处可移');
+      cm.replaceRange('', { line: cur - 1, ch: null }, { line: cur, ch: null });
+    } else {
+      cm.replaceRange('', { line: cur, ch: 0 }, { line: cur + 1, ch: 0 });
+    }
+    /* idx 是在**原文档**坐标里算出来的插入位置；原行已经删掉了，
+     * 所以「原行之后」的那些行号全部要前移一位。少了这一步，
+     * `:m+1` 会把行插到隔一行的位置（看起来像往下跳了两行）。 */
+    const at = insertLineAt(idx > cur ? idx - 1 : idx, text);
+    toast('第 ' + (cur + 1) + ' 行 → 第 ' + (at + 1) + ' 行');
+  }
+
+  /* ── gf：编辑器里跟随 [[wikilink]] ──────────────────────────
+   * nvim 的 gf 是「打开光标下的文件」。本 KB 里「文件」就是 [[页面名]]，
+   * 所以光标停在链接上按 gf 应当跳到那个页面（并离开编辑态）。
+   *
+   * CodeMirror 的 vim 完全没实现 gf。动作表是按 keymap 分发的，
+   * defineAction 注册一个新动作再 mapCommand 挂上去即可 ——
+   * 不需要（也没法）覆盖现有动作，因为 `gf` 根本没定义。 */
+  const openLinkUnderCursor = () => {
+    const cur = cm.getCursor();
+    const line = cm.getLine(cur.line) || '';
+    const re = /\[\[([^\]|]+)/g;
+    let m;
+    while ((m = re.exec(line))) {
+      const from = m.index;
+      const to = from + m[0].length + 1;   // 光标可以在 ]] 之间也算在链接上
+      if (cur.ch >= from && cur.ch <= to) {
+        const name = m[1].trim();
+        toast('gf → ' + name);
+        /* 交给 navigate 统一处理：它自带 guardDirtyNav（脏缓冲先问
+         * 保存/丢弃/留下），dispatch 里也会因 target !== 'edit' 退出编辑态。 */
+        navigate('page', name);
+        return;
+      }
+    }
+    toast('光标不在链接上', 'error');
+  };
+
+  try {
+    CodeMirror.Vim.defineAction('kbGotoLink', openLinkUnderCursor);
+    CodeMirror.Vim.mapCommand('gf', 'action', 'kbGotoLink', {}, {});
+  } catch (e) {
+    console.warn('[kb] gf 注册失败', e);
+  }
+
+  defineEx('t', (a) => copyLineTo(a));
+  defineEx('co', (a) => copyLineTo(a));
+  defineEx('copy', (a) => copyLineTo(a));
+  defineEx('m', (a) => moveLineTo(a));
+  defineEx('move', (a) => moveLineTo(a));
+
+  /* `:m0` / `:t0` 这类会被 vim 的 ex 命令名正则整个吞成命令名：
+   * 它用的是 /^(\w+|…)/，而 \w 含数字 —— `m0` 就变成了一个叫 "m0" 的命令，
+   * 于是报 Not an editor command。数字形态是最常用的写法（:t0 复制到文首、
+   * :m0 移到文首），所以把 0-9 这 20 个名字显式注册一遍。 */
+  for (let d = 0; d <= 9; d++) {
+    const digit = String(d);
+    defineEx('t' + digit, () => copyLineTo(digit));
+    defineEx('m' + digit, () => moveLineTo(digit));
+  }
+
+  /* 注意 :m 的冲突：CodeMirror 自带 exCommands.move 是「range 移动光标」，
+   * defineEx 会覆盖它（同一个 commandMap_ 表项）。这里覆盖是有意的 ——
+   * 网页里 `:3` 跳行可以直接用 `:3`（range + 无命令 = move），
+   * 而 `:m+1` 这种带命令名的才会走到我们这条。两者不冲突。 */
   defineEx('e', (a) => runCommand('e', a));
   defineEx('edit', (a) => runCommand('e', a));
   defineEx('new', () => runCommand('new', []));
