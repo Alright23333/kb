@@ -655,3 +655,114 @@ class TestVimTextObjects(Base):
             '() => document.querySelector(".CodeMirror").CodeMirror.getValue()'
         )
         self.assertNotEqual(before, after, '正常位置上 ciw 失效了')
+
+
+# ══════════════════════════════════════════════════════════
+# 10. 编辑器 ex 命令 —— vim 的逃生出口
+#
+# `:q!` 是最常用的「改坏了想退出」的动作。原先 :q 与 :q! 行为完全一样
+# （都只弹一句「有未保存改动」），用户根本退不出去。
+#
+# 注意：这一节的用例会**真的写库**（:wa 就是保存），所以每条都用
+# 自己的临时页（__e2e-excmd-*），跑完立刻 DELETE 掉，
+# 绝不碰任何真实笔记 —— 早前版本的用例直接改了 KB 页，写脏了生产数据。
+# ══════════════════════════════════════════════════════════
+
+class TestEditorExCommands(Base):
+    """编辑器里 :q / :q! / :wa / :bd 的语义必须与 vim 一致。"""
+
+    PAGE = '__e2e-excmd-scratch'
+
+    def setUp(self):
+        super().setUp()
+        # 必须先落到应用里，页面才有 __KB_BASE__ 与同源 origin
+        # （about:blank 上 fetch('/api/...') 会拼成 undefined/api/...）。
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        self.api('POST', '/pages', {'name': self.PAGE, 'content': 'line one\n'})
+
+    def tearDown(self):
+        try:
+            self.api('DELETE', '/pages/' + self.PAGE)
+        except Exception:
+            pass
+        super().tearDown()
+
+    def api(self, method, path, body=None):
+        """直接用页面自己的 fetch 打 API，省得再引 requests。"""
+        js = """async ([method, path, body]) => {
+          const opts = {method, headers: {'Content-Type': 'application/json'}};
+          if (body) opts.body = JSON.stringify(body);
+          const r = await fetch(window.__KB_BASE__ + '/api' + path, opts);
+          return {status: r.status, text: (await r.text()).slice(0, 120)};
+        }"""
+        return self.page.evaluate(js, [method, path, body])
+
+    def _dirty_editor(self, wait=2600):
+        """打开临时页并制造一处未保存改动。"""
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='networkidle')
+        self.page.wait_for_timeout(wait)
+        self.page.evaluate(
+            '() => { const c = document.querySelector(".CodeMirror").CodeMirror;'
+            ' c.focus(); c.setCursor({line: 0, ch: 0}); }'
+        )
+        self.page.wait_for_timeout(200)
+        self.page.keyboard.type('i')
+        self.page.wait_for_timeout(180)
+        self.page.keyboard.type('QQ')
+        self.page.wait_for_timeout(180)
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(400)
+
+    def _ex(self, cmd):
+        self.page.keyboard.press(':')
+        self.page.wait_for_timeout(300)
+        self.page.keyboard.type(cmd)
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(900)
+
+    def _state(self):
+        return self.page.evaluate(
+            '() => ({ editing: !!window.state.editing,'
+            '  toast: (document.getElementById("toast").innerText || "").trim(),'
+            '  msg: ((document.querySelector(".cm-vim-message") || {}).innerText || "").trim() })'
+        )
+
+    def test_q_refuses_with_dirty_buffer(self):
+        """:q 有改动时拒绝退出并提示 :q! —— 这是 vim 的 E37。"""
+        self._dirty_editor()
+        self._ex('q')
+        st = self._state()
+        self.assertTrue(st['editing'], ':q 在脏缓冲上不该退出')
+        self.assertIn('未保存', st['toast'])
+
+    def test_q_bang_discards_and_exits(self):
+        """:q! 必须真的丢弃并退出（原先与 :q 无差别，是个死路）。"""
+        self._dirty_editor()
+        self._ex('q!')
+        st = self._state()
+        self.assertFalse(st['editing'], ':q! 没有退出编辑器')
+
+    def test_wa_saves_without_exiting(self):
+        """:wa（单缓冲时 == :w）保存但不退出。原先报 Not an editor command。"""
+        self._dirty_editor()
+        self._ex('wa')
+        st = self._state()
+        self.assertTrue(st['editing'], ':wa 不该退出编辑器')
+        self.assertNotIn('Not an editor command', st['msg'])
+        # 真落盘了没有
+        saved = self.page.evaluate(
+            """async (name) => {
+              const r = await fetch(window.__KB_BASE__ + '/api/pages/' + name);
+              const j = await r.json();
+              return j.content || '';
+            }""", self.PAGE
+        )
+        self.assertTrue(saved.startswith('QQ'), ':wa 没有真的保存：%r' % saved[:20])
+
+    def test_bd_is_known_command(self):
+        """:bd 必须被识别（原先报 Not an editor command）。"""
+        self._dirty_editor()
+        self._ex('bd')
+        st = self._state()
+        self.assertNotIn('Not an editor command', st['msg'])
