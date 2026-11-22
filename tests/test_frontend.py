@@ -1077,3 +1077,144 @@ class TestEditorEditAndAliases(Base):
         redone = self._st()
         self.assertEqual(redone['len'], after_edit['len'], ':redo 没生效')
 
+# ══════════════════════════════════════════════════════════
+# 13. gcc/gc 注释、编辑器内 Ctrl-o/Ctrl-i
+#
+# 两处都是「动作到了但被别的东西吃掉」：
+#   · gcc —— CodeMirror 的 vim 没有 gc 系列（`gc` 只是个没人实现的 operator 名）
+#   · Ctrl-o/Ctrl-i —— 应用级 capture 处理器无条件 preventDefault，抢走了
+#     CodeMirror 自己的 jumpListWalk（阅读态这两个键是路由跳转，
+#     编辑器里应当是**缓冲内**跳转，两套语义必须分开）
+#
+# gcc 的第二轮 bug 也是「参数没接」这一类：action 回调签名是
+# (cm, actionArgs, vim)，`2gcc` 的行数在 actionArgs.repeat 里，
+# 第一版写 `() =>` 把它丢掉了 —— 与 :q! 丢 `!`、:e! 丢 `!` 同源。
+# ══════════════════════════════════════════════════════════
+
+class TestEditorCommentAndJumplist(Base):
+    PAGE = '__e2e-gcc-scratch'
+    BODY = 'line one\nline two\nline three\nline four\n'
+
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  return r.status; }'
+    )
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+    LINES_JS = (
+        '() => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  return c.getValue().split(String.fromCharCode(10)); }'
+    )
+    CUR_JS = (
+        '() => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  return {line: c.getCursor().line,'
+        '          visual: !!c.state.vim.visualMode,'
+        '          toast: (document.getElementById("toast").innerText || "").trim()}; }'
+    )
+    VISUAL_JS = (
+        '() => !!document.querySelector(".CodeMirror").CodeMirror.state.vim.visualMode'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        st = self.page.evaluate(self.CREATE_JS, [self.PAGE, self.BODY])
+        if st not in (200, 201):
+            raise RuntimeError('建临时页失败: %s' % st)
+
+    def tearDown(self):
+        try:
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+        except Exception:
+            pass
+        super().tearDown()
+
+    def _open(self, line=0):
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2400)
+        self.page.evaluate(
+            '(l) => { const c = document.querySelector(".CodeMirror").CodeMirror;'
+            ' c.focus(); c.setCursor({line: l, ch: 0}); }', line
+        )
+        self.page.wait_for_timeout(250)
+
+    def _type_seq(self, seq, gap=200):
+        """逐字按 —— press('gcc') 会被 CodeMirror 当成一个键。"""
+        for chx in seq:
+            self.page.keyboard.type(chx)
+            self.page.wait_for_timeout(gap)
+        self.page.wait_for_timeout(400)
+
+    def _lines(self):
+        return self.page.evaluate(self.LINES_JS)
+
+    def _cur(self):
+        return self.page.evaluate(self.CUR_JS)
+
+    # ── gcc ─────────────────────────────────────────
+    def test_gcc_comments_and_uncomments_line(self):
+        """gcc 注释当前行（Markdown 用 <!-- -->），再按一次取消。"""
+        self._open(0)
+        pre = self._lines()
+        self._type_seq('gcc')
+        post = self._lines()
+        self.assertTrue(post[0].startswith('<!--'), 'gcc 没注释：%r' % post[0])
+        self.assertTrue(post[0].rstrip().endswith('-->'), 'gcc 没闭合注释：%r' % post[0])
+        self.assertEqual(post[1], pre[1], 'gcc 改到了别的行')
+        self._type_seq('gcc')
+        back = self._lines()
+        self.assertEqual(back[0], pre[0], '再按 gcc 没取消注释')
+
+    def test_gcc_count_comments_multiple_lines(self):
+        """`2gcc` 注释两行 —— count 在 actionArgs.repeat 里，回调签名必须接。"""
+        self._open(0)
+        self.page.keyboard.type('2')
+        self.page.wait_for_timeout(300)
+        self._type_seq('gcc')
+        post = self._lines()
+        self.assertTrue(post[0].startswith('<!--'), '2gcc 第 1 行没注释')
+        self.assertTrue(post[1].startswith('<!--'), '2gcc 第 2 行没注释（count 被丢掉了）')
+        self.assertFalse(post[2].startswith('<!--'), '2gcc 多注释了第 3 行')
+
+    def test_visual_gc_comments_selection(self):
+        """visual 里 V j gc 注释选区并退出 visual。"""
+        self._open(0)
+        self._type_seq('V', gap=250)
+        self._type_seq('j', gap=250)
+        self._type_seq('gc')
+        post = self._lines()
+        self.assertTrue(post[0].startswith('<!--'), 'V gc 第 1 行没注释')
+        self.assertTrue(post[1].startswith('<!--'), 'V gc 第 2 行没注释')
+        self.assertFalse(post[2].startswith('<!--'), 'V gc 多注释了第 3 行')
+        self.assertFalse(self.page.evaluate(self.VISUAL_JS), 'gc 之后还在 visual 模式')
+
+    # ── Ctrl-o / Ctrl-i ─────────────────────────────
+    def test_editor_ctrl_o_ctrl_i_walks_jumplist(self):
+        """编辑器里 Ctrl-o / Ctrl-i 必须归 CodeMirror 的 jumpListWalk ——
+        应用级 capture 处理器曾经无条件抢走它们，于是按了光标不动。"""
+        self._open(0)
+        a = self._cur()['line']
+        self.page.keyboard.type('G')
+        self.page.wait_for_timeout(600)
+        g = self._cur()['line']
+        self.assertNotEqual(g, a, 'G 没跳到最后一行')
+        self.page.keyboard.press('Control+o')
+        self.page.wait_for_timeout(700)
+        back = self._cur()['line']
+        self.assertEqual(back, a, 'Ctrl-o 没回到原位（被应用级 jumplist 抢走了）')
+        self.page.keyboard.press('Control+i')
+        self.page.wait_for_timeout(700)
+        fwd = self._cur()['line']
+        self.assertEqual(fwd, g, 'Ctrl-i 没回到 G 的位置')
+
