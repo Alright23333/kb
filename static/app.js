@@ -1926,8 +1926,19 @@ function initCM() {
    * defineEx 会覆盖它（同一个 commandMap_ 表项）。这里覆盖是有意的 ——
    * 网页里 `:3` 跳行可以直接用 `:3`（range + 无命令 = move），
    * 而 `:m+1` 这种带命令名的才会走到我们这条。两者不冲突。 */
-  defineEx('e', (a) => runCommand('e', a));
-  defineEx('edit', (a) => runCommand('e', a));
+  /* `:e!` 的 `!` 必须吃掉 —— 否则 runCommand('e', ['!']) 里的 arg 就是 "!",
+   * 于是 openEditor('!') 去打开一个叫 "!" 的页面（404 → 空编辑器），
+   * 缓冲区被清空。nvim 里 :e! 是「丢弃改动，重新读这个文件」。 */
+  const editCmd = (a) => {
+    if (bang(a)) {
+      if (editorDirty) { editorDirty = false; draftClear(); toast('已丢弃改动，重新读取'); }
+      else toast('已重新读取');
+      return openEditor(state.current || '', null, ++navToken);
+    }
+    return runCommand('e', a);
+  };
+  defineEx('e', editCmd);
+  defineEx('edit', editCmd);
   defineEx('new', () => runCommand('new', []));
   defineEx('help', () => runCommand('help', []));
   defineEx('graph', () => runCommand('graph', []));
@@ -1943,6 +1954,33 @@ function initCM() {
   defineEx('del', () => runCommand('del', []));
   defineEx('preview', () => togglePreview());
   defineEx('set', (a) => runCommand('set', a));
+
+  /* 下面这批 runCommand 里早就实现了，只是没在 ex 层注册名字 ——
+   * 用户在编辑器里敲 :bn / :bp / :ls 会得到 Not an editor command。
+   * 都是 vim 里一天敲十几次的命令，且已有实现，补别名即可。 */
+  defineEx('bn', () => runCommand('bnext', []));
+  defineEx('bnext', () => runCommand('bnext', []));
+  defineEx('bp', () => runCommand('bprev', []));
+  defineEx('bprev', () => runCommand('bprev', []));
+  defineEx('bfirst', () => runCommand('bfirst', []));
+  defineEx('blast', () => runCommand('blast', []));
+  defineEx('ls', () => runCommand('buffers', []));
+  defineEx('buffers', () => runCommand('buffers', []));
+  defineEx('only', () => runCommand('only', []));
+  defineEx('noh', () => runCommand('noh', []));
+
+  /* :up / :update = 有改动才写（vim 的 :update 语义，避免无谓的保存请求
+   * 和版本快照）。:wa 在有多个缓冲时也该全部写；这里单页应用只有一个
+   * 编辑器，等价于 :w，但保留名字免得报未知命令。 */
+  defineEx('up', () => (editorDirty ? saveEditor() : toast('没有改动')));
+  defineEx('update', () => (editorDirty ? saveEditor() : toast('没有改动')));
+
+  /* :earlier / :later = 按时间回退/前进，网页编辑器里没有历史时间轴，
+   * 退化成 undo / redo —— 语义最近，且这些键在 CodeMirror 里已有实现。 */
+  defineEx('undo', () => cm.undo());
+  defineEx('earlier', () => cm.undo());
+  defineEx('redo', () => cm.redo());
+  defineEx('later', () => cm.redo());
 
   return cm;
 }
