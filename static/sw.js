@@ -13,7 +13,7 @@
  * HTML/JS（这个坑踩过一次：app.js 改了但浏览器还在用缓存副本）。
  */
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
-const VERSION = 'kb-shell-v18';
+const VERSION = 'kb-shell-v19';
 
 const SHELL = [
   BASE + '/',
@@ -33,6 +33,9 @@ const SHELL = [
   BASE + '/static/vendor/codemirror/search.js',
   BASE + '/static/vendor/codemirror/jump-to-line.js',
   BASE + '/static/vendor/codemirror/scrollpastend.js',
+  BASE + '/static/vendor/codemirror/foldcode.js',
+  BASE + '/static/vendor/codemirror/brace-fold.js',
+  BASE + '/static/vendor/codemirror/markdown-fold.js',
   BASE + '/static/vendor/codemirror/vim.js',
   BASE + '/static/vendor/markdown-it.min.js',
   BASE + '/static/vendor/mermaid/mermaid.min.js',

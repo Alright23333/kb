@@ -1960,6 +1960,23 @@ function initCM() {
     return m ? m[1] + m[2] : t;
   };
 
+  /* ── za / zo / zc / zR / zM —— 折叠 ──────────────────────────
+   * CodeMirror 的 vim 只有 `zz`/`zt`/`zb`/`z.`/`z-`/`z<CR>`（滚动定位），
+   * 整个 `za` 系列都没有。nvim 里 za 是「切换当前折行」的日常动作，
+   * 读长文档（尤其 Markdown 的标题层级）时很依赖它。
+   *
+   * 依赖 foldcode.js + markdown-fold.js + brace-fold.js 三个 addon
+   * （模板里新加的），它们提供 cm.foldCode 与 "markdown"/"brace" rangeFinder。 */
+  const foldAt = (mode) => {
+    const line = cm.getCursor().line;
+    try {
+      if (mode === 'all') { cm.foldCode(CodeMirror.Pos(line, 0), null, 'fold'); return; }
+      cm.foldCode(CodeMirror.Pos(line, 0), { scanUp: false }, mode || undefined);
+    } catch (e) {
+      toast('这一行没有可折叠的区块', 'error');
+    }
+  };
+
   try {
     CodeMirror.Vim.defineAction('kbGotoLink', openLinkUnderCursor);
     CodeMirror.Vim.mapCommand('gf', 'action', 'kbGotoLink', {}, {});
@@ -1967,6 +1984,48 @@ function initCM() {
     /* gcc = 普通模式当前行；gc = visual 选区（nvim 里同一个 operator 的两种用法） */
     CodeMirror.Vim.mapCommand('gcc', 'action', 'kbToggleComment', {}, { context: 'normal' });
     CodeMirror.Vim.mapCommand('gc', 'action', 'kbToggleComment', {}, { context: 'visual' });
+
+    /* 折叠：za 切换 / zo 打开 / zc 关闭 / zR 全展开 / zM 全折叠。
+     * 注意 `z` 在 vim 里是个前缀键（还有 zz/zt/zb），mapCommand 走的是
+     * defaultKeymap 的键位匹配，所以 za 不会被 zz 抢先 —— 前缀相同时
+     * 更长的键位优先（vim.js 的 KeyBuffer 逻辑）。 */
+    CodeMirror.Vim.defineAction('kbFoldToggle', () => foldAt());
+    CodeMirror.Vim.defineAction('kbFoldOpen', () => foldAt('unfold'));
+    CodeMirror.Vim.defineAction('kbFoldClose', () => foldAt('fold'));
+    CodeMirror.Vim.mapCommand('za', 'action', 'kbFoldToggle', {}, {});
+    CodeMirror.Vim.mapCommand('zo', 'action', 'kbFoldOpen', {}, {});
+    CodeMirror.Vim.mapCommand('zc', 'action', 'kbFoldClose', {}, {});
+
+    /* zR / zM：全展开 / 全折叠。foldcode 的 commands.foldAll 会逐行
+     * 尝试折叠（Markdown 上就是每个标题块），展开用 unfoldAll。 */
+    /* 计数必须数**真的折上了几处**：`cm.foldCode` 在「没有可折的 block」时
+     * 只是静默返回、不抛异常，所以第一版按「循环跑了几行」计数，
+     * 在 71 行的文档上报出「已折叠 71 处」而实际只折了 10 处。
+     * 判据换成 `__isFold` 标记数量的变化。 */
+    const foldMarkCount = () => (cm.getAllMarks() || []).filter(m => m.__isFold).length;
+    CodeMirror.Vim.defineAction('kbFoldAll', () => {
+      const n = cm.lineCount();
+      const before = foldMarkCount();
+      cm.operation(() => {
+        for (let i = 0; i < n; i++) {
+          cm.foldCode(CodeMirror.Pos(i, 0), { scanUp: false }, 'fold');
+        }
+      });
+      const delta = foldMarkCount() - before;
+      toast(delta ? '已折叠 ' + delta + ' 处' : '没有可折叠的区块', delta ? undefined : 'warn');
+    });
+    CodeMirror.Vim.defineAction('kbUnfoldAll', () => {
+      const before = foldMarkCount();
+      cm.operation(() => {
+        for (let i = 0; i < cm.lineCount(); i++) {
+          cm.foldCode(CodeMirror.Pos(i, 0), { scanUp: false }, 'unfold');
+        }
+      });
+      const delta = before - foldMarkCount();
+      toast(delta ? '已展开 ' + delta + ' 处' : '没有折叠中的区块', delta ? undefined : 'warn');
+    });
+    CodeMirror.Vim.mapCommand('zR', 'action', 'kbUnfoldAll', {}, {});
+    CodeMirror.Vim.mapCommand('zM', 'action', 'kbFoldAll', {}, {});
   } catch (e) {
     console.warn('[kb] vim 扩展注册失败', e);
   }
@@ -2046,6 +2105,14 @@ function initCM() {
   defineEx('earlier', () => cm.undo());
   defineEx('redo', () => cm.redo());
   defineEx('later', () => cm.redo());
+
+  /* :fold / :unfold —— 与 za/zo 同一套实现。CodeMirror 的 foldcode addon
+   * 自带 commands 叫 fold/unfold，但 vim 的 ex 层不会自动接过去。 */
+  defineEx('fold', () => foldAt('fold'));
+  defineEx('unfold', () => foldAt('unfold'));
+  defineEx('foldopen', () => foldAt('unfold'));
+  defineEx('foldclose', () => foldAt('fold'));
+  defineEx('foldtoggle', () => foldAt());
 
   return cm;
 }

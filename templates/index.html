@@ -42,6 +42,13 @@
     '<script src="' + v + 'codemirror/search.js"><\/script>' +
     '<script src="' + v + 'codemirror/jump-to-line.js"><\/script>' +
     '<script src="' + v + 'codemirror/scrollpastend.js"><\/script>' +
+    /* 折叠三个 addon：foldcode 提供 cm.foldCode 与 commands.fold/unfold，
+     * brace-fold / markdown-fold 注册 rangeFinder。
+     * 之前一个都没引，所以 vim 的 `za`/`zo`/`zc`（本身也没实现）之外，
+     * 连 `:fold` 这种手动折叠都无从谈起。 */
+    '<script src="' + v + 'codemirror/foldcode.js"><\/script>' +
+    '<script src="' + v + 'codemirror/brace-fold.js"><\/script>' +
+    '<script src="' + v + 'codemirror/markdown-fold.js"><\/script>' +
     /* dialog.js 必须在 vim.js 之前：vim 的 / ? : 都靠 cm.openDialog
      * 弹底部单行输入框。此前只引了 dialog.css 没引这个脚本，
      * cm.openDialog 是 undefined → vim 退化成原生 prompt()。 */
