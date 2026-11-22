@@ -766,3 +766,175 @@ class TestEditorExCommands(Base):
         self._ex('bd')
         st = self._state()
         self.assertNotIn('Not an editor command', st['msg'])
+
+# ══════════════════════════════════════════════════════════
+# 11. 编辑器 gf 与行操作（:t / :m）—— nvim 的日常动作
+#
+# 两组都不落盘（gf 是导航，:t/:m 只改内存缓冲），
+# 但为了不碰真实笔记，仍然用临时页 + 跑完删。
+#
+# 注意：这里所有 JS 都是**不含换行的单行字符串**。早先把带真实换行的
+# Python 三引号字符串直接塞进 page.evaluate，JS 侧拿到的是一个字面里
+# 带 U+000A 的字符串 —— 报 "Invalid or unexpected token"，7 条全挂。
+# 换行一律用 String.fromCharCode(10) 或传参拼，别写 "\n"。
+# ══════════════════════════════════════════════════════════
+
+class TestEditorGfAndLineOps(Base):
+    PAGE = '__e2e-lines-scratch'
+
+    # 建临时页：内容在 Python 侧用 chr(10) 拼好，JS 只负责发请求
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  return r.status; }'
+    )
+
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+
+    OPEN_JS = (
+        '(line) => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  c.focus(); c.setCursor({line: line, ch: 0}); }'
+    )
+
+    CM_JS = (
+        '() => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  return {len: c.getValue().length, n: c.lineCount(),'
+        '          cur: c.getCursor().line,'
+        '          lines: c.getValue().split(String.fromCharCode(10))}; }'
+    )
+
+    CURSOR_ON_LINK_JS = (
+        '() => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  const t = c.getLine(2);'
+        '  c.setCursor({line: 2, ch: t.indexOf("[[")}); }'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        body = 'L0 first\nL1 second\nL2 third [[KB]]\nL3 fourth\n'
+        st = self.page.evaluate(self.CREATE_JS, [self.PAGE, body])
+        if st not in (200, 201):
+            raise RuntimeError('建临时页失败: %s' % st)
+
+    def tearDown(self):
+        try:
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+        except Exception:
+            pass
+        super().tearDown()
+
+    def _open(self, line=1):
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2600)
+        self.page.evaluate(self.OPEN_JS, line)
+        self.page.wait_for_timeout(250)
+
+    def _cm(self):
+        return self.page.evaluate(self.CM_JS)
+
+    def _ex(self, cmd):
+        self.page.keyboard.press(':')
+        self.page.wait_for_timeout(280)
+        self.page.keyboard.type(cmd)
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(800)
+
+    def _msg(self):
+        return self.page.evaluate(
+            '() => ((document.querySelector(".cm-vim-message") || {}).innerText || "").trim()'
+        )
+
+    def _gf(self):
+        """g 与 f 必须分两次按：press('gf') 在 CodeMirror 的 vim 里算一个键。"""
+        self.page.keyboard.type('g')
+        self.page.wait_for_timeout(180)
+        self.page.keyboard.type('f')
+
+    # ── gf ──────────────────────────────────────────────
+    def test_gf_opens_wikilink_under_cursor(self):
+        """nvim 的 gf = 打开光标下的文件；这里「文件」就是 [[页面名]]。"""
+        self._open(2)
+        self.page.evaluate(self.CURSOR_ON_LINK_JS)
+        self.page.wait_for_timeout(200)
+        self._gf()
+        self.page.wait_for_timeout(1200)
+        st = self.page.evaluate('() => ({path: location.pathname, editing: !!window.state.editing})')
+        self.assertTrue(st['path'].endswith('/page/KB'), 'gf 没跳到链接目标，停在 %s' % st['path'])
+        self.assertFalse(st['editing'], 'gf 之后仍停在编辑态')
+
+    def test_gf_without_link_reports(self):
+        """光标不在链接上时要给提示，不能静默。"""
+        self._open(0)
+        self.page.evaluate('() => { const c = document.querySelector(".CodeMirror").CodeMirror; c.setCursor({line:0,ch:0}); }')
+        self.page.wait_for_timeout(200)
+        self._gf()
+        self.page.wait_for_timeout(700)
+        toast = self.page.evaluate('() => (document.getElementById("toast").innerText || "").trim()')
+        self.assertIn('链接', toast)
+
+    # ── :t（复制行）─────────────────────────────────────
+    def test_t_dot_duplicates_current_line(self):
+        """:t. 复制当前行到下一行 —— 行数 +1、原行内容重复一次。"""
+        self._open(1)
+        pre = self._cm()
+        self._ex('t.')
+        post = self._cm()
+        self.assertEqual(post['n'], pre['n'] + 1, ':t. 行数没变')
+        self.assertEqual(post['lines'][1], pre['lines'][1])
+        self.assertEqual(post['lines'][2], pre['lines'][1], ':t. 没把 L1 复制到下一行')
+
+    def test_t_zero_copies_to_top(self):
+        """:t0 复制到文首。此前被 vim 的 ex 命令名正则吞成 "t0" 报未识别。"""
+        self._open(2)
+        pre = self._cm()
+        self._ex('t0')
+        post = self._cm()
+        self.assertEqual(post['n'], pre['n'] + 1)
+        self.assertEqual(post['lines'][0], pre['lines'][2], ':t0 没复制到第一行')
+        self.assertEqual(post['cur'], 0, ':t0 之后光标不在第一行')
+        self.assertNotIn('Not an editor command', self._msg())
+
+    def test_t_dollar_copies_to_end(self):
+        """:t$ 复制到文末，且**不能多出一个空行**（越界插入的老坑）。"""
+        self._open(2)
+        pre = self._cm()
+        self._ex('t$')
+        post = self._cm()
+        self.assertEqual(post['n'], pre['n'] + 1)
+        self.assertEqual(post['lines'][-1], pre['lines'][2], ':t$ 末行内容不对')
+        self.assertEqual(post['lines'][-2], pre['lines'][-1], ':t$ 末尾多了空行')
+
+    # ── :m（移动行）─────────────────────────────────────
+    def test_m_plus_one_swaps_with_next_line(self):
+        """:m+1 与下一行互换 —— 行数不变、内容互换。"""
+        self._open(1)
+        pre = self._cm()
+        self._ex('m+1')
+        post = self._cm()
+        self.assertEqual(post['n'], pre['n'], ':m+1 行数变了')
+        self.assertEqual(post['lines'][1], pre['lines'][2], ':m+1 没把 L1 下移')
+        self.assertEqual(post['lines'][2], pre['lines'][1], ':m+1 没把 L2 上移')
+
+    def test_m_zero_moves_to_top(self):
+        """:m0 移到文首，行数不变。"""
+        self._open(2)
+        pre = self._cm()
+        self._ex('m0')
+        post = self._cm()
+        self.assertEqual(post['n'], pre['n'])
+        self.assertEqual(post['lines'][0], pre['lines'][2], ':m0 没移到第一行')
+        self.assertEqual(post['cur'], 0)
+        self.assertNotIn('Not an editor command', self._msg())
