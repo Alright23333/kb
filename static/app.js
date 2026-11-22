@@ -923,6 +923,9 @@ function closeAllBuffers() {
   state.buffers = [];
   renderTabline();
   toast('已关闭全部缓冲');
+  /* 缓冲全关了还停在某一页会很怪（tabline 空着但正文还在），
+   * 所以回首页 —— vim 里全部 :bd 之后也是一个空缓冲。 */
+  if (!state.editing) navigate('home');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1749,10 +1752,40 @@ function initCM() {
       CodeMirror.Vim.defineEx(name, name, function (c, params) { fn((params && params.args) || []); });
     } catch (e) { /* 已注册 */ }
   };
+  /* `!` 后缀（:q! / :qa!）= 丢弃改动，与 vim 完全一致。
+   * CodeMirror 的 ex 解析把 `:q!` 拆成 commandName='q' + argString='!'，
+   * params.args 就是 ['!']，所以判一下参数里有没有 '!' 即可。
+   *
+   * 原先这里直接 `defineEx('q', closeEditor)`：closeEditor 见到脏就拒绝，
+   * 于是 **:q! 和 :q 行为完全一样**（都只弹一句「有未保存改动」）——
+   * 改坏了东西却退不出去，只能去点 tabline 的 × 。vim 里 :q! 是最常用的
+   * 逃生出口，这条必须对。 */
+  const bang = (a) => String(Array.isArray(a) ? a.join('') : (a || '')).indexOf('!') >= 0;
+
   defineEx('w', () => saveEditor());
   defineEx('write', () => saveEditor());
-  defineEx('q', () => closeEditor());
-  defineEx('quit', () => closeEditor());
+  defineEx('wa', () => saveEditor());        // 只有一个「文件」，:wa == :w
+  defineEx('wall', () => saveEditor());
+
+  defineEx('q', (a) => (bang(a) ? discardAndClose() : closeEditor()));
+  defineEx('quit', (a) => (bang(a) ? discardAndClose() : closeEditor()));
+  /* vim 的 :bd 关缓冲；有未保存改动时要 :bd! 才丢 —— 与 :q! 同一套规则。 */
+  const bdel = (a) => {
+    if (bang(a) && state.editing) { editorDirty = false; draftClear(); }
+    closeCurrentBuffer();
+  };
+  defineEx('bd', bdel);
+  defineEx('bdelete', bdel);
+
+  /* :qa / :qall —— 网页只有一个窗口，语义收敛成「关掉当前缓冲」；
+   * 有未保存改动时同样要 ! 才能丢。 */
+  const quitAll = (a) => {
+    if (bang(a)) { discardAndClose(); closeAllBuffers(); return; }
+    closeCurrentBuffer();
+  };
+  defineEx('qa', quitAll);
+  defineEx('qall', quitAll);
+
   defineEx('wq', () => { saveEditor().then(() => closeEditor()); });
   defineEx('x', () => { if (editorDirty) saveEditor().then(() => closeEditor()); else closeEditor(); });
   defineEx('e', (a) => runCommand('e', a));
