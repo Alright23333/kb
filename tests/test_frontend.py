@@ -938,3 +938,142 @@ class TestEditorGfAndLineOps(Base):
         self.assertEqual(post['lines'][0], pre['lines'][2], ':m0 没移到第一行')
         self.assertEqual(post['cur'], 0)
         self.assertNotIn('Not an editor command', self._msg())
+
+# ══════════════════════════════════════════════════════════
+# 12. `:e!` 与缓冲/撤销一族 ex 别名
+#
+# `:e!` 曾经把 `!` 当成文件名，去打开一个叫「!」的页面 —— 404 之后
+# openEditor 拿到空内容，**缓冲区被清空**，2172 字的正文变 0 字。
+# 这是在探测「哪些 ex 命令没实现」时发现的：探测脚本以为是「未知命令」，
+# 实际是**静默清空编辑器**，比未实现危险得多。
+#
+# 一组是 :e! 的两条路径（干净重读 / 脏缓冲丢弃改动重读），
+# 一组是「runCommand 里早有实现、只是没在 ex 层注册名字」的别名。
+# 都不落盘。
+# ══════════════════════════════════════════════════════════
+
+class TestEditorEditAndAliases(Base):
+    PAGE = '__e2e-exalias-scratch'
+    BODY = 'A first\nB second\nC third\n'
+
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  return r.status; }'
+    )
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+    CM_JS = (
+        '() => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  return {len: c.getValue().length, n: c.lineCount(),'
+        '          head: c.getValue().slice(0, 8),'
+        '          msg: ((document.querySelector(".cm-vim-message") || {}).innerText || "").trim(),'
+        '          toast: (document.getElementById("toast").innerText || "").trim()}; }'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        st = self.page.evaluate(self.CREATE_JS, [self.PAGE, self.BODY])
+        if st not in (200, 201):
+            raise RuntimeError('建临时页失败: %s' % st)
+
+    def tearDown(self):
+        try:
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+        except Exception:
+            pass
+        super().tearDown()
+
+    def _open(self):
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2600)
+        self.page.evaluate('() => { const c = document.querySelector(".CodeMirror").CodeMirror; c.focus(); c.setCursor({line:0,ch:0}); }')
+        self.page.wait_for_timeout(200)
+
+    def _ex(self, cmd):
+        self.page.keyboard.press(':')
+        self.page.wait_for_timeout(260)
+        self.page.keyboard.type(cmd)
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(900)
+
+    def _st(self):
+        return self.page.evaluate(self.CM_JS)
+
+    # ── :e! ─────────────────────────────────────────
+    def test_e_bang_reloads_without_clearing_buffer(self):
+        """:e! 必须重读当前文件，**不能把缓冲清成 0 字**（曾经的静默清空）。"""
+        self._open()
+        pre = self._st()
+        self.assertTrue(pre['len'] > 0, '打开就先失败了')
+        self._ex('e!')
+        post = self._st()
+        self.assertEqual(post['len'], pre['len'], ':e! 之后长度变了：%d → %d' % (pre['len'], post['len']))
+        self.assertEqual(post['n'], pre['n'], ':e! 之后行数变了')
+        self.assertEqual(post['head'], self.BODY[:8], ':e! 之后内容不是原文件')
+        self.assertNotIn('Not an editor command', post['msg'])
+
+    def test_e_bang_discards_dirty_and_rereads(self):
+        """:e! 在脏缓冲上 = 丢弃改动 + 重读（nvim 语义）。"""
+        self._open()
+        base = self._st()
+        self.page.keyboard.type('i')
+        self.page.wait_for_timeout(150)
+        self.page.keyboard.type('ZZZ')
+        self.page.wait_for_timeout(150)
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(400)
+        dirty = self._st()
+        self.assertEqual(dirty['len'], base['len'] + 3, '没打进去')
+        self._ex('e!')
+        post = self._st()
+        self.assertEqual(post['len'], base['len'], ':e! 没丢掉那 3 个字符')
+        self.assertEqual(post['head'], self.BODY[:8], ':e! 没重读原文件')
+
+    # ── 别名 ────────────────────────────────────────
+    def test_buffer_aliases_recognized(self):
+        """:bn/:bp/:ls/:only 都已在 runCommand 里实现，缺的只是 ex 层的名字。"""
+        self._open()
+        for cmd, must_in_toast in [('ls', '缓冲'), ('only', '缓冲'), ('bn', ''), ('bp', '')]:
+            self._ex(cmd)
+            st = self._st()
+            self.assertNotIn('Not an editor command', st['msg'], ':%s 仍报未知命令' % cmd)
+            if must_in_toast:
+                self.assertIn(must_in_toast, st['toast'], ':%s 没有真正执行' % cmd)
+
+    def test_update_semantics(self):
+        """:up / :update = 有改动才写，没改动时明确说「没有改动」。"""
+        self._open()
+        self._ex('up')
+        st = self._st()
+        self.assertNotIn('Not an editor command', st['msg'])
+        self.assertIn('没有改动', st['toast'])
+
+    def test_undo_redo_aliases(self):
+        """:undo / :earlier 与 :redo / :later —— 网页里最近的等价物。"""
+        self._open()
+        self.page.keyboard.type('i')
+        self.page.wait_for_timeout(150)
+        self.page.keyboard.type('Q')
+        self.page.wait_for_timeout(150)
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(400)
+        after_edit = self._st()
+        self._ex('undo')
+        undone = self._st()
+        self.assertLess(undone['len'], after_edit['len'], ':undo 没生效')
+        self.assertNotIn('Not an editor command', undone['msg'])
+        self._ex('redo')
+        redone = self._st()
+        self.assertEqual(redone['len'], after_edit['len'], ':redo 没生效')
+
