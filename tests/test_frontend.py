@@ -682,8 +682,13 @@ class TestEditorExCommands(Base):
         self.api('POST', '/pages', {'name': self.PAGE, 'content': 'line one\n'})
 
     def tearDown(self):
+        # 页面和**版本快照**都要删 —— 只删页面的话，page_versions 里会留下
+        # 一条「没有对应页面的孤儿页名」，它会出现在回收站里（每跑一次 e2e
+        # 就多 10 条）。这是本条用例自己抓到的残留（跑完 3 轮后回收站里
+        # 出现 __e2e-excmd-scratch 10 条版本）。
         try:
             self.api('DELETE', '/pages/' + self.PAGE)
+            self.api('DELETE', '/pages/' + self.PAGE + '/versions')
         except Exception:
             pass
         super().tearDown()
