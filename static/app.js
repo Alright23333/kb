@@ -1899,11 +1899,76 @@ function initCM() {
     toast('光标不在链接上', 'error');
   };
 
+  /* ── gcc / gc：注释开关 ────────────────────────────────────
+   * nvim 里 gcc 是 comment.nvim 的「注释当前行」，`<count>gcc` 注释 n 行，
+   * visual 里 gc 注释选区。CodeMirror 的 vim 完全没有 gc 系列
+   * （它的 `gc` 只是个没被 cm 实现的 operator 名）。
+   *
+   * Markdown 的注释是 `<!-- -->`，不是 `//`。所以不能套用代码注释的
+   * line-comment 逻辑（CM 的 comment addon 按 mode 的 commentString 走，
+   * 而 markdown 的 commentString 是空/`<!-- -->`，单行加注释只能包围）。
+   *
+   * 语义：行首已有 `<!--` 且行尾有 `-->` → 去掉；否则整行包起来。 */
+  /* 注意签名：Vim 的 action 回调是 (cm, actionArgs, vim)。`count` 前缀
+   * （`3gcc`）放在 actionArgs.repeat 里 —— 第一版把参数全丢了，`2gcc`
+   * 只注释一行。这和 `:q!` 丢 `!`、`:e!` 丢 `!` 是同一类错误：
+   * **参数到了，签名没接**。 */
+  const toggleComment = (cm_, actionArgs) => {
+    const repeat = (actionArgs && actionArgs.repeat) || 1;
+    const vim = cm.state.vim;
+    let from, to;
+    if (vim && vim.visualMode) {
+      from = Math.min(cm.getCursor('anchor').line, cm.getCursor('head').line);
+      to = Math.max(cm.getCursor('anchor').line, cm.getCursor('head').line);
+    } else {
+      from = cm.getCursor('from').line;
+      to = Math.min(cm.lastLine(), from + repeat - 1);
+    }
+    // 先判断整体方向：全都有注释就全去掉，否则全加上（与 nvim 的 comment.nvim 一致）
+    let all = true;
+    for (let i = from; i <= to; i++) {
+      if (!isCommentedLine(cm.getLine(i))) { all = false; break; }
+    }
+    cm.operation(() => {
+      for (let i = from; i <= to; i++) {
+        const text = cm.getLine(i);
+        if (all) {
+          cm.replaceRange(uncommentLine(text), { line: i, ch: 0 }, { line: i, ch: text.length });
+        } else if (text.trim() || text.length === 0) {
+          cm.replaceRange(commentLine(text), { line: i, ch: 0 }, { line: i, ch: text.length });
+        }
+      }
+    });
+    if (vim && vim.visualMode) CodeMirror.Vim.exitVisualMode(cm);
+    toast(all ? '已取消注释 ' + (to - from + 1) + ' 行' : '已注释 ' + (to - from + 1) + ' 行');
+  };
+
+  const C_OPEN = '<!--', C_CLOSE = '-->';
+  const isCommentedLine = (t) => {
+    const s2 = t.trim();
+    return s2.startsWith(C_OPEN) && s2.endsWith(C_CLOSE) && s2.length > C_OPEN.length + C_CLOSE.length;
+  };
+  const commentLine = (t) => {
+    // 保留缩进：注释符贴在内容两端，不破坏缩进
+    if (!t.trim()) return t + C_OPEN + ' ' + C_CLOSE;
+    const lead = t.match(/^\s*/)[0];
+    const body = t.slice(lead.length);
+    return lead + C_OPEN + ' ' + body + ' ' + C_CLOSE;
+  };
+  const uncommentLine = (t) => {
+    const m = /^(\s*)<\!--\s?(.*?)\s?-->$/.exec(t);
+    return m ? m[1] + m[2] : t;
+  };
+
   try {
     CodeMirror.Vim.defineAction('kbGotoLink', openLinkUnderCursor);
     CodeMirror.Vim.mapCommand('gf', 'action', 'kbGotoLink', {}, {});
+    CodeMirror.Vim.defineAction('kbToggleComment', toggleComment);
+    /* gcc = 普通模式当前行；gc = visual 选区（nvim 里同一个 operator 的两种用法） */
+    CodeMirror.Vim.mapCommand('gcc', 'action', 'kbToggleComment', {}, { context: 'normal' });
+    CodeMirror.Vim.mapCommand('gc', 'action', 'kbToggleComment', {}, { context: 'visual' });
   } catch (e) {
-    console.warn('[kb] gf 注册失败', e);
+    console.warn('[kb] vim 扩展注册失败', e);
   }
 
   defineEx('t', (a) => copyLineTo(a));
@@ -3914,6 +3979,15 @@ document.addEventListener('keydown', (e) => {
   /* Ctrl-o / Ctrl-i —— vim 的跳转历史，编辑器里也要能用（对标 nvim 默认键位）。
    * 放在 capture 且不等 leaderOpen，因为这个组合不可能是 vim 的普通动作。 */
   if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'i') && !e.shiftKey) {
+    /* 编辑器里 Ctrl-o / Ctrl-i 是**缓冲内**的 jump list（nvim 语义），
+     * CodeMirror 的 vim 插件自己有（`jumpListWalk`，`/`、`n`、`G`、`%`
+     * 的动作都带 toJumplist），这里必须**放行**。
+     *
+     * 之前这里无条件 preventDefault + jumpTo()，走的是应用级的「路由跳转
+     * 历史」—— 而编辑器里按 G / n / % 这些跳转根本不会进应用 jumplist，
+     * 于是这两个键在编辑器里表现得完全失灵（按了光标不动、也没提示）。
+     * 同一组键在阅读态是应用级语义，在编辑器里是缓冲级语义，得分开。 */
+    if (state.editing) return;            // 交给 CodeMirror 的 vim
     e.preventDefault();
     e.stopPropagation();
     jumpTo(e.key === 'o' ? -1 : 1);
