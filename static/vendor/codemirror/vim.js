@@ -2178,6 +2178,13 @@ function initVim$1(CodeMirror) {
           return null;
         }
 
+        // KB patch: text objects that find nothing (e.g. `iw` on an empty line,
+        // `iw` in whitespace, `a<` with no '<' on the line) make every branch
+        // above leave `tmp` undefined, and the two returns below then throw
+        // "Cannot read properties of null (reading 'start')". vim itself just
+        // does nothing, so return null (the caller treats it as "no motion").
+        if (!tmp) return null;
+
         if (!cm.state.vim.visualMode) {
           return [tmp.start, tmp.end];
         } else {
