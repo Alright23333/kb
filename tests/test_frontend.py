@@ -1223,3 +1223,129 @@ class TestEditorCommentAndJumplist(Base):
         fwd = self._cur()['line']
         self.assertEqual(fwd, g, 'Ctrl-i 没回到 G 的位置')
 
+# ══════════════════════════════════════════════════════════
+# 14. 折叠 za/zo/zc/zR/zM + :fold
+#
+# CodeMirror 的 vim 只有 zz/zt/zb（滚动定位），整个 za 系列都没有；
+# 而 foldcode.js + markdown-fold.js 这两个 addon **一个都没引** ——
+# 所以即便手动调 cm.foldCode 也不存在（`typeof cm.foldCode === 'undefined'`）。
+#
+# 另一处 bug 值得记：`cm.foldCode` 在「这一行没有可折的 block」时
+# **静默返回、不抛异常**，所以「循环跑了多少行」不等于「折上了多少处」。
+# 第一版 zM 在 71 行的文档上报「已折叠 71 处」，实际只折了 10 处。
+# 现在按 `__isFold` 标记数变化来判定。
+# ══════════════════════════════════════════════════════════
+
+class TestEditorFolding(Base):
+    PAGE = '__e2e-fold-scratch'
+    BODY = '# H1 top\nbody one\nbody two\n## H2 sub\nsub body\nbody three\n## H2 sub2\nmore\n'
+    HEAD_LINE = 0
+
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  return r.status; }'
+    )
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+    FOLD_JS = (
+        '() => {'
+        '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+        '  return {folds: (c.getAllMarks() || []).filter(m => m.__isFold).length,'
+        '          lineCount: c.lineCount(),'
+        '          hasFoldCode: typeof c.foldCode,'
+        '          toast: (document.getElementById("toast").innerText || "").trim(),'
+        '          msg: ((document.querySelector(".cm-vim-message") || {}).innerText || "").trim()}; }'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        st = self.page.evaluate(self.CREATE_JS, [self.PAGE, self.BODY])
+        if st not in (200, 201):
+            raise RuntimeError('建临时页失败: %s' % st)
+
+    def tearDown(self):
+        try:
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+        except Exception:
+            pass
+        super().tearDown()
+
+    def _open(self, line=HEAD_LINE):
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2400)
+        self.page.evaluate(
+            '(l) => { const c = document.querySelector(".CodeMirror").CodeMirror;'
+            ' c.focus(); c.setCursor({line: l, ch: 0}); }', line
+        )
+        self.page.wait_for_timeout(250)
+
+    def _seq(self, keys, gap=230):
+        for chx in keys:
+            self.page.keyboard.type(chx)
+            self.page.wait_for_timeout(gap)
+        self.page.wait_for_timeout(500)
+
+    def _fold_state(self):
+        return self.page.evaluate(self.FOLD_JS)
+
+    def test_fold_addon_is_loaded(self):
+        """foldcode.js 必须在模板里加载，否则 cm.foldCode 是 undefined。"""
+        self._open()
+        st = self._fold_state()
+        self.assertEqual(st['hasFoldCode'], 'function', 'cm.foldCode 不存在：foldcode.js 没加载')
+
+    def test_za_toggles_fold(self):
+        """za 折叠当前标题块，再按一次展开。"""
+        self._open(0)
+        self.assertEqual(self._fold_state()['folds'], 0)
+        self._seq('za')
+        self.assertEqual(self._fold_state()['folds'], 1, 'za 没折上')
+        self._seq('za')
+        self.assertEqual(self._fold_state()['folds'], 0, '再按 za 没展开')
+
+    def test_zc_zo_and_zM_zR(self):
+        """zc 关闭 / zo 打开 / zM 全折 / zR 全展开，计数必须是真的。"""
+        self._open(0)
+        self._seq('zc')
+        self.assertEqual(self._fold_state()['folds'], 1)
+        self._seq('zo')
+        self.assertEqual(self._fold_state()['folds'], 0)
+
+        self._seq('zM', gap=250)
+        st = self._fold_state()
+        # 本页有 3 个标题（# H1 / ## H2 / ## H2 sub2），每个至少折出 1 处
+        self.assertGreaterEqual(st['folds'], 2, 'zM 没有折叠出多处：%r' % st)
+        # 计数不能谎报（曾报「已折叠 71 处」而实际只有 10）
+        self.assertNotIn('已折叠 71', st['toast'], 'zM 计数用行数冒充处数')
+
+        self._seq('zR', gap=250)
+        self.assertEqual(self._fold_state()['folds'], 0, 'zR 没全部展开')
+
+    def test_ex_fold_and_unfold(self):
+        """:fold / :unfold 与 za 同一套实现（ex 层也要认得）。"""
+        self._open(0)
+        self.page.keyboard.press(':')
+        self.page.wait_for_timeout(280)
+        self.page.keyboard.type('fold')
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(800)
+        st = self._fold_state()
+        self.assertEqual(st['folds'], 1, ':fold 没生效')
+        self.assertNotIn('Not an editor command', st['msg'])
+        self.page.keyboard.press(':')
+        self.page.wait_for_timeout(280)
+        self.page.keyboard.type('unfold')
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(800)
+        self.assertEqual(self._fold_state()['folds'], 0, ':unfold 没生效')
+
