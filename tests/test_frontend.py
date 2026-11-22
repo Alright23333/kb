@@ -498,3 +498,160 @@ class TestOffline(Base):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+# ══════════════════════════════════════════════════════════
+# 9. 路由表 —— 部署前缀 / 深链接 / vim text object
+#
+# 这一节的三个 bug 都是「只有在某个具体 URL 或某个具体字符位置上
+# 才会出现」的那一类，纯函数测不到：
+#
+#   ① 访问 /kb/theme 时模板把整段路径当部署前缀，manifest 与 sw.js
+#      请求到 /kb/theme/… 被后端回落成 HTML（unsupported MIME type）
+#   ② /kb/trash 没有 parseRoute 分支，深链接掉成首页，回收站看不到
+#   ③ 编辑器里在空行按 ciw：expandWordUnderCursor 返回 null，
+#      vim.js 直接读 null.start 抛 TypeError 把整个 keydown 打断
+# ══════════════════════════════════════════════════════════
+
+class TestRoutes(Base):
+    def test_base_is_kb_on_command_only_routes(self):
+        """theme / health / searches / trash / gantt 都必须算出 base=/kb。
+
+        断言的是 __KB_BASE__ 这个「后端注入的前缀」而不是页面内容 ——
+        base 错了会牵连 manifest/sw.js/API 三条路径，但页面本身看起来
+        完全正常（静默失效）。原先的模板正则只认识 9 个内置词，
+        上面五个全部算错。
+        """
+        for path in ('/theme', '/health', '/searches', '/trash', '/gantt'):
+            self.page.goto(URL + path, wait_until='domcontentloaded')
+            self.page.wait_for_timeout(1800)
+            base = self.page.evaluate('() => window.__KB_BASE__')
+            self.assertEqual(base, '/kb', '%s 的部署前缀算错：%r' % (path, base))
+
+    def test_deep_link_health_opens_panel(self):
+        """/kb/health 直接打开体检面板，不是一张空白首页。"""
+        self.goto('/health', 3000)
+        visible = self.page.evaluate(
+            '() => {'
+            '  const el = document.getElementById("kb-health");'
+            '  if (!el) return false;'
+            '  const cs = getComputedStyle(el);'
+            '  const r = el.getBoundingClientRect();'
+            '  return cs.display !== "none" && r.width > 0;'
+            '}'
+        )
+        self.assertTrue(visible, '/kb/health 没打开体检面板')
+
+    def test_deep_link_searches_opens_panel(self):
+        """/kb/searches 直接打开常用搜索面板。"""
+        self.goto('/searches', 3000)
+        visible = self.page.evaluate(
+            '() => {'
+            '  const el = document.getElementById("kb-saved-search");'
+            '  if (!el) return false;'
+            '  const cs = getComputedStyle(el);'
+            '  const r = el.getBoundingClientRect();'
+            '  return cs.display !== "none" && r.width > 0;'
+            '}'
+        )
+        self.assertTrue(visible, '/kb/searches 没打开常用搜索面板')
+
+    def test_deep_link_trash_opens_overlay(self):
+        """/kb/trash 要真的弹出回收站（之前没有 parseRoute 分支，掉成首页）。"""
+        self.goto('/trash', 3000)
+        opened = self.page.evaluate(
+            '() => !!document.querySelector("#ov-trash.overlay.open")'
+        )
+        self.assertTrue(opened, '/kb/trash 没有打开回收站')
+
+    def test_theme_route_does_not_flip_scheme(self):
+        """/kb/theme 只是旧链接兜底，不能每次打开都翻转配色。
+
+        原先 dispatch 里写的是 `case 'theme': toggleTheme()`，而 base 修好
+        之后这个分支真的会被走到 —— 同一个 URL 刷两次颜色不一样。
+        """
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1800)
+        first = self.page.evaluate(
+            '() => document.documentElement.getAttribute("data-scheme")'
+        )
+        for _ in range(2):
+            self.page.goto(URL + '/theme', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(1600)
+        after = self.page.evaluate(
+            '() => document.documentElement.getAttribute("data-scheme")'
+        )
+        self.assertEqual(first, after, '/kb/theme 把配色翻掉了')
+
+
+class TestVimTextObjects(Base):
+    """编辑器里在「找不到文本对象」的位置按 text object 不该抛异常。"""
+
+    def _editor(self, wait=2600):
+        self.page.goto(URL + '/edit/KB', wait_until='networkidle')
+        self.page.wait_for_timeout(wait)
+        self.page.click('.CodeMirror')
+        self.page.wait_for_timeout(300)
+
+    def test_ciw_on_empty_line_is_noop(self):
+        """空行上按 ciw：vim 里什么也不做；这里必须不抛异常且按键流还活着。
+
+        原先 vim.js 在没有文本对象可选的字符上直接 return null，
+        但末尾两行无条件读 tmp.start → TypeError，整个 keydown 被打断，
+        之后所有按键都进不了编辑器。
+        """
+        self._editor()
+        self.page.evaluate(
+            '() => {'
+            '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+            '  let empty = -1;'
+            '  for (let i = 0; i < c.lineCount(); i++) {'
+            '    if (c.getLine(i).trim() === "") { empty = i; break; }'
+            '  }'
+            '  c.focus(); c.setCursor({line: empty < 0 ? 0 : empty, ch: 0});'
+            '}'
+        )
+        self.page.wait_for_timeout(200)
+        for k in ('c', 'i', 'w'):
+            self.page.keyboard.type(k)
+            self.page.wait_for_timeout(120)
+        self.page.wait_for_timeout(300)
+        line_before = self.page.evaluate(
+            '() => document.querySelector(".CodeMirror").CodeMirror.getCursor().line'
+        )
+        self.page.keyboard.type('j')
+        self.page.wait_for_timeout(300)
+        line_after = self.page.evaluate(
+            '() => document.querySelector(".CodeMirror").CodeMirror.getCursor().line'
+        )
+        self.assertNotEqual(line_before, line_after, '空行 ciw 之后按键流断了')
+        self.assertEqual(self.errors, [], 'ciw 在空行抛了异常：%s' % self.errors[:2])
+
+    def test_ciw_on_word_still_works(self):
+        """修完空行 bug，正常位置上的 ciw 必须仍然生效（别过度修）。"""
+        self._editor()
+        self.page.evaluate(
+            '() => {'
+            '  const c = document.querySelector(".CodeMirror").CodeMirror;'
+            '  let line = 0;'
+            '  for (let i = 0; i < c.lineCount(); i++) {'
+            '    if (c.getLine(i).trim().length > 3) { line = i; break; }'
+            '  }'
+            '  c.focus(); c.setCursor({line: line, ch: 1});'
+            '}'
+        )
+        self.page.wait_for_timeout(200)
+        before = self.page.evaluate(
+            '() => document.querySelector(".CodeMirror").CodeMirror.getValue()'
+        )
+        for k in ('c', 'i', 'w'):
+            self.page.keyboard.type(k)
+            self.page.wait_for_timeout(120)
+        self.page.keyboard.type('ZZ')
+        self.page.wait_for_timeout(150)
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(400)
+        after = self.page.evaluate(
+            '() => document.querySelector(".CodeMirror").CodeMirror.getValue()'
+        )
+        self.assertNotEqual(before, after, '正常位置上 ciw 失效了')
