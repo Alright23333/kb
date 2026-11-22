@@ -83,6 +83,7 @@ KB.spec([
     priority: 48,
     lazy: true,
     cmd: "health",
+    routes: ["health"],
     keys: [{ lhs: "uh", desc: "知识库体检" }],
     opts: { fold: 25 },
   },
@@ -100,6 +101,7 @@ KB.spec([
      * 懒加载的话没人触发它，等于没装。文件只有 ~6KB。 */
     lazy: false,
     cmd: "Searches",
+    routes: ["searches"],
     keys: [{ lhs: "uS", desc: "常用搜索" }],
     opts: { max: 8 },
   },

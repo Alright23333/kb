@@ -172,6 +172,11 @@ KB.define('saved-search', (api, opts) => {
   api.css('plugins/saved-search.css');
   api.command('Searches', '常用搜索（固定/删除）', openPanel);
   api.keys([{ lhs: 'uS', desc: '常用搜索', run: openPanel }]);
+  /* 同 health：深链接 /kb/searches 要有真视图，否则影子视图会递归。 */
+  api.view('searches', () => {
+    if (window.pluginBackdrop) window.pluginBackdrop();
+    openPanel();
+  });
   api.on('boot', () => setTimeout(watch, 100));
   api.on('navigate', () => { setTimeout(() => { injectSearchButton(); injectHome(); }, 60); });
 });

@@ -18,8 +18,14 @@
  *  2) 这里按「路径里第一个路由词之前的部分」重算
  * 第 2 条是必须的：访问 /gantt 时模板只看内置路由词，会误把整个
  * '/gantt' 当成部署前缀，base 一错，路由就全部退回首页。 */
+/* 部署前缀：**优先用后端注入的值**（templates/index.html 里 <!--KB_BASE-->
+ * 被 main.py 替换成一段 script）。路由词表只存在后端一处，避免第三次出现
+ * 「前端自己的词表不认识某个路由 → 把路由当成了前缀」的事故。
+ * 下面这段推导只在「模板没注入」时兜底（例如直接开静态文件调试）。 */
 const BASE = (function () {
-  const BUILTIN = ['page', 'all', 'graph', 'todo', 'journal', 'tag', 'search', 'edit', 'new'];
+  if (typeof window.__KB_BASE__ === 'string') return window.__KB_BASE__;
+  const BUILTIN = ['page', 'all', 'graph', 'todo', 'journal', 'tag', 'search', 'edit', 'new',
+    'theme', 'trash', 'health', 'searches', 'gantt'];
   const declared = (window.KB && typeof window.KB.declaredRoutes === 'function')
     ? window.KB.declaredRoutes() : [];
   const known = BUILTIN.concat(declared);
@@ -563,6 +569,7 @@ function routeUrl(target, arg) {
     case 'page': return BASE + '/page/' + encodeURIComponent(arg || '');
     case 'edit': return BASE + '/edit/' + encodeURIComponent(arg || '');
     case 'new': return BASE + '/new';
+    case 'trash': return BASE + '/trash';
     default:
       // 插件注册的视图 = 动态路由（REST 后端不需要知道它，SPA 兜底即可）
       if (window.KB && window.KB.routeWords && window.KB.routeWords().indexOf(target) >= 0) {
@@ -590,6 +597,10 @@ function parseRoute(path) {
     case 'page': return { target: 'page', arg: rest };
     case 'edit': return { target: 'edit', arg: rest };
     case 'new': return { target: 'new' };
+    /* 回收站是 overlay 视图，但深链接 /kb/trash 必须能落到 openTrash()。
+     * 原先这里没有 case，/kb/trash 掉进 default → routeWords() 里也没有
+     * 'trash'（它不是插件路由）→ 判定成 home，收件箱永远看不到。 */
+    case 'trash': return { target: 'trash' };
     default:
       if (window.KB && window.KB.routeWords && window.KB.routeWords().indexOf(parts[0]) >= 0) {
         return { target: parts[0], arg: rest || null };
@@ -810,7 +821,16 @@ function dispatch(target, arg) {
     case 'todo': showTodo(token); break;
     case 'journal': showJournal(arg, token); break;
     case 'graph': showGraph(token); break;
-    case 'theme': toggleTheme(); showHome(++navToken); break;
+    /* /kb/theme 现在能算对部署前缀了（后端注入 base），于是它真的会
+     * 进到这个分支。**不能在这里 toggleTheme()** —— 那样每次刷新或从
+     * 收藏夹打开都会翻转一次配色，同一个 URL 两次打开颜色不一样。
+     * 切配色是命令（:theme / :colorscheme / space u c），URL 只是旧链接
+     * 兜底：落到首页即可。 */
+    case 'theme': showHome(token); break;
+    /* /kb/trash 同理：回收站是个 overlay，深链接进来先铺首页再叠面板，
+     * Esc / :q 有东西可退。原先这个 target 根本没有 case，
+     * 一路掉到 default 当页面名去查 —— 查不到就是空页。 */
+    case 'trash': showHome(token); openTrash(); break;
     case 'new': openEditor('', '', token); break;
     case 'edit': openEditor(arg, null, token); break;
     case 'page': showPage(arg, token); break;
@@ -4227,7 +4247,11 @@ Object.assign(window, {
   // 基础
   navigate, dispatch, toast, escapeHtml, renderMd,
   openOverlay, closeOverlays, openPicker, confirmText, promptText,
-  setStatusName, showView, getSetting,
+  setStatusName, showView, getSetting, showHome, openTrash,
+  /* 插件视图需要「铺一层首页当底，再叠自己的面板」：
+   * 深链接 /kb/health 进来时不能是一张空白页，Esc 也得有东西可退。
+   * navToken 直接 ++ 会让进行中的请求失效，所以收敛成一个函数。 */
+  pluginBackdrop: () => showHome(++navToken),
   // 数据
   jfetch, getPage, getTags, ensureNames, fetchAllPages, invalidateCache,
   taskPages, taskPage, parseTasks, parseTaskLine,

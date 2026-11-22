@@ -138,4 +138,12 @@ KB.define('health', (api, opts) => {
   api.css('plugins/health.css');
   api.command('health', '知识库体检（孤立页/断链）', toggle);
   api.keys([{ lhs: 'uh', desc: '知识库体检', run: toggle }]);
+  /* 真视图：让 /kb/health 这个深链接能直接开面板。
+   * 只写 routes 不写 view 的话，dispatch 会走 default 分支，
+   * viewFor('health') 只能拿到「影子视图」，影子再 dispatch 自己 →
+   * 无限递归。所以 lazy 插件的 routes 必须配一个真 api.view()。 */
+  api.view('health', () => {
+    if (window.pluginBackdrop) window.pluginBackdrop();
+    toggle();
+  });
 });
