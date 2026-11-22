@@ -1349,3 +1349,154 @@ class TestEditorFolding(Base):
         self.page.wait_for_timeout(800)
         self.assertEqual(self._fold_state()['folds'], 0, ':unfold 没生效')
 
+# ══════════════════════════════════════════════════════════
+# 15. 触屏动作坞的可达性 + 目录面板的会话记忆
+#
+# 两个都是「只有真的用手指点一次才会暴露」的问题：
+#
+# ① #fxdock 的 z-index 是 55，而 KBPanel 的 overlay 是 90、scrim 是 89。
+#    390×844 上打开 /page/KB，目录面板（240×506）正好压在动作坞展开区，
+#    12 个按钮里 8 个的 elementFromPoint 命中的是 .toc-item —— 真实 tap
+#    直接超时。触屏上动作坞是**唯一**命令入口，被盖住等于入口没了。
+#
+# ② TOC 关掉后每次 `api.on('page')` 又把它弹出来，没有会话记忆。
+#    用户在不想要目录的页面上得反复关同一个东西。
+#
+# 注意：`locator.tap()` 需要 hasTouch context。基类的 page 是
+# `new_page()` 建的无 touch 页面，直接 tap 会报
+# "The page does not support tap" —— 与 bug 本身无关的错误，
+# 所以这里统一用自建的 touch context。
+# ══════════════════════════════════════════════════════════
+
+MOBILE_UA = ('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+             '(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36')
+
+
+class TestTouchDockReachable(Base):
+    """触屏：动作坞必须点得动，且不被任何面板盖住。"""
+
+    def _touch_page(self):
+        ctx = self._browser.new_context(**{
+            'viewport': {'width': 390, 'height': 844},
+            'has_touch': True, 'is_mobile': True,
+            'user_agent': MOBILE_UA,
+        })
+        pg = ctx.new_page()
+        pg.goto(URL + '/page/KB', wait_until='domcontentloaded')
+        pg.wait_for_timeout(3200)
+        return ctx, pg
+
+    def test_dock_zindex_above_overlay_panels(self):
+        """动作坞的 z-index 必须高于 KBPanel 的 overlay(90)。"""
+        ctx, pg = self._touch_page()
+        try:
+            z = pg.evaluate(
+                '() => ({dock: getComputedStyle(document.getElementById("fxdock")).zIndex,'
+                '        toc: (document.getElementById("kb-toc")'
+                '              ? getComputedStyle(document.getElementById("kb-toc")).zIndex : null)})'
+            )
+            self.assertEqual(z['dock'], '96', '动作坞 z-index 不是 96: %r' % z)
+            if z['toc'] is not None:
+                self.assertGreater(int(z['dock']), int(z['toc']),
+                                   '动作坞被目录面板盖住: %r' % z)
+        finally:
+            ctx.close()
+
+    def test_dock_buttons_all_clickable(self):
+        """12 个按钮的 elementFromPoint 必须命中按钮本身（TOC 开着的前提下）。"""
+        ctx, pg = self._touch_page()
+        try:
+            pg.locator('#fx-toggle').first.tap()
+            pg.wait_for_timeout(800)
+            r = pg.evaluate(
+                '() => {'
+                '  const p = document.getElementById("fx-panel");'
+                '  const out = [];'
+                '  for (const t of Array.from(p.querySelectorAll(".fx-btn"))) {'
+                '    const rc = t.getBoundingClientRect();'
+                '    const el = document.elementFromPoint(rc.left + rc.width / 2, rc.top + rc.height / 2);'
+                '    out.push({fx: t.dataset.fx, ok: !!(el && el.closest(".fx-btn"))});'
+                '  }'
+                '  return {blocked: out.filter(o => !o.ok), total: out.length}; }'
+            )
+            self.assertEqual(r['blocked'], [], '这些按钮被别的元素盖住了: %r' % (r['blocked'],))
+            self.assertEqual(r['total'], 12)
+        finally:
+            ctx.close()
+
+    def test_real_tap_on_dock_opens_picker(self):
+        """真实 tap 点「跳转页面」必须真的打开 #ov-pick。"""
+        ctx, pg = self._touch_page()
+        try:
+            pg.locator('#fx-toggle').first.tap()
+            pg.wait_for_timeout(800)
+            pg.locator('#fx-panel .fx-btn').first.tap(timeout=6000)
+            pg.wait_for_timeout(1300)
+            vis = pg.evaluate(
+                '() => { const o = document.querySelector("#ov-pick");'
+                ' return !!o && getComputedStyle(o).display !== "none"; }'
+            )
+            self.assertTrue(vis, 'tap 了「跳转页面」但 #ov-pick 没出现')
+        finally:
+            ctx.close()
+
+
+class TestTocRemembersClose(Base):
+    """关掉目录后不该在每次切页时又弹回来。"""
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/page/KB', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(3000)
+        self.page.evaluate('() => { try { localStorage.removeItem("kb-toc-off"); } catch (e) {} }')
+
+    def _toc_display(self):
+        return self.page.evaluate(
+            '() => { const e = document.getElementById("kb-toc");'
+            ' return e ? getComputedStyle(e).display : "MISSING"; }'
+        )
+
+    def _close_toc(self):
+        self.page.evaluate('() => { const x = document.querySelector("#kb-toc .kbp-x"); if (x) x.click(); }')
+        self.page.wait_for_timeout(600)
+
+    def test_closing_toc_persists_across_navigation(self):
+        """点 × 关掉后切三页都不能自己回来，且 localStorage 记下了。"""
+        self._close_toc()
+        self.assertEqual(self.page.evaluate('() => localStorage.getItem("kb-toc-off")'), '1',
+                         '关闭后没记住')
+        for tgt in ['kb-issue', 'KB', 'kb-docker']:
+            self.page.evaluate('(n) => navigate("page", n)', tgt)
+            self.page.wait_for_timeout(2000)
+            self.assertEqual(self._toc_display(), 'none', '切到 %s 后目录又弹回来了' % tgt)
+
+    def test_toc_command_clears_memory(self):
+        """:toc 重新打开时清掉记忆，之后切页照常出现。"""
+        self._close_toc()
+        self.assertEqual(self._toc_display(), 'none')
+        self.page.evaluate('() => runCommand("toc", [])')
+        self.page.wait_for_timeout(1200)
+        self.assertNotEqual(self._toc_display(), 'none', ':toc 没能重新打开')
+        self.assertIsNone(self.page.evaluate('() => localStorage.getItem("kb-toc-off")'),
+                          ':toc 没清掉关闭记忆')
+        self.page.evaluate('() => navigate("page", "kb-issue")')
+        self.page.wait_for_timeout(2000)
+        self.assertNotEqual(self._toc_display(), 'none', '重新打开后切页应继续显示')
+
+    def test_toc_still_clickable_on_desktop(self):
+        """z-index 调整不能反过来盖住目录面板自己的条目。"""
+        self.page.set_viewport_size({'width': 1280, 'height': 900})
+        self.page.goto(URL + '/page/KB', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(3000)
+        r = self.page.evaluate(
+            '() => {'
+            '  const el = document.getElementById("kb-toc");'
+            '  if (!el) return {missing: true};'
+            '  const items = el.querySelectorAll(".toc-item");'
+            '  if (!items.length) return {items: 0};'
+            '  const rc = items[0].getBoundingClientRect();'
+            '  const hit = document.elementFromPoint(rc.left + rc.width / 2, rc.top + rc.height / 2);'
+            '  return {items: items.length, ok: !!(hit && hit.closest(".toc-item"))}; }'
+        )
+        self.assertFalse(r.get('missing'), '桌面上目录面板不见了')
+        self.assertTrue(r['ok'], '目录项被别的东西盖住了: %r' % (r,))
