@@ -35,6 +35,13 @@
 - **`/all`→KB 继承滚动位置 900**：`innerHTML` 换掉不重置 `scrollTop`，没有记忆时必须**显式归零**
 - **e2e 首跑抓到 3 个问题**：`5j` 预期写错（光标初始在首行之前，`5j` 到索引 4）；两个离线用例被自己的 `tearDown` 判红（断网必然产生 resource 加载失败，加白名单）
 
+### 本轮追加（2026-11-23 凌晨，注释与缓冲内跳转）
+
+| # | 修的是什么 | commit |
+|---|---|---|
+| 25 | **`gcc`/`gc` 完全没实现** —— `vim.js` 里只有 `{keys:'gc', type:'operator', operator:'comment'}` 这条**键位声明**，而 `operators['comment']` 根本没写，所以按 gcc 既无反应也不报错。Markdown 的注释是 `<!-- -->` 而非 `//`，不能套 CM 的 comment addon。自己实现：整行包围/去掉、多行先判方向（全有则全去）、`gcc` normal / `gc` visual、visual 后主动 exit。**第一次仍漏了 count** —— action 回调签名是 `(cm, actionArgs, vim)`，`2gcc` 的行数在 `actionArgs.repeat`，写成 `() =>` 就只注释一行 | `619d500` |
+| 26 | **编辑器里 Ctrl-o/Ctrl-i 被应用级 capture 处理器抢走** —— app.js 的 document capture 里无条件 `preventDefault + jumpTo(±1)`，那是**阅读态**的路由跳转历史；而 CodeMirror 的 vim 有 `jumpListWalk`，`/`、`n`、`G`、`%`、marks 的动作全带 `toJumplist`，是**缓冲内**语义。抢走之后编辑器里按 Ctrl-o 光标纹丝不动（应用 jumplist 里根本没有编辑器内的跳转）。改法：`if (state.editing) return;` 放行 | `619d500` |
+
 ### 本轮追加（2026-11-23 凌晨，ex 命令层）
 
 | # | 修的是什么 | commit |
@@ -313,6 +320,11 @@
 - [[2026-11-17]] — 待办重排：把散落在 P0/P3/P5' 下的未完成项抽成「当前未完成（16 条）」总表，按可动手程度分六档（小改动/待拍板/暂缓/AI-native 两档/路线图）；P3 与 P5' 里重复的改成指针，避免两处打勾状态漂移
 - [[2026-11-21]] — **P7 对外开放与稳定性 4/4 上线**（`ee99ea4`）：① MCP 搜索 SQL 列名拼错（`frowid` → `f.rowid`，此前一直静默走 LIKE 兜底）② `/api/pages/count` + 前端「加载更多」，页面数不再卡 500（568 → 579）③ `mcp_public.py` 公开只读子集（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / `mode=ro` 强制只读 / `kb-mcp-public` 容器 `127.0.0.1:8100`）④ 两个 MCP 端点改 `stateless_http=True`，服务端重启不再让客户端永久 404。本轮改动此前只存在于生产服务器工作区，已全部收编入仓库，三方（本地/fajita/GitHub）同 commit
 - [[2026-11-22]] — **新前端接管生产 8080**（`570edda`）+ 停掉冗余测试容器（`eca1291`）；随后修 leader 双 handler 争用与 `[[` 补全四处缺陷（`7702967`）、配色重构为 Catppuccin 四口味且结构层/参数层拆开（`a83446f`）
+- [[2026-11-23]] — `619d500` **`gcc`/`gc` 从未实现**（vim.js 只有键位声明、没有 operator），
+  按 Markdown 语义自实现 `<!-- -->` 包围/取消；**第一次仍漏了 count**（`2gcc` 只注释一行 ——
+  action 回调签名 `(cm, actionArgs, vim)` 被写成 `() =>`，这是第三次踩「参数到了、签名没接」）。
+  同 commit 修掉**编辑器里 Ctrl-o/Ctrl-i 被应用级 capture 抢走**（阅读态是路由跳转历史、
+  编辑器里应是 CodeMirror 的 `jumpListWalk`，两套语义必须分开）。单测 84 全绿。
 - [[2026-11-23]] — **ex 命令层又两处**：`d587d65` **`:e!` 静默清空缓冲区**（`!` 当文件名 →
   打开叫「!」的页 → 404 → `load('')` → 2172 字变 0 字）；`1c6935b` 补 `gf`（编辑器里跟
   `[[wikilink]]`，CodeMirror 全文没有这个动作）与 `:t`/`:m` 复制/移动行（坐标换算连错三轮，
