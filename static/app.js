@@ -1747,9 +1747,17 @@ function initCM() {
   });
 
   // nvim-ish Ex 命令（编辑态下的 :xxx）
-  const defineEx = (name, fn) => {
+  /* 第三个参数 prefix 是给「短名」用的：defineEx('delete', fn, 'd') 之后
+   * `:d` 与 `:delete` 都能命中（CodeMirror 的 matchCommand_ 走前缀匹配，
+   * 但要求 commandMap_ 里那个条目的 name 以用户输入为前缀）。
+   *
+   * 第二个实参改成透传整个 params —— 行号范围（params.line / lineEnd）、
+   * 原始 argString 都在里面。原先只给 args 数组，`:d` 系列就永远拿不到
+   * range，只能删光标所在行。 */
+  const defineEx = (name, fn, prefix) => {
     try {
-      CodeMirror.Vim.defineEx(name, name, function (c, params) { fn((params && params.args) || []); });
+      CodeMirror.Vim.defineEx(name, prefix || name,
+        function (c, params) { fn((params && params.args) || [], params || {}); });
     } catch (e) { /* 已注册 */ }
   };
   /* `!` 后缀（:q! / :qa!）= 丢弃改动，与 vim 完全一致。
@@ -2046,6 +2054,118 @@ function initCM() {
     defineEx('m' + digit, () => moveLineTo(digit));
   }
 
+  /* ── `:d` / `:delete` / `:normal` / `:j` / `:put` / `:y` ────────
+   * CodeMirror 的 vim 把「行操作」这一族整个漏了：defaultExCommandMap 里
+   * 只有 colorscheme/map/set/sort/substitute/yank/delmarks/global…
+   * 没有 delete、没有 normal、没有 join、没有 put。
+   *
+   * 后果最严重的是 `:g/xxx/d` —— 真实 vim 里 global 最常用的用法。
+   * global 的实现是「对每个匹配行拼一条 `:{行号}{cmd}` 再交给
+   * exCommandDispatcher」，所以 `:g/a/d` 会去执行 `:2d`，
+   * 而 `d` 没注册 → 一个字符都不删，只在状态区弹一句
+   * 「Not an editor command ":2d"」。`:g/a/normal dd` 同样死。
+   *
+   * 这一族补上之后 `:g` 才真的可用。 */
+  const exRange = (p) => {
+    const last = cm.lastLine();
+    const clamp = (n) => Math.max(0, Math.min(last, n));
+    let from = p.line !== undefined ? clamp(p.line) : cm.getCursor().line;
+    let to = p.lineEnd !== undefined ? clamp(p.lineEnd) : from;
+    if (to < from) { const t = from; from = to; to = t; }
+    return { from: from, to: to };
+  };
+
+  /* 删整行区间。边界必须按「删到下一行行首」处理 ——
+   * `{line: to, ch: null}` 只到行尾，会留下空行（与 :m+1 踩过的同一个坑）。 */
+  const deleteRange = (r, quiet) => {
+    const last = cm.lastLine();
+    const text = cm.getRange({ line: r.from, ch: 0 }, { line: r.to, ch: null });
+    try {
+      CodeMirror.Vim.getRegisterController().pushText('"', 'delete', text + '\n', true, false);
+    } catch (e) { /* 寄存器不可用就算了，别把删除本身弄挂 */ }
+    cm.operation(() => {
+      if (r.from === 0 && r.to === last) {
+        cm.setValue('');
+      } else if (r.to === last) {
+        cm.replaceRange('', { line: r.from - 1, ch: null }, { line: r.to, ch: null });
+      } else {
+        cm.replaceRange('', { line: r.from, ch: 0 }, { line: r.to + 1, ch: 0 });
+      }
+    });
+    cm.setCursor({ line: Math.min(r.from, cm.lastLine()), ch: 0 });
+    if (!quiet) toast('已删除 ' + (r.to - r.from + 1) + ' 行');
+  };
+
+  defineEx('delete', (a, p) => deleteRange(exRange(p)), 'd');
+
+  /* `:normal {keys}` —— global 的另一种常用搭配（`:g/pat/normal dd`）。
+   * vim 自己维护前缀缓冲，所以逐字符喂给 handleKey 就能正确拼出 dd / dw。 */
+  defineEx('normal', (a, p) => {
+    const seq = String(p.argString || '').trim();
+    if (!seq) return toast('用法：:normal {按键}', 'warn');
+    /* 行号范围必须先用上：`:g/pat/normal dd` 是靠 global 逐行拼出
+     * `:{行号}normal dd` 再交给分发器的，光标不挪过去的话每次 dd
+     * 都作用在**当前光标行**上 —— 实测 `:g/beta/normal dd` 删掉的是
+     * 第一行 `# 测试用`，beta 行一根汗毛没动。 */
+    const r = exRange(p);
+    let startLine = r.from;
+    cm.operation(() => {
+      for (let line = r.from; line <= r.to; line++) {
+        cm.setCursor({ line: line, ch: 0 });
+        for (let i = 0; i < seq.length; i++) {
+          CodeMirror.Vim.handleKey(cm, seq[i], 'normal');
+        }
+      }
+    });
+    cm.setCursor({ line: Math.min(startLine, cm.lastLine()), ch: 0 });
+  }, 'norm');
+
+  /* `:j` / `:join` —— 合并行。不带 ! 时用一个空格连接并吃掉续行缩进。 */
+  defineEx('join', (a, p) => {
+    let r = exRange(p);
+    if (r.from === r.to) r = { from: r.from, to: Math.min(cm.lastLine(), r.from + 1) };
+    if (r.from === r.to) return toast('只有一行，无处合并', 'warn');
+    const parts = [];
+    for (let i = r.from; i <= r.to; i++) parts.push(cm.getLine(i));
+    const merged = (parts[0].replace(/\s+$/, '') + ' '
+      + parts.slice(1).map(x => x.replace(/^\s+/, '').replace(/\s+$/, ''))
+        .filter(x => x !== '').join(' ')).replace(/\s+$/, '');
+    cm.replaceRange(merged, { line: r.from, ch: 0 }, { line: r.to, ch: null });
+    cm.setCursor({ line: r.from, ch: 0 });
+    toast('已合并 ' + (r.to - r.from + 1) + ' 行');
+  }, 'j');
+
+  /* `:pu` / `:put` —— 把寄存器内容贴到指定行**下方**（vim 语义）。 */
+  defineEx('put', (a, p) => {
+    let text = '';
+    try {
+      text = CodeMirror.Vim.getRegisterController()
+        .getRegister(String(a[0] || '"')).toString();
+    } catch (e) { /* ignore */ }
+    if (!text) return toast('寄存器为空', 'warn');
+    const at = (p.line !== undefined ? p.line : cm.getCursor().line) + 1;
+    const body = text.replace(/\n$/, '');
+    const last = cm.lastLine();
+    if (at > last) {
+      cm.replaceRange('\n' + body, { line: last, ch: null });
+      cm.setCursor({ line: last + 1, ch: 0 });
+    } else {
+      cm.replaceRange(body + '\n', { line: at, ch: 0 });
+      cm.setCursor({ line: at, ch: 0 });
+    }
+    toast('已粘贴到第 ' + (Math.min(at, last) + 1) + ' 行');
+  }, 'pu');
+
+  /* `:y` / `:yank` —— 带行号范围复制（内置的 yank 只认光标那一行）。 */
+  defineEx('yank', (a, p) => {
+    const r = exRange(p);
+    const text = cm.getRange({ line: r.from, ch: 0 }, { line: r.to, ch: null });
+    try {
+      CodeMirror.Vim.getRegisterController().pushText('"', 'yank', text + '\n', true, false);
+    } catch (e) { /* ignore */ }
+    toast('已复制 ' + (r.to - r.from + 1) + ' 行');
+  }, 'y');
+
   /* 注意 :m 的冲突：CodeMirror 自带 exCommands.move 是「range 移动光标」，
    * defineEx 会覆盖它（同一个 commandMap_ 表项）。这里覆盖是有意的 ——
    * 网页里 `:3` 跳行可以直接用 `:3`（range + 无命令 = move），
@@ -2075,7 +2195,14 @@ function initCM() {
   defineEx('settings', () => runCommand('settings', []));
   defineEx('find', (a) => runCommand('find', a));
   defineEx('rename', (a) => runCommand('rename', a));
-  defineEx('del', () => runCommand('del', []));
+  /* 命名冲突：vim 里 `:del` 是 `:delete` 的缩写，而 `:delete` 删的是**行**。
+   * 本应用早先用 `:del` 表示「删除当前页（进回收站）」，补上 `:d`/`:delete`
+   * 之后 `:del` 就被前缀匹配抢到行删除上了（`'delete'.indexOf('del') === 0`）。
+   *
+   * 取舍按「对齐真实 vim」：`:d` / `:delete` / `:del` 一律删行；
+   * 删页面改成 netrw 的 `:Delete`（首字母大写，与 vim 的 `:Delete` 语义一致）。
+   * 页面删除同时保留按键入口 `x`（阅读态）与 `space x`，不依赖 ex。 */
+  defineEx('Delete', () => runCommand('del', []));
   defineEx('preview', () => togglePreview());
   defineEx('set', (a) => runCommand('set', a));
 
@@ -2660,7 +2787,12 @@ const BASE_COMMANDS = [
   ['new', '新建页面'],
   ['find <词>', '模糊跳转页面'],
   ['rename <新名>', '重命名当前页'],
-  ['del', '删除当前页（进回收站）'],
+  ['d [范围]', '删除行（:delete / :del 同义，同 vim）'],
+  ['Delete', '删除当前页（进回收站，同 netrw）'],
+  ['normal {按键}', '按普通模式按键执行（:g/pat/normal dd 依赖它）'],
+  ['j [范围]', '合并行'],
+  ['y [范围]', '复制行到寄存器'],
+  ['pu [x]', '把寄存器贴到当前行下方'],
   ['versions', '版本历史'],
   ['preview', '切换预览'],
   ['all', '所有页面'],
