@@ -1921,3 +1921,201 @@ class TestEditorExLineOps(Base):
         self.page.keyboard.press('Escape')
         self.page.wait_for_timeout(400)
 
+# ══════════════════════════════════════════════════════════
+# 18. iw / aw 文本对象 —— 期望值取自真 nvim 实测
+#
+# 用 `nvim --headless -u NONE` + `nvim_feedkeys` 对同一段文本、同一光标位置
+# 跑同一组按键，把结果抄成本节的断言。网页侧对不上就是 bug。
+#
+# 本轮修的三处（都在 vendored vim.js）：
+#
+#  ① expandWordUnderCursor 只会「向前找词」——光标落在空白上时，
+#     `diw` 越过空白去删下一个词。vim 里选中的是**那段空白本身**。
+#  ② yank operator 无条件 `return oldAnchor`（光标原地不动）。vim 的
+#     字符级 y{motion} 把光标留在**区域起点**，`yb`/`y0` 这种向后运动时
+#     锚点恰是区域**尾**，只留原地就会错位；偏差一路传到后面的 `P` 粘贴。
+#  ③ paste 的 `P` 分支用 `idx + text.length`（最后字符的**下一格**），
+#     比 `p` 偏一位。
+# ══════════════════════════════════════════════════════════
+
+IWAW_SCRATCH = 'placeholder'
+
+
+class TestEditorWordTextObjects(Base):
+    """iw / aw 在空白、标点、CJK、行首缩进、行尾空白上的选区行为。"""
+
+    PAGE = '__e2e-iwaw-scratch'
+
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  return r.status; }'
+    )
+
+    EXISTS_JS = (
+        'async (name) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages/" + name);'
+        '  return r.status; }'
+    )
+
+    SETUP_JS = (
+        '([text, ch]) => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  if (!w) return false;'
+        '  w.CodeMirror.setValue(text);'
+        '  w.CodeMirror.setCursor({line: 0, ch: ch});'
+        '  w.CodeMirror.focus();'
+        '  return true; }'
+    )
+
+    READ_JS = (
+        '() => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  const c = w.CodeMirror;'
+        '  return {text: c.getValue(), ch: c.getCursor().ch,'
+        '          line: c.getCursor().line}; }'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1200)
+        st = self.page.evaluate(self.CREATE_JS, [self.PAGE, 'placeholder'])
+        self.assertEqual(st, 200, '临时页创建失败: %r' % st)
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(3000)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            left = self.page.evaluate(self.EXISTS_JS, self.PAGE)
+            self.assertEqual(left, 404, '临时页没清干净（HTTP %r）' % left)
+        finally:
+            super().tearDown()
+
+    def _run(self, text, ch, keys):
+        """在临时页里载入 text、把光标放到 ch、喂 keys，返回最终状态。"""
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(150)
+        ok = self.page.evaluate(self.SETUP_JS, [text, ch])
+        self.assertIsNot(ok, False, '拿不到 CodeMirror 实例')
+        self.page.wait_for_timeout(200)
+        for k in keys:
+            self.page.keyboard.press(k)
+            self.page.wait_for_timeout(90)
+        self.page.wait_for_timeout(350)
+        return self.page.evaluate(self.READ_JS)
+
+    # ── ① 空白当词：diw / daw 在空格上 ────────────────────────
+    def test_diw_on_whitespace_deletes_the_space_not_next_word(self):
+        """`'foo(bar, baz)'` 光标在 ch=8（空格）上按 diw。
+
+        nvim: (0,8) 'foo(bar,baz)'   ← 删掉那个空格
+        修前: (0,9) 'foo(bar, )'     ← 越过空格删掉了 'baz'
+        """
+        r = self._run('foo(bar, baz)', 8, ['d', 'i', 'w'])
+        self.assertEqual(r['text'], 'foo(bar,baz)',
+                         'diw 删错了内容: %r' % r['text'])
+        self.assertEqual(r['ch'], 8)
+
+        # 两个空格中间：iw = 两个空格
+        r = self._run('a  b', 1, ['d', 'i', 'w'])
+        self.assertEqual(r['text'], 'ab', 'iw 在双空格上的选区不对: %r' % r['text'])
+
+    def test_diw_on_indent_and_trailing_whitespace(self):
+        """行首缩进 / 行尾空白上的 diw。
+
+        nvim: '   abc' ch=1 → '' 之外先吃缩进 → 'abc'
+              'foo  '  ch=3 → 'foo'
+        """
+        r = self._run('   abc', 1, ['d', 'i', 'w'])
+        self.assertEqual(r['text'], 'abc', '缩进上的 diw 删错了: %r' % r['text'])
+
+        r = self._run('foo  ', 3, ['d', 'i', 'w'])
+        self.assertEqual(r['text'], 'foo', '行尾空白上的 diw 删错了: %r' % r['text'])
+
+    # ── ② aw 只向后吃词 ─────────────────────────────────────
+    def test_daw_on_whitespace_takes_space_plus_next_word(self):
+        """`'foo(bar, baz)'` ch=8 的 daw = 空格 + 'baz'。
+
+        nvim: (0,8) 'foo(bar,)'；修前 `exitVisualMode` 后跟的选区方向不对。
+        """
+        r = self._run('foo(bar, baz)', 8, ['d', 'a', 'w'])
+        self.assertEqual(r['text'], 'foo(bar,)',
+                         'daw 在空格上的选区不对: %r' % r['text'])
+        self.assertEqual(r['ch'], 8)
+
+    def test_daw_without_trailing_word_does_nothing_but_moves_cursor(self):
+        """后面没有词时 vim 不删东西，但光标会挪到空白结束处。
+
+        nvim 实测：'foo  ' ch=3 daw → 文本不变、光标 (0,4)
+                  '   '   ch=1 daw → 文本不变、光标 (0,2)（夹到行长-1）
+        """
+        for text, ch, want_ch in (('foo  ', 3, 4), ('   ', 1, 2)):
+            r = self._run(text, ch, ['d', 'a', 'w'])
+            self.assertEqual(r['text'], text,
+                             'aw 后面没词时不该改动文本: %r' % r['text'])
+            self.assertEqual(r['ch'], want_ch,
+                             'aw 后光标应在 %d，实际 %d' % (want_ch, r['ch']))
+
+    # ── ③ yiw / yaw 之后光标在区域起点 ────────────────────────
+    def test_yank_moves_cursor_to_region_start(self):
+        """字符级 y{motion} 之后光标 = min(锚点, 区域尾)。
+
+        nvim 实测（'foo  bar' 逐列跑 yiw，共 8 列）：
+          ch=0,1,2 → 0   （"foo" 起点）
+          ch=3,4   → 3   （iw 是空白 [3,5)，起点 3）
+          ch=5,6,7 → 5   （"bar" 起点）
+
+        注意别拿 ch=8 去比 —— 'foo  bar' 只有 8 个字符、下标 0..7，
+        nvim 对越界列会先夹到 7 再算，跟网页侧「行尾=ch 8」不是同一件事
+        （这条第一版就踩了：期望 5、实际 8，以为是 yank bug）。
+        """
+        expect = {0: 0, 1: 0, 2: 0, 3: 3, 4: 3, 5: 5, 6: 5, 7: 5}
+        for ch, want in expect.items():
+            r = self._run('foo  bar', ch, ['y', 'i', 'w'])
+            self.assertEqual(r['ch'], want,
+                             'yiw 在 ch=%d 后光标应在 %d，实际 %d'
+                             % (ch, want, r['ch']))
+
+    # ── ④ P 与 p 的光标偏移一致 ──────────────────────────────
+    def test_put_P_cursor_lands_on_last_inserted_char(self):
+        """`y{l}P` 的光标应与 `p` 一样落在插入文本的最后一字符。
+
+        nvim 实测：'abcdef' ch=2
+          ylP  → (0,2) 'abccdef'      （P 插入 1 个字符，光标 = 2）
+          y2lP → (0,3) 'abcdcdef'
+          y$P  → (0,5) 'abcdefcdef'
+        修前 P 走 `idx + text.length`，每次多一位。
+        """
+        cases = [('abcdef', 2, ['y', 'l', 'P'], 2, 'abccdef'),
+                 ('abcdef', 2, ['y', '2', 'l', 'P'], 3, 'abcdcdef'),
+                 ('abcdef', 2, ['y', '$', 'P'], 5, 'abcdefcdef')]
+        for text, ch, keys, want_ch, want_text in cases:
+            r = self._run(text, ch, keys)
+            self.assertEqual(r['text'], want_text,
+                             '%s 粘贴结果不对: %r' % (''.join(keys), r['text']))
+            self.assertEqual(r['ch'], want_ch,
+                             '%s 后光标应在 %d，实际 %d'
+                             % (''.join(keys), want_ch, r['ch']))
+
+        # p 那一支本来就是对的，别改坏了
+        r = self._run('abcdef', 2, ['y', 'l', 'p'])
+        self.assertEqual((r['text'], r['ch']), ('abccdef', 3))
+
+
