@@ -35,6 +35,19 @@
 - **`/all`→KB 继承滚动位置 900**：`innerHTML` 换掉不重置 `scrollTop`，没有记忆时必须**显式归零**
 - **e2e 首跑抓到 3 个问题**：`5j` 预期写错（光标初始在首行之前，`5j` 到索引 4）；两个离线用例被自己的 `tearDown` 判红（断网必然产生 resource 加载失败，加白名单）
 
+### 本轮追加（2026-11-23 上午，nvim 差分对照 + iw/aw）
+
+| # | 修的是什么 | commit |
+|---|---|---|
+| 40 | **搭起 nvim 差分对照装置** —— 用 `nvim --headless -u NONE` + `nvim_feedkeys` 喂同一段文本、同一组按键，逐点比「光标（行,字符列）」与「缓冲区全文」。排掉三个假差异坑：页面尾部换行、nvim 的 col 是**字节**偏移（`charidx` 换算）、Playwright `press()` 只认单键 | — |
+| 41 | **`iw`/`aw` 在空白上的选区错** —— `expandWordUnderCursor` 第一件事就是 `while (!test(...)) idx++`，光标在空格上时跳过空白去删下一个词。实测 `'foo(bar, baz)'` ch=8：nvim 删掉空格得 `'foo(bar,baz)'`，我们删掉 `'baz'` 得 `'foo(bar, )'`。新增 `wsAsWord` 参数（`*`/`#` 走同一函数但语义不同，不能一起改） | `dda05b2` |
+| 42 | **`aw` 后面没词时光标不对** —— vim 文本不动但光标挪到「空白结束处夹到行长-1」（`'foo  '` ch=3→4、`'   '` ch=1→2）；只 `return null` 会让光标原地不动 | `dda05b2` |
+| 43 | **yank operator 无条件 `return oldAnchor`** —— vim 的字符级 `y{motion}` 把光标留在区域起点 `min(anchor, head)`，行级才原地不动。`yb`/`y0` 这种向后运动锚点恰是区域**尾**，全错位。偏差一路传到 `P`（`'foofoo  '` 上 yiwP 把词劈开） | `dda05b2` |
+| 44 | **`P` 的光标多走一位** —— paste 的 `P` 分支用 `idx + text.length`（最后字符的下一格），`p` 用 `idx + length - 1`。nvim 实测 `ylP`→(0,2)、`y2lP`→(0,3)、`y$P`→(0,5)，全是 `idx+n-1` | `dda05b2` |
+| 45 | **iw/aw 6 例落测** —— 期望值取自真 nvim 实测；含 `yiw` 的 8 列逐列对照表 `[0,0,0,3,3,5,5,5]`。踩了个坑：拿 ch=8 比 `'foo  bar'`（下标 0..7）是越界，nvim 会夹到 7 再算 | `9799d82` |
+
+**96 点矩阵（8 组文本 × 每列 × diw/daw/ciwZ/yiwP）：修前 43/96 一致 → 修后 96/96，0 文本差异。**
+
 ### 本轮追加（2026-11-23 凌晨，行操作 ex 命令族）
 
 | # | 修的是什么 | commit |
@@ -355,6 +368,11 @@
 - [[2026-11-17]] — 待办重排：把散落在 P0/P3/P5' 下的未完成项抽成「当前未完成（16 条）」总表，按可动手程度分六档（小改动/待拍板/暂缓/AI-native 两档/路线图）；P3 与 P5' 里重复的改成指针，避免两处打勾状态漂移
 - [[2026-11-21]] — **P7 对外开放与稳定性 4/4 上线**（`ee99ea4`）：① MCP 搜索 SQL 列名拼错（`frowid` → `f.rowid`，此前一直静默走 LIKE 兜底）② `/api/pages/count` + 前端「加载更多」，页面数不再卡 500（568 → 579）③ `mcp_public.py` 公开只读子集（8 个 `public_*` 工具 / SQL 层 `#public` 白名单 / `mode=ro` 强制只读 / `kb-mcp-public` 容器 `127.0.0.1:8100`）④ 两个 MCP 端点改 `stateless_http=True`，服务端重启不再让客户端永久 404。本轮改动此前只存在于生产服务器工作区，已全部收编入仓库，三方（本地/fajita/GitHub）同 commit
 - [[2026-11-22]] — **新前端接管生产 8080**（`570edda`）+ 停掉冗余测试容器（`eca1291`）；随后修 leader 双 handler 争用与 `[[` 补全四处缺陷（`7702967`）、配色重构为 Catppuccin 四口味且结构层/参数层拆开（`a83446f`）
+- [[2026-11-23]] — `dda05b2` **iw/aw 文本对象对齐真 nvim**：搭了 nvim 差分装置
+  （`nvim --headless` + `nvim_feedkeys` 逐点比光标与全文），一次抓出三处：`expandWordUnderCursor`
+  只会向前找词（光标在空格上时删掉下一个词而非空格）、yank 后光标无条件原地不动（`yb`/`y0`
+  这种向后运动锚点是区域尾，全错位并一路传到 `P`）、`P` 的光标比 `p` 多走一位。96 点矩阵
+  43/96 → 96/96。全量 114 tests OK。
 - [[2026-11-23]] — `7852e69` **`:g`/`:v` 全局命令是死的**：`vim.js` 的 `defaultExCommandMap`
   里没有 `delete`/`normal`/`join`/`put`，而 `global` 是「逐行拼 `:{行号}{cmd}` 再分发」——
   `:g/a/d` 去执行 `:2d` → `Not an editor command`，一个字符都不删。连带修了三处：
