@@ -2143,10 +2143,12 @@ function initVim$1(CodeMirror) {
           tmp = findBeginningAndEnd(cm, head, character, inclusive);
         } else if (character === 'W') {
           tmp = expandWordUnderCursor(cm, inclusive, true /** forward */,
-                                                     true /** bigWord */);
+                                                     true /** bigWord */, undefined,
+                                                     true /** wsAsWord */);
         } else if (character === 'w') {
           tmp = expandWordUnderCursor(cm, inclusive, true /** forward */,
-                                                     false /** bigWord */);
+                                                     false /** bigWord */, undefined,
+                                                     true /** wsAsWord */);
         } else if (character === 'p') {
           tmp = findParagraph(cm, head, motionArgs.repeat, 0, inclusive);
           motionArgs.linewise = true;
@@ -2380,13 +2382,44 @@ function initVim$1(CodeMirror) {
       yank: function(cm, args, ranges, oldAnchor) {
         var vim = cm.state.vim;
         var text = cm.getSelection();
-        var endPos = vim.visualMode
-          ? cursorMin(vim.sel.anchor, vim.sel.head, ranges[0].head, ranges[0].anchor)
-          : oldAnchor;
         vimGlobalState.registerController.pushText(
             args.registerName, 'yank',
             text, args.linewise, vim.visualBlock);
-        return endPos;
+        /* 复制完之后光标落在哪 —— vim 的规则和 delete 不同：
+         * **字符级**操作把光标留在「被操作区域的第一个字符」上，
+         * **行级**（yy / yj / yG …）则原地不动。
+         *
+         * 原实现无条件 `return oldAnchor`（原地不动），于是所有
+         * `y{motion}` 之后的光标都偏了。真 nvim
+         * （`nvim --headless -u NONE` + `nvim_feedkeys`）实测：
+         *
+         *   'foo  bar' 光标 4（第二个空格）
+         *     yiw → (0,3)   iw 区域 = 空白 [3,5)，起点 3
+         *     yaw → (0,3)   同上
+         *     yw  → (0,4)   w 区域 = [4,5)，起点 4（= 锚点）
+         *     yb  → (0,0)   b 区域 = [0,4)，起点 0（锚点是 4，在区域**尾**）
+         *     y$  → (0,4)   起点 4
+         *     y0  → (0,0)   起点 0
+         *     yy  → (0,4)   行级：原地不动
+         *   'foo  bar' 光标 8（'r'）  yiw → (0,5)  "bar" 起点 5
+         *   'a  b' 光标 2           yiw → (0,1)  空白 [1,3) 起点 1
+         *   '   abc' 光标 1         yiw → (0,0)  缩进 [0,3) 起点 0
+         *
+         * 也就是「区域起点 = min(anchor, head)」。`yb`/`y0` 这种**向后**
+         * 的运动里锚点正好是区域**尾**，所以只 return oldAnchor 会错。
+         *
+         * 这个偏差会一路传下去：`yiw` 之后按 `P`，粘贴位置由光标决定，
+         * 实测 'foo  ' 光标 2 时 nvim 得 'foofoo  '、我们得 'fofooo  ' ——
+         * **缓冲区内容都不一样了**。 */
+        if (vim.visualMode) {
+          return cursorMin(vim.sel.anchor, vim.sel.head,
+                           ranges[0].head, ranges[0].anchor);
+        }
+        if (args.linewise) {
+          // yy / yj / yG：vim 把光标留在原行首非空白处，我们保持原地
+          return oldAnchor;
+        }
+        return cursorMin(ranges[0].anchor, ranges[0].head);
       }
     };
 
@@ -2818,12 +2851,22 @@ function initVim$1(CodeMirror) {
               curPosFinal = new Pos(
                 cur.line,
                 findFirstNonWhiteSpaceCharacter(cm.getLine(cur.line)));
-            } else if (!linewise && actionArgs.after) {
+            } else {
+              /* 字符级粘贴（p 与 P 都一样）：光标停在**插入文本的最后一个
+               * 字符**上。原实现把 `P` 那一路写成 `idx + text.length`
+               * （最后一个字符的**下一格**），于是每次 `P` 的光标都多走一位。
+               *
+               * 真 nvim 实测（`nvim --headless -u NONE` + `nvim_feedkeys`）：
+               *
+               *   'abcdef' ch=2  ylP  → cur=(0,2)  'abccdef'      n=1 → 2+1-1
+               *   'abcdef' ch=2  y2lP → cur=(0,3)  'abcdcdef'     n=2 → 2+2-1
+               *   'abcdef' ch=2  y$P  → cur=(0,5)  'abcdefcdef'   n=4 → 2+4-1
+               *   'abcdef' ch=2  dlP  → cur=(0,2)  'abcdef'(空)
+               *
+               * `p`（after）那一路本来就是 `idx + n - 1`，是对的；两条
+               * 分支现在合并成一句。 */
               idx = cm.indexFromPos(cur);
               curPosFinal = cm.posFromIndex(idx + text.length - 1);
-            } else {
-              idx = cm.indexFromPos(cur);
-              curPosFinal = cm.posFromIndex(idx + text.length);
             }
           }
         }
@@ -3375,10 +3418,72 @@ function initVim$1(CodeMirror) {
       return firstNonWS == -1 ? text.length : firstNonWS;
     }
 
-    function expandWordUnderCursor(cm, inclusive, _forward, bigWord, noSymbol) {
+    function expandWordUnderCursor(cm, inclusive, _forward, bigWord, noSymbol, wsAsWord) {
       var cur = getHead(cm);
       var line = cm.getLine(cur.line);
       var idx = cur.ch;
+
+      /* vim 的 `iw` / `aw` 在光标落在**空白**上时，选中的是这一段空白
+       * 本身，而不是「向前跳过空白去找下一个词」。
+       *
+       * 原实现下面那句 `while (!test(line.charAt(idx))) idx++;` 只会向后
+       * 找词，于是光标停在空格上按 `diw` 会跳过去把下一个词删掉 —— 实测
+       * `'foo(bar, baz)'` 光标在 ch=8（空格）：
+       *
+       *     nvim  diw → 'foo(bar,baz)'   （删掉那个空格）
+       *     我们  diw → 'foo(bar, )'     （跳过空格删掉了 'baz'）
+       *
+       * 用真 nvim（`nvim --headless -u NONE` + `nvim_feedkeys`）跑出来的
+       * 矩阵（`iw` 用 `ciwX` 反推选区边界）：
+       *
+       *     文本 / 光标          iw 选区          aw 选区
+       *     'foo(bar, baz)' 8    [8,9)  空格      [8,12) 空格+baz
+       *     'a  b' 1 或 2        [1,3)  两空格    [1,4)  空格+b
+       *     '   abc' 1           [0,3)  全缩进    整行
+       *     'foo  ' 3 / 4        [3,5)  行尾空格  无动作（后面没有词）
+       *     '   '  1             [0,3)  整行      无动作
+       *
+       * `aw` 只向后吃词、不向前 —— 后面没有词时 vim 就是什么都不做，
+       * 不会回退成「往前找」。这条也和 nvim 一致。
+       *
+       * 只有文本对象（diw / daw / ciw / yiw …）才走这个分支：`*` / `#`
+       * 用的也是这个函数，但它们要的是「跳到下一个词」，语义不同，
+       * 由 `wsAsWord` 明确区分。 */
+      if (wsAsWord && /\s/.test(line.charAt(idx))) {
+        var wsStart = idx, wsEnd = idx;
+        while (wsStart > 0 && /\s/.test(line.charAt(wsStart - 1))) { wsStart--; }
+        while (wsEnd < line.length && /\s/.test(line.charAt(wsEnd))) { wsEnd++; }
+        if (!inclusive) {
+          // iw / iW：就是这段空白本身
+          return { start: new Pos(cur.line, wsStart), end: new Pos(cur.line, wsEnd) };
+        }
+        // aw / aW：空白 + 紧随其后的那个词
+        var after = wsEnd;
+        var wt = bigWord ? bigWordCharTest[0] : wordCharTest[0];
+        if (after < line.length && !wt(line.charAt(after))) {
+          wt = bigWord ? bigWordCharTest[0] : wordCharTest[1];
+        }
+        var wEnd = after;
+        while (wEnd < line.length && wt(line.charAt(wEnd))) { wEnd++; }
+        if (wEnd === after) {
+          /* 后面没有词 —— vim 的 `aw` 只向**后**吃词，不回退到前面的词。
+           * 这种情况下 vim 不删任何东西，但**光标会挪到这段空白结束处**
+           * （并夹到本行最后一个字符）。真 nvim 实测：
+           *
+           *   'foo  ' ch=3（空白）  daw → 文本不变、光标 (0,4)
+           *   '   '   ch=1          daw → 文本不变、光标 (0,2)
+           *   'ab   ' ch=2          daw → 文本不变、光标 (0,4)
+           *   'foo\t' ch=3          daw → 文本不变、光标 (0,3)
+           *
+           * 也就是 `min(空白结束处, 行长-1)`。返回 null（操作作废）之后再
+           * 显式 setCursor 补上这一步 —— 只返回 null 的话光标原地不动，
+           * 矩阵里就剩这 3 个点对不上。 */
+          cm.setCursor(new Pos(cur.line,
+              Math.min(wsEnd, Math.max(0, line.length - 1))));
+          return null;
+        }
+        return { start: new Pos(cur.line, wsStart), end: new Pos(cur.line, wEnd) };
+      }
 
       // Seek to first word or non-whitespace character, depending on if
       // noSymbol is true.
