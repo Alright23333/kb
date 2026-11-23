@@ -5,109 +5,107 @@
 后端一行没改，前端整个重写。这个分支只动**前端 + 一个服务端缓存头**，
 `main` 上的业务随时可以合进来。
 
-## 两种 UI 长期共存（2026-11-21 决定）
+## 两种 UI：曾经的并存 → 现在只有一个（2026-11-23）
 
-**不合并，两个分支各自独立部署，长期并存。**
+**历史上（2026-11-21 ~ 11-22）两个分支独立部署、长期共存。那段已结束。**
 
 | | 旧 UI（`main`） | 新 UI（`ui-lazyvim`） |
 |---|---|---|
-| 形态 | 单文件 5234 行内联 | 866 行模板 + `static/app.js` 3317 行 + 插件 |
-| 容器 | `kb` | `kb-ui-test` |
-| 端口 | `127.0.0.1:8080`（经 nginx `/kb/`） | `127.0.0.1:8099`（经 tailscale serve :8447） |
-| 数据 | `~/services/kb-docker/data/kb.db` | `~/pi-working/kb-ui/data/kb.db`（独立副本） |
+| 形态 | 单文件 5234 行内联 | 954 行模板 + `static/app.js` 4895 行 + 8 个插件 |
+| 容器 | `kb`（当时跑旧模板） | `kb-ui-test`（**已 Exited**） |
+| 端口 | `127.0.0.1:8080`（经 nginx `/kb/`） | `127.0.0.1:8099`（**已无人监听**） |
+| 数据 | `~/services/kb-docker/data/kb.db` | `~/pi-working/kb-ui/data/`（独立副本，不再使用） |
 | 后端 | 17 个业务文件**共用同一 blob**，零差异 | 同左 |
 | 镜像 | 共用 `kb-docker-kb:latest`（requirements.txt / Dockerfile 零差异） | 同左 |
 
-**为什么能共存**：后端完全一样，只有前端和入口不同。两个容器读两份独立
-的数据库（不同 inode），互不干扰；同一份 Docker 镜像因为依赖没变所以
-两边都能复用，不必重建。
+**现状（2026-11-22 起）**：新前端接管生产 `8080`，旧 UI 不再对外，
+`kb-ui-test` 已停。所以下表里"两个容器读两份数据库"那段不再适用 ——
+现在**只有一份部署、一份数据**（`~/services/kb-docker/data/kb.db`）。
 
-**数据是两份，会漂移**：新 UI 里的写入只进 `~/pi-working/kb-ui/data/`，
-生产看不到；反过来也一样。想让测试库追上生产：
+**分支仍未合并进 `main`**：用户 2026-11-23 明确决定先不合。生产 `kb`
+容器挂的是 worktree `~/pi-working/kb-ui` 的源码，worktree 已 lock。
 
-```sh
-sudo sqlite3 /home/user/services/kb-docker/data/kb.db \
-  ".backup '/home/user/pi-working/kb-ui/data/kb.db'"
-```
+> 历史备注（并存期的数据同步方式，现在不需要了）：两份库会漂移，
+> 用 `sqlite3 … ".backup '…'"` 做在线一致快照（`cp` 会漏 WAL 里未
+> checkpoint 的事务）。
 
-（`.backup` 是 SQLite 官方在线一致快照，不会像 `cp` 那样漏 WAL 里没
- checkpoint 的事务。想要两边看同一份数据就改 `run-container.sh` 的
- 挂载指向生产 `data/`，但那样测试写入会进生产库，慎用。）
+## 切换前端：当时的三种办法（已过时，仅存档）
 
-## 切换前端的三种办法
+> **2026-11-22 之后不需要切换了** —— 生产跑的就是新前端。下面这段是并存期
+> 的操作记录，留作回退参考。现在的日常操作在「办法 D」。
 
-### 办法 A：临时切到新 UI 看一眼（不改任何东西）
+### 办法 A：临时切到新 UI 看一眼（并存期用）
 
 直接打开新 UI 的地址即可，生产容器不动：
 
-- tailnet 内：`https://fajita.tail117f80.ts.net:8447/`
-- 本机：`http://127.0.0.1:8099/`
+- 本机：`http://127.0.0.1:8099/`（**容器已停，现在打不开**）
+- tailnet 内：`https://fajita.tail117f80.ts.net:8447/`（映射保留，会 502）
 
-### 办法 B：把**生产入口**切到新 UI（换默认前端）
+### 办法 B：把生产入口切到新 UI（这是实际上线的做法）
 
-生产容器 `kb` 通过 `docker-compose.override.yml` 挂载
-`./templates/index.html`，所以**换模板 = 换这个文件指向哪份源码**。
-注意：仅换模板是不够的，新 UI 还需要 `static/app.js` 等 44 个文件，
-而生产容器里的 `static/` 来自镜像（旧版内容）。所以正确步骤是：
+生产容器 `kb` 通过 `docker-compose.override.yml` 挂载 worktree 的源码。
+仅换模板是不够的 —— 新 UI 还需要 `static/` 下几十个文件，而镜像里的
+`static/` 是旧版内容。所以正确做法是整个目录挂进去：
 
 ```sh
 cd /home/user/services/kb-docker
 
-# 1. 把新前端文件也挂进生产容器（只读，不动镜像）
-#    在 docker-compose.override.yml 的 kb.volumes 里加：
-#      - ./static:/app/static:ro
-#      - ./main.py:/app/main.py:ro   # 新 UI 的 no-cache 中间件 + /search 路由词
+# 在 docker-compose.override.yml 的 kb.volumes 里加（这就是现在生效的配置）：
+#   - /home/user/pi-working/kb-ui/main.py:ro
+#   - /home/user/pi-working/kb-ui/routers:ro
+#   - /home/user/pi-working/kb-ui/static:ro
+#   - /home/user/pi-working/kb-ui/templates:ro
 
-# 2. 把 main 分支的模板换成新 UI 的（两种方式二选一）
-#    方式一（推荐，可随时回退）：worktree 挂载，不 commit
-#      git worktree add /tmp/lazy-ui ui-lazyvim
-#      # 然后把 override 里的挂载源改成 /tmp/lazy-ui/templates/index.html
-#    方式二（正式合并）：merge ui-lazyvim 进 main（见下面「合并」节）
-
-# 3. 重启生产容器
-docker compose up -d --no-build kb
-
-# 回退旧 UI：
-git checkout main -- templates/index.html static/sw.js
 docker compose up -d --no-build kb
 ```
 
-### 办法 C：日常开发时在两个 UI 之间切换（不碰生产）
+**回退旧 UI**：把 override 的四个挂载去掉（或指回 `./main.py` 等仓库路径），
+`docker compose up -d --no-build kb` 即可 —— 旧模板在 `main` 分支，
+镜像里本来就有一份，不需要 `git checkout` 任何东西。
 
-在分支 worktree 里起停容器即可，**生产始终跑旧 UI**：
+### 办法 C：并存期在两个 UI 之间切换（已停用）
 
 ```sh
-# 切到新 UI（已起的容器重建）
 cd /home/user/pi-working/kb-ui
-./run-container.sh                  # 容器 kb-ui-test → :8099
-
-# 切回旧 UI：停掉测试容器即可，生产 kb 一直在跑
-docker stop kb-ui-test
+./run-container.sh                  # 起 kb-ui-test → :8099（已 Exited）
+docker stop kb-ui-test              # 停掉
 ```
+
+### 办法 D：现在怎么干活（唯一有效的方式）
+
+```
+生产 = 容器 kb = worktree ~/pi-working/kb-ui（branch ui-lazyvim）
+```
+
+| 改了什么 | 怎么生效 |
+|---|---|
+| `static/**`、`templates/**` | 刷新页面（`sw.js` 会 network-first；若外壳变了要先 bump `VERSION`）|
+| `main.py`、`routers/**` | `docker restart kb` |
+| `mcp_server.py`、`mcp_http.py` | `docker restart kb-mcp`（`:ro` 挂载，不用重建镜像）|
+| `Dockerfile`、`requirements.txt` | 真需要重建镜像（很少见）|
 
 ### 容器↔代码对应关系（`git worktree list` 一眼看清）
 
 ```
-/home/user/services/kb-docker  758578f [main]        → 容器 kb（生产，旧 UI）
-/home/user/pi-working/kb-ui    4ffb7b8 [ui-lazyvim]  → 容器 kb-ui-test（新 UI）
+/home/user/services/kb-docker  87fd3ed [main]        → 仓库本体（pull-only，不跑）
+/home/user/pi-working/kb-ui    ad322c3 [ui-lazyvim]  → 容器 kb（生产）locked
 ```
 
-两个目录共享同一份 `.git`（kb-ui/.git 只是 4KB gitdir 指针）。
-**分支互斥**：`main` 只能在 `kb-docker`，`ui-lazyvim` 只能在 `kb-ui`。
+（提交号会走，看 `git worktree list` 的实际输出为准。）
 
 ## 这个分支相对 `main` 动了什么
 
 ```
-main.py                  +2 处（其余 229 行逐字节相同）
+main.py                  +2 处（其余 280 行逐字节相同）
 templates/index.html       -5234 行（旧内联单文件）
-                             +866 行（新模板：只有设计 token + DOM 骨架）
-static/app.js              +3292 行（外置的 SPA 主程序）
-static/plugin.js           +474 行（插件内核，lazy.nvim 模型）
-static/panel.js           +236 行（面板容器 overlay / dock / full）
-static/themes/               +3 文件（Catppuccin Mocha / Latte + 注册表）
-static/plugins/             +12 文件（6 个插件）
-static/sw.js               重写（分策略缓存，VERSION → kb-shell-v16）
-static/vendor/codemirror/  +18 个 addon（vim / show-hint / search / fold …）
+                             +954 行（新模板：只有设计 token + DOM 骨架）
+static/app.js              +4895 行（外置的 SPA 主程序）
+static/plugin.js           +475 行（插件内核，lazy.nvim 模型）
+static/panel.js           +247 行（面板容器 overlay / dock / full）
+static/themes/               +6 文件（catppuccin.css 结构层 + 4 flavour + index.js）
+static/plugins/             +16 文件（8 个插件 ×(js+css) + index.js 清单）
+static/sw.js               重写（分策略缓存，VERSION 现在 kb-shell-v20）
+static/vendor/codemirror/  +20 个文件（vim / show-hint / search / fold …）
 docs/*.md                  +3 篇（架构对比 / 移动端输入 / 插件模型）
 ```
 
@@ -137,22 +135,21 @@ git pull --rebase origin main           # 把 main 的进展带进来
 `data/kb.db` 副本**（首次运行从生产库 `.backup` 快照）。它绝不会写入
 `~/services/kb-docker/data`。
 
-生产目录 `/home/user/services/kb-docker` 始终在 `main`，两边互不干扰
-（`git worktree list` 能看到）。
+生产目录 `/home/user/services/kb-docker` 始终在 `main`（pull-only），
+分支 worktree 在 `/home/user/pi-working/kb-ui`（已 `git worktree lock`）。
 
-生产容器 `kb` 只挂了 `./templates/index.html`（见 `docker-compose.override.yml`），
-所以这个分支**不会**影响线上。它自己有一套：
+**2026-11-22 之后：这个分支就是线上。** 生产容器 `kb` 通过
+`docker-compose.override.yml` 挂载 worktree 的 `main.py` / `routers/` /
+`static/` / `templates/`（`./data` 仍是生产库），所以：
 
-- 容器 `kb-ui-test` → `127.0.0.1:8099`
-- 预览 `https://fajita.tail117f80.ts.net:8447/`（tailnet 内）
-- 数据 `~/pi-working/kb-ui/data/kb.db`（独立副本，579 页）
+- 改 `static/`、`templates/` → 刷新页面即生效，**不用重启**
+- 改 `main.py`、`routers/` → `docker restart kb`
+- 改 `mcp_server.py` / `mcp_http.py` → `docker restart kb-mcp`（`:ro` 挂载，不用重建镜像）
 
-`kb-ui-test` 容器现在挂的就是**这个 worktree** 的源码
-（`/home/user/pi-working/kb-ui`），所以改分支代码 = 刷新页面即可看到，
-不用重建镜像。
-
-旧的 `/home/user/pi-working/kb-ui-test/` 是开发时的临时副本，
-已不再被容器使用，可以随时删（它的 `data/` 有 459MB 备份，删前确认）。
+`kb-ui-test` 容器（`:8099` / tailserve `:8447`）**已 Exited(0)**，
+它的 `catppuccin` 时代预览不再需要。旧的 `/home/user/pi-working/kb-ui-test/`
+是开发时的临时副本（484MB，`data/` 里有备份），已不再被任何容器使用，
+可以随时删 —— 删前确认里面没有还没进仓库的东西。
 
 ## 加一个插件（不改 `app.js`）
 
@@ -219,7 +216,7 @@ git merge --no-ff ui-lazyvim
 | 主题 | `:colorscheme` 列全部/切换/缩写匹配，CM 配色随主题变 |
 | 面板 | dock 248px 可拖宽，宿主 `margin` 跟着让位，关闭归零；overlay Esc 关最上层 |
 | 移动端 | 390×844 无横向溢出，动作坞 18 键，数字盘 1–9，滑动切缓冲 |
-| 生产未受影响 | `kb` 仍 27h healthy / 579 页，`/static/app.js` 仍 404（旧模板内联） |
+| 生产未受影响 | 并存期：`kb` 仍 healthy、`/static/app.js` 仍 404（旧模板内联）。**现在相反，`kb` 就是新前端** |
 | 合并预演 | `git merge-tree` 0 冲突标记；分支已包含 `main` 最新 commit |
 | 业务代码 | 12 个后端文件与 `main` **0 行差异**（逐文件 `git diff --quiet` 验证） |
 
@@ -243,7 +240,7 @@ git merge --no-ff ui-lazyvim
 ```
 static/themes/
   catppuccin.css              ← 结构层：语义别名 + CodeMirror 分组，只写一次
-  catppuccin-mocha.css        ← 参数层：26 行官方色板
+  catppuccin-mocha.css        ← 参数层：15 行官方色板（26 个变量）
   catppuccin-macchiato.css    ← 同上
   catppuccin-frappe.css       ← 同上
   catppuccin-latte.css        ← 同上 + 浅色对比度修正 + 语法色压暗

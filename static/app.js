@@ -4154,7 +4154,9 @@ function attachTouchGestures() {
     // 只认「快、短、以横向为主」的滑动，避免和滚动/长按打架
     if (dt > 500 || !start.moved) return;
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
-    if (!$('view').closest('#editor')) { /* noop, 保持结构 */ }
+    /* 编辑器里不切缓冲（state.editing 时 cycleBuffer 自己会拒绝），
+     * 所以这里不需要额外判断 —— #view 和 #editor 是兄弟节点，
+     * 曾经写过 `$('view').closest('#editor')` 做判定，恒为 null，是死代码。 */
     cycleBuffer(dx < 0 ? 1 : -1);
     toast(dx < 0 ? '→ 下一个缓冲' : '← 上一个缓冲');
   }, { passive: true });

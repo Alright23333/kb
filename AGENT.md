@@ -2,6 +2,26 @@
 
 > 本文件面向 AI 开发助手。修改本仓库前请阅读本文件，避免违背设计原则的修改。
 
+## 技能小结（先读这段）
+
+本项目当前**只有一份前端**（`ui-lazyvim` 分支，已接管生产 `8080`）：
+
+| 层 | 文件 | 规模 |
+|---|---|---|
+| 页面外壳 | `templates/index.html` | 954 行（CSS 63-773、DOM 773-954）|
+| 应用逻辑 | `static/app.js` | 4895 行（最后约 300 行是 vim 层）|
+| 插件内核 | `static/plugin.js` | 475 行（lazy.nvim 模型）|
+| 面板容器 | `static/panel.js` | 247 行 |
+| 插件实现 | `static/plugins/` | 8 个（1330 行）|
+| 主题 | `static/themes/` | 结构层 + 4 flavour |
+| 离线壳 | `static/sw.js` | 135 行（**改外壳必须 bump VERSION**）|
+
+旧版单文件模板（5234 行）在 `main` 分支，**不在**当前工作区 —— 本文里
+凡是提到 `applyCustomCSS`、`insertRef`、`openPalette`、`resetMobilePreview`、
+`updateFABVisibility`、`sidebar.classList.add('open')` 这类名字的条目，都是
+**旧版的历史教训**，对应代码已经不存在了；教训本身仍然有效，但要按新的
+位置去找（见「旧教训在新代码里的落点」一节）。
+
 ## 项目定位
 
 KB 是一个**人能用、AI 也能用**的双链笔记系统。
@@ -39,24 +59,40 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 - 所有端点 try/finally 确保 `db.close()`
 - `update_page` 的改名逻辑：新名不存在才更新 name + 重写 refs.target_name
 
-### `templates/index.html` — 前端
+### 前端（`templates/index.html` + `static/`）— 新架构
 
-- CodeMirror 5（不是 6，CDN 6.65.7 实际是 5.65.7），连同 markdown-it / Frappe Gantt 都已 vendored 到 `static/vendor/`，不再走 CDN
+页面外壳只放三样东西：设计 token（`<style>` 63-773）、DOM 骨架（773-954）、
+vendor 加载（`document.write`，base 前缀先算）。**没有任何应用逻辑**。
+
+应用逻辑全在 `static/app.js`，插件逻辑在 `static/plugin.js` + `static/plugins/`：
+
+- CodeMirror 5（不是 6，CDN `6.65.7` 实际是 `5.65.7`），连同 markdown-it /
+  Frappe Gantt / mermaid 全部 vendored 到 `static/vendor/`，不走 CDN
 - markdown-it 自定义 `wikilink` 内联规则：`[[target]]` → `<a data-page="target">`
-- Frappe Gantt 0.6.1（甘特图渲染，static/vendor/ 自托管）
-- 全局事件委托处理所有点击（`[data-page]`、`[data-tag]`、`[data-nav]`）
-- `navigate(target, ...args)` 是唯一路由入口
-- 主题：CSS 变量 `[data-theme="dark"/"light"]`（Tokyo Night 色板 + 语义色 --tag/--overdue/--p1..p4），localStorage 持久化。**不要用 JS 内联样式改颜色**（已删过一次 applyCustomCSS hack，那是主题切换bug的根源），一律走 CSS 变量
-- 设计系统：token 分层在 `:root`（间距/圆角/阴影/缓动）与 `[data-theme]`（颜色）；新增样式优先用 `var(--sp-*)`/`var(--r-*)` 等既有 token，不要写内联 style
-- 自定义 CSS（`data/custom.css`）**只覆盖变量**，注入 `<style id="custom-css">` 追加到 `<head>` 末尾（同等特异性下后者胜出）。不要在 JS 里逐元素写 inline style —— 后渲染的卡片会漏、切主题会残留
-- 不要用 `@media (prefers-color-scheme)` 新增一套主题变量定义：媒体查询块 `:root:not([data-theme=…])` 的特异性 (0,2,0) 会静默压过用户显式选择的 `[data-theme="light"]`（(0,1,0)）——现在 light 媒体块与 `[data-theme="light"]` 的值完全相同才没出 bug，改动时两处必须同步
-- 移动端编辑顶栏折叠：MutationObserver 监听 `#editor` 显隐切换 `#header.compact`（CSS 在 media query 内）
-- 侧边栏窄栏切换有 width 0.2s 过渡；移动端是 transform 动画，两套 transition 在不同规则里，别合并
-- 日记编辑器复用页面编辑器，`currentSaveMode` 区分保存目标
-- 任务管理：`parseTaskLine()` 解析任务语法，Frappe Gantt 渲染甘特图；任务条颜色从 CSS 变量读取（`ganttPriorityColor`），甘特网格/文字主题化规则在 `/* Frappe Gantt */` 注释块
-- 图谱力导向：`startForceLayout()`/`graphSimFrame()`（rAF + alpha 冷却，收敛即停）；拖动中的节点置 `_fixed=true`（tick 跳过其速度），松手 `graphReheat(0.35)`；参数（斥力/弹簧/向心）在 `graphForceTick` 顶部
-- 键盘导航（j/k/Enter）是全局 document keydown：必须过滤输入焦点、`.CodeMirror-focused`、`isComposing`（中文输入法）、移动端；`knavMove` 里 `knavClear()` 会把索引重置为 -1，先算好 next 再 clear 再用（曾因此 TypeError 按键全崩）
-- 体检报告（孤立页/断链）是「所有页面」视图里的折叠区（同回收站模式），`computeHealth()` 纯前端算自 /api/graph，别为它加后端 API
+  （规则在 `app.js` 的 `md.renderer.rules.kb_*`，不在模板里）
+- 全局事件委托在 `app.js` 底部：`[data-page]` / `[data-tag]` / `[data-nav]`
+  / `[data-close]` / `[data-buffer]` …
+- `navigate(target, arg)` 是唯一路由入口 → `dispatch()` → 各 `show*()`
+- **主题**：`html[data-scheme="catppuccin-<flavour>"]`，四个 flavour 的
+  语义别名与 CodeMirror 分组全在 `static/themes/catppuccin.css`（结构层），
+  每个 flavour 只写 15 行色板（latte 例外 48 行）。**不要为某个 flavour
+  单独重写规则** —— 加口味只需加一个色板文件 + 在 `themes/index.js` 登记一行
+- **自定义 CSS**（`data/custom.css`）**只覆盖变量**，注入 `<style id="custom-css">`。
+  不要在 JS 里逐元素写 inline style —— 后渲染的卡片会漏、切主题会残留
+- **不要新增 `@media (prefers-color-scheme)` 的第二套变量**：媒体查询块
+  特异性 (0,2,0) 会静默压过用户显式选择的 `[data-scheme]`（(0,1,0)）
+- 移动端不是补丁层，是一等公民：`:touchui` / `:vimui` / `:autoinput` 切换
+  输入模式，动作坞 + 数字盘 + tabline 摘要条 + 横向滑切缓冲。设计见
+  `docs/MOBILE-INPUT.md`
+- 面板一律走 `KBPanel.mount(...)`（`static/panel.js`），它自带 760px
+  响应式（overlay 全屏、dock 84% 宽），**新面板不需要自己写媒体查询**
+- 编辑器复用同一套 CodeMirror：页面编辑、日记、新建页共用一个实例，
+  靠 `state.editing` + `state.current` 区分
+- 图谱力导向在 `app.js`（rAF + alpha 冷却，收敛即停），拖动节点置 `_fixed=true`
+- 键盘：桌面走 vim（CodeMirror vim keymap）+ `space` which-key + `:` 命令行；
+  列表导航（`j`/`k`/`Enter`/计数前缀）是 document 级 capture handler，
+  **必须过滤输入焦点、`.CodeMirror-focused`、`isComposing`、touch 模式**
+- 体检报告是插件 `health`（`space uh` / `:health` / `/health`），不是视图里的折叠区
 
 ### `import_logseq.py` — Logseq 导入
 
@@ -164,9 +200,19 @@ CDN 上 `6.65.7` 实际是 `5.65.7`。v6 是完全不同的 ESM 架构，不要�
 
 只插不删会导致「删掉的引用」残留。每次 save 必须 `DELETE FROM refs WHERE source_id=?` 再重插。
 
-### 7. insertRef 用整行替换
+### 7. `[[` 补全的坐标不能依赖「点菜单后的 getCursor()」
 
-`insertRef` 通过 `lastIndexOf('[[')` 找到行内最后一个 `[[`，替换整行文本。**不要改回 cursor 范围方式**（`replaceRange(from, cursor)`）——点击补全菜单时 CodeMirror 失焦，`getCursor()` 可能返回错误坐标，导致吞字符。
+旧版 `insertRef` 通过 `lastIndexOf('[[')` 找到行内最后一个 `[[`，替换整行文本；
+**不要改回 cursor 范围方式**（`replaceRange(from, cursor)`）—— 点击补全菜单时
+CodeMirror 失焦，`getCursor()` 可能返回错误坐标，导致吞字符。
+
+这条教训现在落在 **`static/plugins/hint.js`**。它另外踩过两个坑（已修）：
+
+1. **判定用整行搜 `]]` 永远失败** —— 打完第二个 `[` 时文档里已经是 `[[]]`，
+   光标停在两个 `]` 之间。必须只取**光标之前**的子串（`getLine().slice(0, ch)`）
+   再找 `[[`
+2. **`#` 标签的触发正则写成了 `/#[^\s]/`（要求 `#` 后有空白）** —— 等于永远
+   不匹配。正确是 `/(^|[^\p{L}\p{N}_#])#([\p{L}\p{N}_-]*)$/u`
 
 ### 8. CodeMirror.Pass 必须 return
 
@@ -186,7 +232,11 @@ CDN 上 `6.65.7` 实际是 `5.65.7`。v6 是完全不同的 ESM 架构，不要�
 
 ### 9. Frappe Gantt 日期范围
 
-Frappe Gantt 的 `refresh()` 不重算视图日期范围。切换日期筛选必须 `ganttChart = null` 后重建实例，否则甘特图仍显示全年时长。
+Frappe Gantt 的 `refresh()` 不重算视图日期范围。切换日期筛选必须销毁旧实例
+再重建，否则甘特图仍显示全年时长。
+
+这条现在落在 **`static/plugins/gantt.js`**（lazy 插件，`:gantt` / `/gantt` /
+`space tg` 才加载）。旧版的 `ganttChart` 全局变量已不存在。
 
 ### 10. 主题切换联动 CodeMirror
 
@@ -220,9 +270,12 @@ MCP 客户端 spawn 子进程时只传 PATH、HOME 等白名单变量，**自定
 
 `toggleTaskDone` 不能用行号定位（内容可能已变），必须用 `task.raw` 全行匹配。写回前 bypass 缓存 fetch 最新内容。循环任务勾选不加 done: 而是滚动 due:（recalcRecurring 含追赶逻辑）。
 
-### 18. 甘特图幻影条与 colorGanttBars 索引对齐
+### 18. 甘特图幻影条与颜色索引对齐
 
-循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。`colorGanttBars` 必须用 `ganttRenderTasks`（含幻影元数据）而非 filterGanttTasks()，否则颜色错位。任务条颜色经 `ganttPriorityColor()` 从 CSS 变量 `--p1..--p4` 读取（改优先级色只改变量，两处调用者——列表圆点 CSS 和甘特条 JS——同时生效）。
+循环任务渲染未来 2 个周期为额外幻影条，DOM bar 数量 > 过滤后任务数。
+**上色的索引必须用「含幻影元数据的那份任务表」，不能用过滤后的任务表**，
+否则颜色错位（现在的实现在 `static/plugins/gantt.js` 里）。任务条颜色从
+CSS 变量 `--p1..--p4` 读（改优先级色只改变量，列表圆点和甘特条同时生效）。
 
 ### 19. IP 白名单只信任可信代理的 X-Forwarded-For
 
@@ -301,7 +354,8 @@ async function loadPage(name) {
 
 ### 28. 不要用 monkey-patch 包装函数（会吞返回值）
 
-移动端适配曾这样给 `hideAll` 挂 FAB 刷新：
+移动端适配曾这样给 `hideAll` 挂 FAB 刷新（旧单文件模板时代，
+`updateFABVisibility` 已随重构消失，但结论不变）：
 
 ```js
 // ❌ 反面教材
@@ -313,9 +367,11 @@ window.hideAll = function() { _origHideAll(); updateFABVisibility(); };
 而 `const token = hideAll()` 就全是 `undefined` —— 上一条的防线因此全部失效，
 且**不报任何错**（表现为页面永远不渲染）。
 
-**正确做法**：直接在函数体内显式调用副作用（`updateFABVisibility()` /
-`resetMobilePreview()`，函数声明会提升，定义在后面也能调），不要包装。
-新增类似“副作用”时同理，写进目标函数而不是套壳。
+**正确做法**：直接在函数体内显式调用副作用（函数声明会提升，定义在后面
+也能调），不要包装。新增类似"副作用"时同理，写进目标函数而不是套壳。
+
+新架构里同类风险是**插件的 `api.on(...)` 钩子**：如果钩子内部抛异常，
+别让它污染主流程 —— 插件应该自己 try/catch 并 `api.ui.toast` 报错。
 
 ### 29. 不要静默吞异常
 
@@ -504,7 +560,7 @@ AND p.id IN (SELECT source_id FROM refs WHERE kind='tag' AND lower(target_name)=
 ```python
 # /tmp/hermes-verify-*.py — 临时验证脚本，用完即删
 import sys
-sys.path.insert(0, "/home/user/services/kb")
+sys.path.insert(0, "/home/user/pi-working/kb-ui")   # 分支 worktree（生产挂的就是它）
 from parse import parse
 
 # 1. 解析测试
@@ -541,7 +597,10 @@ assert len(seen) == 1  # 归并后只有 1 个
 - 或直接 `uvicorn main:app --host 0.0.0.0 --port 8080`
 - 通过 Tailscale 内网访问，CORS `*` 仅供内网使用（不要暴露公网）
 - 数据库备份：`sqlite3 data/kb.db "PRAGMA wal_checkpoint" && cp data/kb.db backup/`
-- 环境变量 `KB_DB_PATH` 指定数据库路径（默认 `/home/user/services/kb/data/kb.db`）
+- 环境变量 `KB_DB_PATH` 指定数据库路径。`database.py` 里的默认值是
+  `/home/user/services/kb/data/kb.db`，但**那个目录不存在** —— 真实路径是
+  生产 `~/services/kb-docker/data/kb.db`，容器内是 `/app/data/kb.db`。
+  所有容器都用 `KB_DB_PATH=/app/data/kb.db` 覆盖，别照默认值找文件
 
 ## 不要做的事
 
@@ -552,11 +611,14 @@ assert len(seen) == 1  # 归并后只有 1 个
 - ❌ 不要为日记建独立表
 - ❌ 不要提交数据库文件到 git
 - ❌ 不要在 API 层做大小写敏感比较
-- ❌ 不要把 insertRef 改回 cursor 范围方式（会吞字符）
 - ❌ 不要在 extraKeys 里写 `CodeMirror.Pass;` 而不 return（会吞上下键）
-- ❌ 不要用 `ganttChart.refresh()` 换日期范围（不重算视图，需销毁重建）
-- ❌ 不要在桌面端使用 `sidebar.classList.add('open')`（drawer 模式仅限移动端）
-- ❌ 不要在 `@media` 外写移动端专属样式（FAB、preview tab 等）
-- ❌ 不要忘记新增面板的移动响应式（所有固定宽度面板都需要）
+- ❌ 不要在 `@media` 外写移动端专属样式（触屏入口/动作坞等）
+- ❌ 不要忘记新增面板的移动响应式（用 `KBPanel.mount` 就自带，自己写 div 就不会）
+- ❌ 不要让「bottom 锚定、向上生长」的浮层没有 `max-height` —— 装不下就长到
+  屏幕外，选项等于不存在（`#fxdock` / `#whichkey` / `#numgrid` 都栽过）；
+  限高必须用 `dvh` 覆盖 `vh`，否则软键盘弹起时照样顶出去
+- ❌ 不要把触屏浮层的关闭只做在「按 Esc」上（手机没有 Esc），必须有遮罩点击/×
+- ❌ 不要在顶层 `<span>` 里用 `innerHTML` 拼未转义的页面名（`escapeHtml` 是必须的）
+- ❌ 不要改 `static/sw.js` 的静态资源策略而不 bump `VERSION`（客户端会一直跑旧壳）
 - ❌ 不要直接修改 `_search()` 的 SQL（搜索逻辑在 `search.py` 的 `build_search_query()` 中，改了要同时改 API 和 MCP 两处调用者）
 - ❌ 不要在 `search.py` 里假设 jieba 一定存在（必须 try/except import，无 jieba 时降级）

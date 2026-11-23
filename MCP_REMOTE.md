@@ -37,7 +37,7 @@ mcp_servers:
       - docker
       - exec
       - -i
-      - kb
+      - kb-mcp
       - python3
       - /app/mcp_server.py
     enabled: true
@@ -48,7 +48,7 @@ mcp_servers:
 ```bash
 hermes mcp add kb \
   --command ssh \
-  --args -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 user@100.88.251.64 docker exec -i kb python3 /app/mcp_server.py
+  --args -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 user@100.88.251.64 docker exec -i kb-mcp python3 /app/mcp_server.py
 ```
 
 然后测试连接：
@@ -70,7 +70,7 @@ ssh user@100.88.251.64  ──────────────────�
   │                                                      │
   │  在 fajita 上执行                                    │
   ▼                                                      │
-docker exec -i kb python3 /app/mcp_server.py             │
+docker exec -i kb-mcp python3 /app/mcp_server.py          │
   │                                                      │
   │  直连容器内 SQLite                                    │
   ▼                                                      │
@@ -78,6 +78,23 @@ kb-docker/data/kb.db                                      │
 ```
 
 数据不离开 fajita，不需要把数据库文件复制到别的设备。SSH 传输本身在 Tailscale 加密隧道内，没有额外暴露面。
+
+> **必须是 `kb-mcp` 而不是 `kb`**（2026-11-23 实测发现）。
+>
+> `kb` 容器里的 `/app/mcp_server.py` 是**镜像里那份（11-13 烤进去的）**，
+> 没有挂载、不含后续修复：
+>
+> ```
+> kb      容器 /app/mcp_server.py   md5 70300efd…  grep frowid → 1   ← 有 bug
+> kb-mcp  浏览器挂载那份             md5 b35db7eb…  grep frowid → 0   ← 已修
+> ```
+>
+> `frowid` 就是 P7 修的「FTS 搜索 SQL 列名拼错、一直静默走 LIKE 兜底」。
+> 走 `docker exec -i kb` 的 agent 搜索**能用但退化**（没有 FTS5 rank、
+> 慢、精度差），而且没有任何报错，几乎不可能自己发现。
+>
+> `kb-mcp` 容器把 `mcp_server.py` 以 `:ro` 挂载进来，改完不用重建镜像，
+> 所以它永远是最新代码。
 
 ---
 
@@ -116,7 +133,7 @@ mcp_servers:
       - docker
       - exec
       - -i
-      - kb
+      - kb-mcp
       - python3
       - /app/mcp_server.py
     enabled: true
@@ -133,7 +150,7 @@ mcp_servers:
 | `create_page(name, content)` | 创建页面 |
 | `update_page(name, content)` | 更新页面 |
 | `delete_page(name)` | 删除页面（可通过 versions 恢复） |
-| `rename_page(old, new)` | 重命名 + 原子重写入链 |
+| `rename_page(old_name, new_name)` | 重命名 + 原子重写入链 |
 | `list_pages()` | 列出所有页面名 |
 | `get_recent_pages(limit)` | 最近更新的页面 |
 | `get_tags()` | 所有 tag 及计数 |
@@ -142,7 +159,7 @@ mcp_servers:
 | `get_page_versions(name)` | 版本历史（含已删除页面） |
 | `restore_page_version(name, version_id)` | 恢复旧版本 |
 | `append_to_page(name, content)` | 追加写入（不覆盖全文，行级修改场景更安全） |
-| `delete_lines(name, lines)` | 逐行删除（避开全文覆盖式更新的纰漏） |
+| `delete_lines(name, start_line, end_line)` | 按行号区间删除（1-based 含端点，返回被删行） |
 | `append_to_journal(content, date?)` | 记日记一步到位（默认今天，页面不存在自动创建） |
 | `recently_changed(since)` | 增量拉取「上次看过之后改了什么」 |
 

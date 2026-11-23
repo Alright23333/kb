@@ -4,13 +4,22 @@
 
 **后端一行没改，前端整个重写。** 旧前端是 5234 行、210KB 的单个
 `templates/index.html`（CSS + HTML + 全部 JS 内联）；新前端是
-866 行模板 + 3292 行独立 `static/app.js`。
+954 行模板（其中 711 行 CSS）+ 4895 行独立 `static/app.js`
++ 475 行插件内核 + 1330 行插件实现。
+
+> **2026-11-23 现状**：新前端已**接管生产 `8080`**，旧 `main` 模板只存在于
+> git 历史里。本文下半部保留「旧版 vs 新版」的对照，是为了说明重构的理由；
+> 但**旧版已不在任何地方运行**，`kb-ui-test` 容器也已停止。
+>
+> `ui-lazyvim` 分支**尚未合并进 `main`**（用户决定先不合）。生产 `kb` 容器
+> 挂的是 worktree `~/pi-working/kb-ui` 的源码，所以这个 worktree 已
+> `git worktree lock`，删掉或切分支会让生产立刻挂掉。
 
 ## 后端（两版完全相同）
 
 ```
                     ┌─────────────────────────────┐
-  浏览器 ──HTTP──▶  │  main.py  (FastAPI, 229 行) │
+  浏览器 ──HTTP──▶  │  main.py  (FastAPI, 280 行) │
                     │  ├ ip_whitelist 中间件       │
                     │  ├ strip_static_prefix 中间件│
                     │  ├ /api  → routers/api.py    │
@@ -19,7 +28,7 @@
                     └──────────┬──────────────────┘
                                │
                     ┌──────────┴──────────┐
-                    │ routers/api.py       │  838 行，22 个端点
+                    │ routers/api.py       │  838 行，21 个端点
                     │ search.py  166 行    │  FTS5 + jieba + rerank
                     │ database.py 125 行   │  SQLite WAL, aiosqlite
                     │ parse.py   102 行    │  [[链接]] / #tag 解析
@@ -52,15 +61,22 @@
 未知路径喂给 `index.html`，前端再靠 `KB.declaredRoutes()` 认识它。
 后端不该知道有哪些插件 —— 加插件不需要改 `main.py`。
 
-> 测试副本 vs 生产的后端差异只有两处：
-> 1. `nocache_first_party_static` 中间件（`/static/*` 除 vendor 外 `no-cache`，
->    否则改 `app.js` 浏览器仍用旧版）
-> 2. `_SPA_ROUTE_WORDS` 多了 `search`
+> **只剩一份部署**（2026-11-22 起新前端接管生产），所以「测试副本 vs 生产」
+> 这个对照已经没有意义。当前生产容器跑的就是仓库 `ui-lazyvim` 分支的源码：
 >
-> `routers/api.py`、`database.py`、`search.py`、`parse.py`、
-> `mcp_*.py`、`export.py`、`backup.py` **全部二进制相同**（`diff` 0 行）。
+> - `main.py` 里有 `nocache_first_party_static` 中间件
+>   （`/static/*` 除 vendor 外 `no-cache`，否则改 `app.js` 浏览器仍用旧版）
+> - `_SPA_ROUTE_WORDS`（11 个词）与 `_SPA_VIEW_WORDS`（5 个词：
+>   `theme/health/searches/trash/gantt`）分开维护，后者由模板注入 base
+>
+> 后端业务文件与 `main` 分支**零差异**：`routers/api.py`、`database.py`、
+> `search.py`、`parse.py`、`mcp_*.py`、`export.py`、`backup.py`。
 
-## 旧前端（生产 `~/services/kb-docker/templates/index.html`）
+## 旧前端（`main` 分支，已不在运行）
+
+> 2026-11-22 之前生产跑的是这个。现在只留作重构理由的对照，
+> 代码在 git 历史里（`main` 分支的 `templates/index.html`），
+> **没有** `index.classic.html` 之类的仓库内副本。
 
 单文件 5234 行 / 210KB：
 
@@ -95,14 +111,14 @@ function hideAll() {                       // 行 4405
 | 页面视图 | `showPage`, `buildToc`, `fillEmbeds` | ⚠️ 部分（无 TOC）|
 | 编辑器 | `initCM`, `savePage`, `showVersionHistory` | ✅ 有 |
 | 任务/待办 | `parseTasks`, `computeTaskStats`, `switchTodoTab` | ✅ 有（无甘特）|
-| **甘特图** | `filterGanttTasks`, `colorGanttBars`, `copyTasksAsMermaidGantt` | ❌ **缺** |
+| **甘特图** | `filterGanttTasks`, `colorGanttBars`, `copyTasksAsMermaidGantt` | ✅ 插件 `gantt` |
 | 图谱 | `graphForceTick`, `graphSetFocus`, `applyGraphTransform` | ✅ 有（简化）|
-| 搜索 | `doSearch`, `doSavedSearch`, `getSavedSearches` | ⚠️ 无保存搜索 |
+| 搜索 | `doSearch`, `doSavedSearch`, `getSavedSearches` | ✅ 插件 `saved-search` |
 | 命令面板 | `openPalette`, `handlePaletteInput` | ✅ 换成 which-key + `:` |
-| 侧栏 | `toggleSidebar`, `closeSidebar` | ❌ 去掉了 |
+| 侧栏 | `toggleSidebar`, `closeSidebar` | ✅ 插件 `sidebar`（dock 面板）|
 | 链接预览 | `link-preview-card` | ✅ 有（hover/长按）|
 | 草稿 | `draftSave`, `draftRestore`, `checkDraft` | ✅ 有 |
-| 体检 | `computeHealth`, `loadHealth` | ❌ **缺** |
+| 体检 | `computeHealth`, `loadHealth` | ✅ 插件 `health` |
 | 引用补全 | `insertRef`, `#ref-autocomplete` | ⚠️ 靠 CodeMirror 自身 |
 | 移动端 | `resetMobilePreview`, `updateFABVisibility` | ✅ 重做（动作坞）|
 
@@ -115,21 +131,24 @@ function hideAll() {                       // 行 4405
 5. **移动端是补丁**：`resetMobilePreview` / `updateFABVisibility` 这类"事后撑住"的函数
 6. **没有统一的状态对象**：每个视图自己管自己的一堆全局变量
 
-## 新前端（`~/pi-working/kb-ui-test/`）
+## 新前端（`~/pi-working/kb-ui/`，branch `ui-lazyvim`）
 
 拆成三层，各管各的：
 
 ```
-templates/index.html   866 行   只有设计 token + DOM 骨架（无任何色值）
-  ├ 行 45-720    <style>   组件样式、3 个 @media
-  ├ 行 12-38     资源加载  document.write 一批 vendor（base 前缀先算）
-  └ 行 700-866   DOM      18 个区块（vs 旧的 44 个）
-static/app.js        3292 行   全部应用逻辑 + 桥（window.KB 对面）
-static/plugin.js      474 行   插件内核（lazy.nvim 模型）
-static/panel.js       236 行   面板容器 overlay / dock / full
-static/sw.js          128 行   离线壳
-static/themes/        129 行   catppuccin-mocha / latte 各一个 CSS + 注册表
-static/plugins/       ~700 行   6 个插件（manager/sidebar/gantt/hint/toc/autosave）
+templates/index.html   954 行   只有设计 token + DOM 骨架（无任何色值）
+  ├ 行 63-773    <style>   组件样式、2 个 @media（760px / reduced-motion）
+  ├ 行 12-62     资源加载  document.write 一批 vendor（base 前缀先算）
+  └ 行 773-954   DOM      10 个顶层区块（vs 旧的 44 个 id 区块）
+static/app.js        4895 行   全部应用逻辑 + 桥（window.KB 对面）
+static/plugin.js      475 行   插件内核（lazy.nvim 模型）
+static/panel.js       247 行   面板容器 overlay / dock / full + 自己的 760px 媒体查询
+static/sw.js          135 行   离线壳（VERSION 见文件头，改外壳必须 bump）
+static/themes/        364 行   catppuccin.css 结构层(116) + 4 个 flavour 各 15 行
+                              （latte 例外 48 行）+ index.js 注册表(155)
+static/plugins/      1330 行   9 个 .js（index.js 是清单，**8 个插件**：
+                              autosave-hint/gantt/health/hint/manager/
+                              saved-search/sidebar/toc）+ 6 个 .css
 ```
 
 主题与插件是**可扩展层**，不受 `app.js` 约束 —— 见
@@ -178,7 +197,7 @@ token 已变就丢弃）。好处是视图不残留状态、加视图只需加�
 
 | 维度 | 旧版 | 新版 |
 |---|---|---|
-| 模板体积 | 5234 行 / 210KB | 866 行 / 37KB（无内联 JS、无色值）|
+| 模板体积 | 5234 行 / 210KB | 954 行 / 46KB（无内联 JS、无色值）|
 | JS 位置 | 内联 | 独立 `static/app.js` |
 | 全局函数 | 163 个 | 0（全在模块作用域） |
 | 视图容器 | 5 个常驻 + `display` 切换 | 1 个 `#view` + 重渲 |
@@ -191,7 +210,7 @@ token 已变就丢弃）。好处是视图不残留状态、加视图只需加�
 
 ## 迁移时要补的东西
 
-原先"故意不做"的 6 项里，4 项已经以**插件**形式补回来了（不占启动成本）：
+原先"故意不做"的 6 项**全部以插件形式补回来了**（lazy，不占启动成本）：
 
 | 功能 | 旧版实现 | 现在 |
 |---|---|---|
@@ -199,15 +218,24 @@ token 已变就丢弃）。好处是视图不残留状态、加视图只需加�
 | 目录 TOC | `buildToc` | 插件 `toc`，`page` 事件自动挂，`space uT` 开关 |
 | 侧栏导航 | `toggleSidebar` | 插件 `sidebar`，`space bs` 开 dock 面板，比旧版多标签云/统计 |
 | 引用补全 `[[` | `insertRef` + 浮动框 | 插件 `hint`，换成 CodeMirror 官方 `show-hint` |
-| 体检报告 | `computeHealth` | 仍未做（可写成插件，`api.data` 已够用） |
-| 保存搜索 | `getSavedSearches` | 仍未做（`#tag` + 收藏页可替代） |
+| 体检报告 | `computeHealth` | 插件 `health`，`space uh` / `:health` / `/health` |
+| 保存搜索 | `getSavedSearches` | 插件 `saved-search`，`/searches` 视图；存储键沿用 `kb-saved-searches`，两套 UI 之间切换不丢收藏 |
 
-`templates/index.classic.html` 是旧模板的完整副本，随时可对照。
+旧模板随时可对照，但它**在 `main` 分支的 git 历史里**，不是仓库内副本 ——
+仓库里没有 `templates/index.classic.html` 这个文件（查过 `git log --all`，
+从未存在过）。要看旧版：
+
+```sh
+git show main:templates/index.html | less
+```
 
 ## 为什么这样拆
 
-1. **后端稳定**：API 是 838 行成熟代码，22 个端点，有测试；重写它没有收益
+1. **后端稳定**：API 是 838 行成熟代码，21 个端点，有测试；重写它没有收益
 2. **前端是瓶颈**：210KB 单文件让每次改动都高风险
-3. **分离后可以并存**：旧 `kb` 容器跑旧模板，`kb-ui-test` 跑新模板，
-   共用同一份 DB schema，合并只需换 `templates/` + `static/app.js`
-4. **可回退**：`index.classic.html` + 生产容器原封不动
+3. **分离后可以并存**（历史上确实并存过一个多月）：旧 `kb` 容器跑旧模板，
+   `kb-ui-test` 跑新模板，共用同一份 DB schema。2026-11-22 新前端接管生产后
+   并存结束，`kb-ui-test` 已停；分支**尚未合并进 `main`**（用户决定先不合）
+4. **可回退**：旧模板在 `main` 分支（`git show main:templates/index.html`），
+   回退只需把 `docker-compose.override.yml` 的挂载源改回 `./templates`，
+   再 `docker compose up -d --no-build kb`

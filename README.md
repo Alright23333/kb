@@ -28,14 +28,24 @@ kb/
 ├── backup.py            # 自动备份（VACUUM INTO 快照 + 保留策略，应用内后台任务）
 ├── export.py            # 导出 CLI（markdown / json / zip）
 ├── import_logseq.py     # 从 Logseq 文件版导入
-├── tests/               # 单元测试（解析边界 / FK 级联 / 改名 / 孤儿 ref）
+├── tests/               # 单元测试 + 前端 e2e（Playwright，真浏览器跑 vim 键位）
 ├── scripts/             # 运维脚本（时区修复、reindex）
-├── templates/index.html  # 单页 Web UI（CodeMirror 5 + markdown-it + Frappe Gantt + mermaid）
+├── templates/index.html # 页面外壳：设计 token(CSS) + DOM 骨架 + vendor 加载（954 行）
+├── static/app.js        # 全部应用逻辑：路由/状态/渲染/编辑器/vim 层（4895 行）
+├── static/plugin.js     # 插件内核（lazy.nvim 模型：spec 登记 + lazy 触发）
+├── static/panel.js      # 面板容器（overlay / dock / full 三种模式）
+├── static/plugins/      # 8 个插件（sidebar/gantt/hint/toc/health/saved-search/manager/autosave-hint）
+├── static/themes/       # Catppuccin 四口味（结构层 + 参数层分离）
+├── static/sw.js         # 离线外壳（改 static/ 策略必须 bump VERSION）
 ├── static/vendor/       # 自托管前端依赖（无 CDN）
+├── docs/                # ARCHITECTURE / UI-BRANCH / PLUGIN-MODEL / MOBILE-INPUT
 ├── MCP_REMOTE.md        # MCP 远程接入指南
 ├── run.sh               # 启动脚本
 ├── data/kb.db           # SQLite 数据库（首次启动自动创建）
 ```
+
+> 前端现在是**拆分后的新架构**（`ui-lazyvim`，已接管生产 `8080`）。
+> 旧版单文件模板（5234 行内联）在 `main` 分支，不在当前分支的工作区里。
 
 ## 数据模型
 
@@ -390,7 +400,7 @@ docker compose up -d --no-build kb-mcp-public
 | 写 | `delete_page(name)` | 删除（版本快照保留，可恢复） |
 | 行级 | `append_to_page(name, content)` | 追加写入页尾（自动补换行，避免全文覆盖） |
 | 行级 | `append_to_journal(content, date?)` | 追加到日记页（默认今天，不存在则创建）——AI 记录当下的一步调用 |
-| 行级 | `delete_lines(name, start, end)` | 按行号区间删除（1-based 含端点，返回被删行供核对） |
+| 行级 | `delete_lines(name, start_line, end_line)` | 按行号区间删除（1-based 含端点，返回被删行供核对） |
 | 保险 | `get_page_versions(name)` | 版本历史（已删除页面也可查） |
 | 保险 | `restore_page_version(name, id)` | 恢复旧版本 |
 

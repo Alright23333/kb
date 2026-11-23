@@ -16,9 +16,9 @@ lazygit 插件就是典型：一个 `keys` 绑定，按键时在 nvim 里开个�
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `static/plugin.js` | 474 | 内核：spec 登记、lazy 触发、能力表、生命周期 |
-| `static/panel.js` | 236 | 面板容器：overlay / dock / full 三种模式 |
-| `static/plugins/index.js` | 95 | 插件清单（= `lua/plugins/*.lua` 的合集） |
+| `static/plugin.js` | 475 | 内核：spec 登记、lazy 触发、能力表、生命周期 |
+| `static/panel.js` | 247 | 面板容器：overlay / dock / full 三种模式 |
+| `static/plugins/index.js` | 129 | 插件清单（= `lua/plugins/*.lua` 的合集），现登记 8 个插件 |
 
 应用主程序 `app.js` 只提供**桥**（`window.KB` 对面的一批函数导出），
 插件只通过 `api.*` 接触外部世界，不直接读全局变量。
