@@ -119,7 +119,7 @@ function hideAll() {                       // 行 4405
 | 链接预览 | `link-preview-card` | ✅ 有（hover/长按）|
 | 草稿 | `draftSave`, `draftRestore`, `checkDraft` | ✅ 有 |
 | 体检 | `computeHealth`, `loadHealth` | ✅ 插件 `health` |
-| 引用补全 | `insertRef`, `#ref-autocomplete` | ⚠️ 靠 CodeMirror 自身 |
+| 引用补全 | `insertRef`, `#ref-autocomplete` | ✅ 插件 `hint`（CodeMirror 官方 show-hint）|
 | 移动端 | `resetMobilePreview`, `updateFABVisibility` | ✅ 重做（动作坞）|
 
 ### 旧版的问题（重写的理由）
