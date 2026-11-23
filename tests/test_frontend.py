@@ -2118,4 +2118,291 @@ class TestEditorWordTextObjects(Base):
         r = self._run('abcdef', 2, ['y', 'l', 'p'])
         self.assertEqual((r['text'], r['ch']), ('abccdef', 3))
 
+# ══════════════════════════════════════════════════════════
+# 19. 动作坞（＋ 号菜单）在小屏/横屏上不能被裁掉、必须能滚
+#
+# 动作坞向下锚定（`bottom: 44px`），面板向上生长，12 条动作约 523px 高。
+# 原来 `overflow: visible`，装不下就直接顶到屏幕上方外面：
+#
+#     320×568   面板 top = -55px   12 条里 1 条点不到（'ff'）
+#     844×390   面板 top = -233px  12 条里 5 条点不到（横屏，很常见）
+#     740×360   面板 top = -263px  12 条里 6 条点不到
+#
+# 触屏上动作坞是**唯一**的命令入口（没有键盘、没有 which-key、没有 :ex），
+# 少一条就是少一个功能。用户报的就是这个：编辑时找不到某个选项。
+#
+# 修法是给面板限高 + `overflow-y: auto`，上限算到「面板顶边永远 ≥ 16px」。
+# ══════════════════════════════════════════════════════════
+
+FXDOCK_UA = ('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+             '(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36')
+
+
+class TestTouchDockFitsScreen(Base):
+    """动作坞的各种「装不下」场景。"""
+
+    def _touch_page(self, w, h):
+        ctx = self._browser.new_context(**{
+            'viewport': {'width': w, 'height': h},
+            'has_touch': True, 'is_mobile': True,
+            'user_agent': FXDOCK_UA,
+        })
+        pg = ctx.new_page()
+        pg.goto(URL + '/page/KB', wait_until='domcontentloaded')
+        pg.wait_for_timeout(3200)
+        # 目录面板会盖住动作坞，先关掉（另一节已单独测过目录记忆）
+        pg.evaluate('() => { const x=document.querySelector("#kb-toc .kbp-x");'
+                    ' if (x) x.click(); }')
+        pg.wait_for_timeout(400)
+        pg.locator('#fx-toggle').tap()
+        pg.wait_for_timeout(700)
+        return ctx, pg
+
+    MEASURE_JS = (
+        '() => {'
+        '  const p = document.getElementById("fx-panel");'
+        '  const dp = getComputedStyle(p);'
+        '  const pr = p.getBoundingClientRect();'
+        '  const btns = Array.from(p.querySelectorAll(".fx-btn"));'
+        '  return {top: Math.round(pr.top), bottom: Math.round(pr.bottom),'
+        '          h: Math.round(pr.height), oy: dp.overflowY,'
+        '          sh: p.scrollHeight, ch: p.clientHeight, n: btns.length,'
+        '          squeezed: btns.filter(b => b.getBoundingClientRect().height < 28).length}; }'
+    )
+
+    # 逐条滚到可见处再命中测试 —— 这才是「用户能不能点到」
+    REACH_JS = (
+        '() => {'
+        '  const p = document.getElementById("fx-panel");'
+        '  p.scrollTop = 0;'
+        '  const bad = [];'
+        '  for (const b of p.querySelectorAll(".fx-btn")) {'
+        '    if (b.offsetTop < p.scrollTop) p.scrollTop = b.offsetTop;'
+        '    else if (b.offsetTop + b.offsetHeight > p.scrollTop + p.clientHeight)'
+        '      p.scrollTop = b.offsetTop + b.offsetHeight - p.clientHeight;'
+        '    const r = b.getBoundingClientRect();'
+        '    const x = r.left + r.width / 2, y = r.top + r.height / 2;'
+        '    const el = (x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight)'
+        '      ? document.elementFromPoint(x, y) : null;'
+        '    if (!(el && el.closest(".fx-btn") === b)) bad.push(b.dataset.fx);'
+        '  }'
+        '  p.scrollTop = 0;'
+        '  return bad; }'
+    )
+
+    def test_dock_never_escapes_top_of_screen(self):
+        """5 种尺寸下面板顶边都必须 ≥ 0，且每条动作都点得到。"""
+        for label, w, h in (('Pixel8 竖屏', 390, 844), ('小屏竖屏', 360, 640),
+                            ('超小竖屏', 320, 568), ('横屏', 844, 390),
+                            ('横屏小', 740, 360)):
+            ctx, pg = self._touch_page(w, h)
+            try:
+                m = pg.evaluate(self.MEASURE_JS)
+                bad = pg.evaluate(self.REACH_JS)
+                self.assertGreaterEqual(
+                    m['top'], 0,
+                    '%s(%dx%d) 面板顶边跑到屏幕外: top=%d'
+                    % (label, w, h, m['top']))
+                self.assertEqual(
+                    bad, [],
+                    '%s(%dx%d) 这些动作点不到: %r' % (label, w, h, bad))
+                self.assertEqual(
+                    m['squeezed'], 0,
+                    '%s(%dx%d) 有 %d 条按钮被压扁'
+                    % (label, w, h, m['squeezed']))
+            finally:
+                ctx.close()
+
+    def test_dock_scrolls_with_real_finger_swipe(self):
+        """小屏上装不下时必须能用手指滚到底（不是只有 JS 改 scrollTop 才行）。"""
+        ctx, pg = self._touch_page(320, 568)
+        try:
+            m = pg.evaluate(self.MEASURE_JS)
+            self.assertEqual(m['oy'], 'auto', '面板 overflow-y 不是 auto')
+            self.assertGreater(m['sh'], m['ch'],
+                               '这个尺寸上面板没超高，测不到滚动: %r' % m)
+
+            cdp = ctx.new_cdp_session(pg)
+            x = 320 - 60
+            y0 = m['bottom'] - 20
+            y1 = m['top'] + 20
+            cdp.send('Input.dispatchTouchEvent',
+                     {'type': 'touchStart', 'touchPoints': [{'x': x, 'y': y0}]})
+            for i in range(1, 11):
+                cdp.send('Input.dispatchTouchEvent',
+                         {'type': 'touchMove',
+                          'touchPoints': [{'x': x, 'y': int(y0 + (y1 - y0) * i / 10)}]})
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+            pg.wait_for_timeout(600)
+
+            st = pg.evaluate(
+                '() => { const p=document.getElementById("fx-panel");'
+                ' return {st: p.scrollTop, max: p.scrollHeight - p.clientHeight,'
+                '         fade: p.classList.contains("fade-top")}; }')
+            self.assertGreater(st['st'], 0, '手指上划后面板没滚动')
+            self.assertTrue(st['fade'], '滚起来之后没挂 fade-top 提示')
+
+            # 滚到底之后最后一条真的能 tap
+            pg.locator('#fx-panel .fx-btn:last-child').tap(timeout=6000)
+            pg.wait_for_timeout(400)
+            self.assertFalse(
+                pg.evaluate('() => document.getElementById("fxdock").classList.contains("open")'),
+                'tap 之后面板没关（动作没执行完）')
+        finally:
+            ctx.close()
+
+    def test_dock_resets_scroll_on_open(self):
+        """关闭再打开要回到第一条，不能接着上次滚到一半的位置。"""
+        ctx, pg = self._touch_page(320, 568)
+        try:
+            pg.evaluate('() => { const p=document.getElementById("fx-panel");'
+                        ' p.scrollTop = 60; p.classList.add("fade-top"); }')
+            pg.wait_for_timeout(150)
+            pg.locator('#fx-toggle').tap()          # 关
+            pg.wait_for_timeout(250)
+            pg.locator('#fx-toggle').tap()          # 再开
+            pg.wait_for_timeout(500)
+            st = pg.evaluate(
+                '() => { const p=document.getElementById("fx-panel");'
+                ' return {st: p.scrollTop, fade: p.classList.contains("fade-top")}; }')
+            self.assertEqual(st['st'], 0, '重开之后没回到第一条（scrollTop=%d）' % st['st'])
+            self.assertFalse(st['fade'], '重开之后还挂着 fade-top')
+        finally:
+            ctx.close()
+
+    def test_dock_shrinks_when_viewport_shrinks(self):
+        """软键盘弹起时可视区变矮 —— 限高必须跟着变（dvh 而不是 vh）。
+
+        这是用户「编辑时找不到选项」的最常见场景：在编辑器里点 ＋，
+        键盘还没收，可视区只有一半。
+        """
+        ctx, pg = self._touch_page(390, 380)
+        try:
+            m = pg.evaluate(self.MEASURE_JS)
+            self.assertGreaterEqual(m['top'], 0,
+                                    '矮视口下面板又跑到屏幕外: top=%d' % m['top'])
+            self.assertEqual(m['oy'], 'auto')
+            bad = pg.evaluate(self.REACH_JS)
+            self.assertEqual(bad, [], '矮视口下这些动作点不到: %r' % bad)
+            # 限高必须真的按 380 算（而不是按 CSS 里的 100vh 原始值）
+            mh = pg.evaluate(
+                '() => getComputedStyle(document.getElementById("fx-panel")).maxHeight')
+            px = float(mh.replace('px', ''))
+            self.assertLess(px, 300, '矮视口没缩短限高（maxHeight=%s）' % mh)
+        finally:
+            ctx.close()
+
+# ══════════════════════════════════════════════════════════
+# 20. which-key 面板同族排查：也是「bottom 锚定、向上生长」，也装不下
+#
+# 动作坞（#fxdock）已经踩过一次：面板向上长、没有限高、overflow 可见 →
+# 装不下就直接顶到屏幕外，装的那些动作等于不存在。which-key 是同一种
+# 锚定形状（`bottom: 34px`），顺手量了一遍，同样是坏的：
+#
+#     900×420    面板 top = -372px  28 条 leader 动作里 13 条点不到
+#     800×340    面板 top = -452px  16 条点不到
+#     1024×500   面板 top = -292px  10 条点不到
+#
+# 矮窗口 / 笔记本半屏 / 手机横屏都是常态。修完（限高 + 滚动 + j/k 自动
+# 滚进视野）后 4 种尺寸全部 28/28 可达。
+# ══════════════════════════════════════════════════════════
+
+class TestWhichKeyFitsScreen(Base):
+    """which-key 在各种矮窗口下不能跑到屏幕上方外面。"""
+
+    def _open_wk(self, w, h):
+        ctx = self._browser.new_context(viewport={'width': w, 'height': h})
+        pg = ctx.new_page()
+        pg.goto(URL + '/edit/KB', wait_until='domcontentloaded')
+        pg.wait_for_timeout(3200)
+        pg.evaluate('() => { const cm = document.querySelector(".CodeMirror");'
+                    ' if (cm && cm.CodeMirror) cm.CodeMirror.focus(); }')
+        pg.wait_for_timeout(300)
+        pg.keyboard.press('Escape')
+        pg.wait_for_timeout(200)
+        pg.keyboard.press('Space')
+        pg.wait_for_timeout(600)
+        return ctx, pg
+
+    MEASURE_JS = (
+        '() => {'
+        '  const wk = document.getElementById("whichkey");'
+        '  if (!wk || !wk.classList.contains("open")) return {open: false};'
+        '  const dp = getComputedStyle(wk);'
+        '  const r = wk.getBoundingClientRect();'
+        '  const rows = Array.from(wk.querySelectorAll(".wk-row"));'
+        '  return {open: true, top: Math.round(r.top), h: Math.round(r.height),'
+        '          oy: dp.overflowY, sh: wk.scrollHeight, ch: wk.clientHeight,'
+        '          scrollable: wk.scrollHeight > wk.clientHeight, n: rows.length}; }'
+    )
+
+    REACH_JS = (
+        '() => {'
+        '  const wk = document.getElementById("whichkey");'
+        '  const rows = Array.from(wk.querySelectorAll(".wk-row"));'
+        '  wk.scrollTop = 0; const bad = [];'
+        '  for (const x of rows) {'
+        '    if (x.offsetTop < wk.scrollTop) wk.scrollTop = x.offsetTop;'
+        '    else if (x.offsetTop + x.offsetHeight > wk.scrollTop + wk.clientHeight)'
+        '      wk.scrollTop = x.offsetTop + x.offsetHeight - wk.clientHeight;'
+        '    const rr = x.getBoundingClientRect();'
+        '    const cx = rr.left + rr.width / 2, cy = rr.top + rr.height / 2;'
+        '    const el = (cy >= 0 && cy <= innerHeight)'
+        '      ? document.elementFromPoint(cx, cy) : null;'
+        '    if (!(el && el.closest(".wk-row") === x))'
+        '      bad.push((x.innerText || "").trim().split("\\n")[0]);'
+        '  }'
+        '  wk.scrollTop = 0; wk.classList.remove("fade-top");'
+        '  return bad; }'
+    )
+
+    def test_whichkey_never_escapes_top_of_screen(self):
+        """4 种窗口高度下面板顶边 ≥ 0，且 28 条 leader 动作每条都点得到。"""
+        for label, w, h in (('正常', 1280, 900), ('矮窗口', 900, 420),
+                            ('很矮', 800, 340), ('笔记本半屏', 1024, 500)):
+            ctx, pg = self._open_wk(w, h)
+            try:
+                m = pg.evaluate(self.MEASURE_JS)
+                self.assertTrue(m['open'], '%s(%dx%d) which-key 没打开' % (label, w, h))
+                self.assertGreaterEqual(
+                    m['top'], 0,
+                    '%s(%dx%d) which-key 顶边跑到屏幕外: top=%d'
+                    % (label, w, h, m['top']))
+                bad = pg.evaluate(self.REACH_JS)
+                self.assertEqual(bad, [],
+                                 '%s(%dx%d) 这些动作点不到: %r' % (label, w, h, bad))
+                # 矮窗口必须真的能滚（否则限高只是把内容裁掉了）
+                if m['sh'] > m['ch']:
+                    self.assertEqual(m['oy'], 'auto',
+                                     '%s 面板超高但 overflow-y 不是 auto' % label)
+            finally:
+                ctx.close()
+
+    def test_whichkey_keeps_selection_in_view(self):
+        """键盘往下选到看不见的行时，必须自动把选中行滚进视野。"""
+        ctx, pg = self._open_wk(800, 340)
+        try:
+            m = pg.evaluate(self.MEASURE_JS)
+            self.assertTrue(m['open'])
+            self.assertGreater(m['sh'], m['ch'],
+                               '这个高度上没超高，测不到自动滚动: %r' % m)
+            # which-key 里 j 是「今日日记」这个动作（按了就直接执行并关闭面板），
+            # 移动选中项只有 ArrowDown/ArrowUp。所以这里必须按 ArrowDown。
+            for _ in range(24):
+                pg.keyboard.press('ArrowDown')
+                pg.wait_for_timeout(90)
+            r = pg.evaluate(
+                '() => { const wk = document.getElementById("whichkey");'
+                ' const s = wk.querySelector(".wk-row.sel");'
+                ' if (!s) return {sel: null};'
+                ' const sr = s.getBoundingClientRect(), wr = wk.getBoundingClientRect();'
+                ' return {sel: true, visible: sr.top >= wr.top - 1 && sr.bottom <= wr.bottom + 1,'
+                '         st: wk.scrollTop, fade: wk.classList.contains("fade-top")}; }')
+            self.assertTrue(r['sel'], '按 ArrowDown 之后没有选中行')
+            self.assertTrue(r['visible'],
+                            '选中行没被滚进视野（scrollTop=%s）' % r['st'])
+            self.assertGreater(r['st'], 0, '选中行往下走了但面板没滚')
+            self.assertTrue(r['fade'], '滚起来之后没挂 fade-top')
+        finally:
+            ctx.close()
 
