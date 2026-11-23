@@ -3183,6 +3183,8 @@ function openWhichKey() {
   wkSel = 0;
   state.leaderOpen = true;
   $('whichkey').classList.add('open');
+  const wk = $('whichkey');
+  if (wk) { wk.scrollTop = 0; wk.classList.remove('fade-top'); }
   renderWhichKey();
 }
 
@@ -3213,6 +3215,26 @@ function renderWhichKey() {
   $('whichkey').querySelectorAll('.wk-row').forEach(row => {
     row.addEventListener('click', () => wkPress(row.dataset.k));
   });
+
+  /* 28 条 leader 动作共约 758px 高，矮窗口 / 横屏 / 笔记本半屏装不下。
+   * CSS 给了限高 + overflow-y:auto，这里补：
+   *   ① 键盘上下移动选中项时，把选中行滚进视野（否则按 j 看不到选中）
+   *   ② 顶边渐隐，只在真的滚出内容时挂 .fade-top */
+  const wk = $('whichkey');
+  if (wk) {
+    if (!wk.__kbScrollHint) {
+      wk.__kbScrollHint = true;
+      wk.addEventListener('scroll',
+        () => wk.classList.toggle('fade-top', wk.scrollTop > 4), { passive: true });
+    }
+    const sel = wk.querySelector('.wk-row.sel');
+    if (sel) {
+      const r = sel.offsetTop, b = r + sel.offsetHeight;
+      if (r < wk.scrollTop) wk.scrollTop = r;
+      else if (b > wk.scrollTop + wk.clientHeight) wk.scrollTop = b - wk.clientHeight;
+    }
+    wk.classList.toggle('fade-top', wk.scrollTop > 4);
+  }
 }
 
 /* 按下一个键：分组则下钻，叶子则执行。都通过这里，鼠标点击走同一条路径。 */
@@ -3968,6 +3990,18 @@ function renderFxPanel() {
       try { a.run(); } catch (e) { toast(String(e.message || e), 'error'); }
     });
   });
+  /* 面板装了 12 条动作，小屏竖屏 / 横屏上装不下（实测 320×568 顶边 -55px、
+   * 844×390 顶边 -233px，12 条里有 5 条根本点不到）。CSS 给了限高 +
+   * overflow-y:auto，这里补两件事：
+   *   ① 每次打开都回到第一条，别接着上次滚到一半的位置
+   *   ② 顶边渐隐：只在真的滚出内容时挂 .fade-top，提示「上面还有」 */
+  if (!panel.__kbScrollHint) {
+    panel.__kbScrollHint = true;
+    const syncFade = () => panel.classList.toggle('fade-top', panel.scrollTop > 4);
+    panel.addEventListener('scroll', syncFade, { passive: true });
+  }
+  panel.scrollTop = 0;
+  panel.classList.remove('fade-top');
 }
 
 /* 页面/编辑器/缓冲三种上下文，决定动作坞列哪几条 */
@@ -3979,7 +4013,12 @@ function ctxKind() {
 }
 
 function dockToggle() {
-  $('fxdock').classList.toggle('open');
+  const d = $('fxdock');
+  d.classList.toggle('open');
+  if (d.classList.contains('open')) {
+    const p = $('fx-panel');
+    if (p) { p.scrollTop = 0; p.classList.remove('fade-top'); }
+  }
 }
 
 function dockClose() { $('fxdock').classList.remove('open'); }

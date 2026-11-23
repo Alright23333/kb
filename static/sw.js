@@ -13,7 +13,7 @@
  * HTML/JS（这个坑踩过一次：app.js 改了但浏览器还在用缓存副本）。
  */
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
-const VERSION = 'kb-shell-v19';
+const VERSION = 'kb-shell-v20';
 
 const SHELL = [
   BASE + '/',

@@ -459,6 +459,23 @@ body {
   background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--r-md);
   box-shadow: 0 12px 34px rgba(0,0,0,.45); padding: .5em .6em; min-width: 15em;
   max-width: min(92vw, 30em);
+  /* 和 #fxdock 同一种锚定形状（bottom 锚、向上生长），同一个坑：
+   * 实测 28 条 leader 动作共 758px 高，没有限高时——
+   *     900×420   面板 top = -372px  28 条里 13 条点不到
+   *     800×340   面板 top = -452px  28 条里 16 条点不到
+   *     1024×500  面板 top = -292px  28 条里 10 条点不到
+   * 矮窗口/笔记本半屏/手机横屏都是常态，不是边角情况。
+   * 限高把顶边钉在 ≥16px，超出部分靠滚。 */
+  max-height: calc(100vh - 34px - 16px);
+  max-height: calc(100dvh - 34px - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+/* 顶部渐隐：滚出内容时才挂，提示「上面还有」 */
+#whichkey.fade-top {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
 }
 #whichkey.open { display: block; }
 .wk-head {
@@ -625,19 +642,49 @@ body {
   display: none; flex-direction: column; align-items: flex-end; gap: 8px;
 }
 #fxdock.on { display: flex; }
+/* 动作坞向下锚定（bottom:44px），面板是向上长的 —— 12 条动作约 523px 高，
+ * 小屏/横屏装不下就**直接顶到屏幕上方外面**，而且原来 overflow 是 visible、
+ * 滚不动，那几条选项等于不存在。实测（390×844 竖屏正常，但）：
+ *
+ *     320×568   面板 top=-55   12 条里 1 条点不到（'ff'）
+ *     844×390   面板 top=-233  12 条里 5 条点不到（横屏，很常见）
+ *     740×360   面板 top=-263  12 条里 6 条点不到
+ *
+ * 触屏上动作坞是**唯一**的命令入口（没有键盘、没有 which-key、没有 :ex），
+ * 少一条就是少一个功能。所以给它一个上限高度并让它可以滚。
+ *
+ * 上限 = 视口高 − 底部留白(44) − ＋ 按钮(48) − 间隙(8) − 顶部留白(16)
+ *        − 刘海/手势条安全区
+ * 这样面板顶边永远 ≥ 16px，不会被裁掉。 */
 .fx-panel {
   display: none; flex-direction: column; gap: 6px;
   background: color-mix(in srgb, var(--bg-deep) 92%, transparent);
   border: 1px solid var(--line); border-radius: var(--r-md);
   padding: 8px; box-shadow: 0 10px 34px rgba(0,0,0,.42);
   backdrop-filter: blur(8px);
+  /* dvh 而不是 vh：手机上软键盘弹起时 `100vh` 不变，可视区却矮了一半，
+   * 用 vh 算出来的高度仍然会顶到屏幕外面。dvh 跟着可视区走。
+   * 先写 vh 兜底，再写 dvh 覆盖（老浏览器不认 dvh 就退回 vh）。 */
+  max-height: calc(100vh - 44px - 48px - 8px - 16px - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 44px - 48px - 8px - 16px - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 #fxdock.open .fx-panel { display: flex; }
+/* 面板装了 12 条、在小屏/横屏上被限高，顶部会藏住一截 —— 顶部渐隐用
+ * 来告诉用户「上面还有」。JS 只在真的滚出内容时才挂这个类。 */
+.fx-panel.fade-top {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+}
 .fx-btn {
   font-family: var(--mono); font-size: 13px; padding: .6em .95em;
   background: var(--bg-mantle); color: var(--fg); border: 1px solid var(--line);
   border-radius: var(--r-sm); cursor: pointer; text-align: left;
   display: flex; align-items: center; gap: .6em; min-width: 10.5em;
+  flex: 0 0 auto;                      /* 受限高度下不许被压缩 */
   transition: border-color .12s var(--ease), color .12s var(--ease);
 }
 .fx-btn:hover, .fx-btn:active { border-color: var(--accent); color: var(--accent); }
