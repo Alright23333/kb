@@ -91,6 +91,61 @@ class TestTags(unittest.TestCase):
         self.assertEqual(extract_tags(""), set())
 
 
+class TestIndentedCode(unittest.TestCase):
+    """4-space indented blocks are code — for tags, links *and* properties.
+
+    The renderer (markdown-it) draws an indented block as <pre>, so anything
+    inside it must not reach the sidebar / backlinks / properties. Before
+    this, only extract_tags() consulted CODE_RE, and CODE_RE did not know
+    about indented blocks at all — a page could show `#fxdock` as code while
+    the sidebar listed it as a tag.
+    """
+
+    def test_indented_block_hides_tags(self):
+        content = "    #fxdock { position: absolute; }\n\n正文 #真标签"
+        self.assertEqual(extract_tags(content), {"真标签"})
+
+    def test_indented_block_hides_links(self):
+        # A TOML table header is not a wikilink.
+        content = "```toml\n[[tool.uv.index]]\n```\n\n见 [[真页面]]"
+        self.assertEqual(extract_links(content), {"真页面"})
+
+    def test_indented_block_hides_links_too(self):
+        content = "      [[notal link]]\n\n见 [[真页面]]"
+        self.assertEqual(extract_links(content), {"真页面"})
+
+    def test_indented_block_hides_properties(self):
+        content = "    示例输出\n    collapsed:: true\n\n真属性:: 值"
+        self.assertEqual(extract_properties(content), {"真属性": "值"})
+
+    def test_tab_indented_bullet_keeps_its_tag(self):
+        # Logseq outlines use tabs. "\t- #深夜写文 ..." is a real tag.
+        content = "\t\t- #深夜写文 睡不着"
+        self.assertEqual(extract_tags(content), {"深夜写文"})
+
+    def test_tab_indented_bullet_keeps_its_link(self):
+        content = "\t\t- [[兵推]]有一个疯狂计划"
+        self.assertEqual(extract_links(content), {"兵推"})
+
+    def test_four_space_continuation_is_not_a_block(self):
+        # Indented, but the line above is prose — this is a continuation
+        # paragraph, not a code block, so the tag is real.
+        content = "一句话\n    接着 #真标签 说下去"
+        self.assertEqual(extract_tags(content), {"真标签"})
+
+    def test_indented_list_continuation_is_not_a_block(self):
+        content = "\n    - 列表项 #真标签"
+        self.assertEqual(extract_tags(content), {"真标签"})
+
+    def test_fenced_block_hides_links_and_properties(self):
+        content = "```bash\n[[Meeting Notes]]\nkey:: v\n```\n\n真链接 [[页面]]"
+        self.assertEqual(extract_links(content), {"页面"})
+        self.assertEqual(extract_properties(content), {})
+
+    def test_inline_code_hides_links(self):
+        self.assertEqual(extract_links("`[[a]]` 和 [[b]]"), {"b"})
+
+
 class TestLinks(unittest.TestCase):
     def test_plain_link(self):
         self.assertEqual(extract_links("[[Foo]]"), {"Foo"})
