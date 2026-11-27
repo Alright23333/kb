@@ -24,6 +24,19 @@ KB.define('hint', (api, opts) => {
     return qi === ql.length ? score : -1;
   }
 
+  /* 中文输入法「全角标点」模式下按 `[` 得到的是 `［`(U+FF3B) 或 `【`(U+3010)，
+   * 按 `]` 得到 `］`/`】`。用户报的原话是「两个中文【也可以打开页面引用」——
+   * 在中文输入法里给 [[开始补全几乎是必须的，否则每次都要先切半角。
+   *
+   * 归一化只用于**判定**：全角↔半角是 1 字符对应 1 字符，下标不会错位，
+   * 所以 start / q 的下标可以直接用在实际文本上；替换时 show-hint 从
+   * from 到 to 覆盖的正是用户敲下的那几个全角字符，结果同样是正常的
+   * `[[名字]]`（因为我们把右括号也一并写进候选 text）。 */
+  const FW_MAP = { '\uFF3B': '[', '\u3010': '[', '\uFF3D': ']', '\u3011': ']' };
+  function fwNorm(str) {
+    return str.replace(/[\uFF3B\u3010\uFF3D\u3011]/g, ch => FW_MAP[ch] || ch);
+  }
+
   /* 找光标前面是不是 [[ 或 #，决定候选类型和替换范围。
    *
    * 只看**光标之前**这一段：closebrackets 插件在输入 `[` 时就把 `[]` 补好了，
@@ -32,7 +45,8 @@ KB.define('hint', (api, opts) => {
    * 弹出来也没有候选」就是这个原因。 */
   function contextOf(c) {
     const cur = c.getCursor();
-    const before = c.getLine(cur.line).slice(0, cur.ch);
+    const raw = c.getLine(cur.line).slice(0, cur.ch);
+    const before = fwNorm(raw);              // 仅判定用，下标与 raw 一一对应
     const openBracket = before.lastIndexOf('[[');
     if (openBracket >= 0 && before.slice(openBracket + 2).indexOf(']]') === -1) {
       return { kind: 'page', start: openBracket + 2, text: before.slice(openBracket + 2) };
@@ -60,12 +74,12 @@ KB.define('hint', (api, opts) => {
        * 所以我们把「补 [[ 的右括号」写进候选的 text，而不是靠回调。 */
       CodeMirror.showHint(c, function () {
         const cur = c.getCursor();
-        const before = c.getLine(cur.line).slice(0, cur.ch);
+        const before = fwNorm(c.getLine(cur.line).slice(0, cur.ch));
         const q = before.slice(ctx.start);
-        // closebrackets 已经把 ]] 补好了：光标后面若已经是 ]]，候选只放名字，
-        // 否则会变成 [[名字]]]]。
+        // closebrackets 已经把 ]] 补好了：光标后面若已经是 ]]（全角也认），
+        // 候选只放名字，否则会变成 [[名字]]]]。
         const alreadyClosed = ctx.kind === 'page' &&
-                              c.getLine(cur.line).slice(cur.ch, cur.ch + 2) === ']]';
+                              fwNorm(c.getLine(cur.line).slice(cur.ch, cur.ch + 2)) === ']]';
         const items = list
           .map(x => ({ text: x, score: matchFuzzy(q, x) }))
           .filter(x => x.score > 0)
@@ -106,7 +120,8 @@ KB.define('hint', (api, opts) => {
     function maybeComplete(instance, change) {
       if (!change || change.origin !== '+input') return;
       const cur = instance.getCursor();
-      const before = instance.getLine(cur.line).slice(0, cur.ch);
+      /* 全角 `［［` / `【【` 也要自动弹（中文输入法常态）。见上面 fwNorm 的说明。 */
+      const before = fwNorm(instance.getLine(cur.line).slice(0, cur.ch));
       const wantPopup = before.slice(-2) === '[[' ||
                         /(^|[^\p{L}\p{N}_#])#[\p{L}\p{N}_-]*$/u.test(before);
       if (!wantPopup) return;

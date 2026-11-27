@@ -5,6 +5,43 @@
 > **[[2026-11-22]] 状态快照**：**新前端（`ui-lazyvim`）已接管生产 `8080`**；本轮又做了一整轮「Vim 真实性」补齐（13 个 commit，见下方 checkpoint）。前端从此有 e2e 测试（`tests/test_frontend.py`，25 例），单测总数 **57 全绿**。
 > **`ai-native` 分支**：课程作业形态（RAG 问答/划词写作/AI 建链 + 批量扫描/周报生成/引用 chips），mock 全链路 E2E 通过，待验收后决定是否合并，见 `docs/ai-native.md`。
 
+## ✅ Checkpoint 2026-11-27（用户手报四条 + 中文输入法一整层）
+
+用户在 `kb-issue` 的 `new_issue` 段里直接写了四条抱怨，这一轮全部修完并落测。
+一句话结论：**四条里三条是「界面上看不出、按一次就暴露」的静默失效，一条是
+硬编码默认值；每条都补了真浏览器 e2e（130 → 全绿）**。
+
+| # | 修的是什么 | 实测证据 | commit |
+|---|---|---|---|
+| 68 | **中文全角标点打不开命令行 / 不触发引用补全** —— `：`(U+FF1A)、`／`(U+FF0F)、`［［`/`【【` 全部无反应 | 全角冒号在编辑器里必须落到**同一个** `.CodeMirror-dialog`（ASCII `:` 走的就是它，`:w`/`:q!` 都在那边执行）；阅读视图里则开应用层 `#cmdline`；全角括号要弹 show-hint 且候选是真实页面名 | `—` |
+| 69 | **任务快捷添加写死 `p2`** —— 输入框里写 `p1 标题` 仍建成 p2（`p1` 被当成标题一部分） | 实测落库行从 `p2 2026-01-01 p1 写文档` 改成了 `p1 2026-01-01 写文档`；`3 修脚本`→p3、`P4 打杂`→p4、不带优先级仍 p2 | `—` |
+| 70 | **`yy` 只进内存寄存器，`Ctrl+V` 粘不出来** | 先写哨兵值到系统剪贴板，`yy` 之后 `navigator.clipboard.readText()` 读到的是那一行；`yiw` 只读到那个词（≤8 字符） | `—` |
+| 71 | **中文输入法在 normal 模式敲字母「完全没响应」**（未记录，修 #68 时顺手发现） | 组字结果 `j` 被当成 vim 的 j（光标下移一行）且**不写进正文**；组字结果是真中文时不动光标、不插入 | `—` |
+
+### 这一轮的方法论收获
+
+- **「两种入口」必须落到同一套界面**。编辑器里的 ASCII `:` 到不了应用层 ——
+  CodeMirror 的 vim 在隐藏 textarea 上先吃掉它，打开自己的 ex 对话框。第一版
+  把全角冒号接到应用层 `#cmdline`，结果是「阅读视图能用、编辑器里换了一套
+  不一样的 ex 界面」。正确做法是喂给 vim（`handleKey(cm, ':', 'normal')`）。
+- **capture / bubble 的位置决定成败**。应用层 keydown 是冒泡阶段，而键盘事件
+  在隐藏 textarea 上被 vim 先接走、冒泡到 document 时又被「输入框只处理 Esc」
+  那条 return 掉 —— 全角冒号的分支必须写在 **capture** 阶段。
+- **Playwright 打不出全角字符，`new KeyboardEvent` 的 `keyCode` 恒为 0**。
+  前者要用 `evaluate` 派发带 `key` 的合成事件；后者进不了 CodeMirror 的
+  keymap（它按 keyCode 查表），ASCII oracle 必须用真实 `keyboard.press`。
+- **测试期望值不能硬编码部署前缀**。`/kb/` 是 nginx 那层的，容器直连是 `/`。
+  写死任何一边，另一半环境的那批用例就假红 —— 统一走 `base_path()`（从
+  `KB_E2E_URL` 推导）。同理默认 URL 从 `:8081/kb` 改成 `:8080`：8081 现在
+  挂了 basic auth，直接打是 `ERR_INVALID_AUTH_CREDENTIALS`。
+- **`yy` 写剪贴板必须在用户手势的同步栈里**。`navigator.clipboard.writeText`
+  在 keydown 里属于 transient activation，先 `await` 别的东西就变
+  `NotAllowedError`；失败要退回 `execCommand('copy')`（`<textarea>` + select）。
+- **包装 `pushText` 必须把返回值返回出去**。这是 AGENT.md 陷阱 28 的同一个坑
+  （monkey-patch 吞返回值 → 调用方拿到 `undefined`，静默坏）。
+- **IME 组字回滚不能用 `setValue`**。`setValue` 会清空撤销历史，用户之前
+  的 dd/u 全丢 —— 只 `replaceRange('', from, to)` 删掉组字那一段。
+
 ## ✅ Checkpoint 2026-11-22（前端 Vim 真实性）
 
 用户诉求：「连续自主推进，定位 bug → 记 todo → 每修一次提交一次，不用等我确认」。

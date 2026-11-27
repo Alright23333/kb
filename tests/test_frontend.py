@@ -7,8 +7,15 @@
 
 跑法：
 
-  # 起一个实例（默认打 http://127.0.0.1:8081/kb）
+  # 默认打 http://127.0.0.1:8080（容器直连，无鉴权）
+  python3 -m unittest tests.test_frontend -v
+
+  # 想覆盖 nginx 的部署前缀就改成 8081 —— 但那条路现在有 basic auth，
+  # 直接打会 ERR_INVALID_AUTH_CREDENTIALS，得自己配 http_credentials：
   KB_E2E_URL=http://127.0.0.1:8081/kb python3 -m unittest tests.test_frontend -v
+
+  断言里的部署前缀一律走 base_path()（从 KB_E2E_URL 推导），
+  不硬编码 —— 否则换环境跑的那一半用例会假红。
 
   # 没有 chromium / 没装 playwright 时自动 skip，不会让 CI 变红
   python3 -m unittest discover -s tests -v
@@ -25,7 +32,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-URL = os.environ.get('KB_E2E_URL', 'http://127.0.0.1:8081/kb')
+# 默认直连容器：经 nginx 的 :8081/kb 现在挂了 basic auth，
+# 直接打开会 401（ERR_INVALID_AUTH_CREDENTIALS）。
+URL = os.environ.get('KB_E2E_URL', 'http://127.0.0.1:8080')
 CHROMIUM = os.environ.get('KB_E2E_CHROMIUM', '/usr/sbin/chromium')
 
 try:
@@ -108,6 +117,17 @@ class Base(unittest.TestCase):
 
     def url_path(self):
         return self.page.url.split('/kb', 1)[-1]
+
+    @staticmethod
+    def base_path():
+        """部署前缀：从 KB_E2E_URL 推导，别再硬编码 /kb/。
+
+        直连 8080 时前缀是空串，经 nginx 的 8081/kb 时是 '/kb' ——
+        硬编码任何一个都会让换环境跑的那一半用例假红（踩过）。
+        """
+        from urllib.parse import urlparse
+        p = urlparse(URL).path.rstrip('/')
+        return p
 
     def toast(self):
         return self.page.evaluate(
@@ -514,19 +534,23 @@ if __name__ == '__main__':
 # ══════════════════════════════════════════════════════════
 
 class TestRoutes(Base):
-    def test_base_is_kb_on_command_only_routes(self):
-        """theme / health / searches / trash / gantt 都必须算出 base=/kb。
+    def test_base_matches_deployment_prefix(self):
+        """theme / health / searches / trash / gantt 都必须算出**正确的** base。
 
         断言的是 __KB_BASE__ 这个「后端注入的前缀」而不是页面内容 ——
         base 错了会牵连 manifest/sw.js/API 三条路径，但页面本身看起来
         完全正常（静默失效）。原先的模板正则只认识 9 个内置词，
         上面五个全部算错。
+
+        期望值不能写死 '/kb'：直连 8080 时前缀是空串，经 nginx 的
+        8081/kb 时才是 '/kb'。写死任何一边都会让另一半环境假红。
         """
+        want = self.base_path()
         for path in ('/theme', '/health', '/searches', '/trash', '/gantt'):
             self.page.goto(URL + path, wait_until='domcontentloaded')
             self.page.wait_for_timeout(1800)
             base = self.page.evaluate('() => window.__KB_BASE__')
-            self.assertEqual(base, '/kb', '%s 的部署前缀算错：%r' % (path, base))
+            self.assertEqual(base, want, '%s 的部署前缀算错：%r' % (path, base))
 
     def test_deep_link_health_opens_panel(self):
         """/kb/health 直接打开体检面板，不是一张空白首页。"""
@@ -1662,14 +1686,17 @@ class TestTouchSwipeBuffers(Base):
         try:
             pg.evaluate('() => addBuffer("kb-issue")')
             pg.wait_for_timeout(400)
-            self.assertEqual(pg.evaluate('() => location.pathname'), '/kb/page/KB')
+            base = self.base_path()
+            self.assertEqual(pg.evaluate('() => location.pathname'), base + '/page/KB')
             self._swipe(cdp, 300, 400, 120, 400)
             pg.wait_for_timeout(1200)
-            self.assertEqual(pg.evaluate('() => location.pathname'), '/kb/page/kb-issue',
+            self.assertEqual(pg.evaluate('() => location.pathname'),
+                             base + '/page/kb-issue',
                              '左滑没切到下一个缓冲')
             self._swipe(cdp, 120, 400, 320, 400)
             pg.wait_for_timeout(1200)
-            self.assertEqual(pg.evaluate('() => location.pathname'), '/kb/page/KB',
+            self.assertEqual(pg.evaluate('() => location.pathname'),
+                             base + '/page/KB',
                              '右滑没切回上一个缓冲')
         finally:
             ctx.close()
@@ -1689,7 +1716,8 @@ class TestTouchSwipeBuffers(Base):
                 '() => ({path: location.pathname, editing: !!window.state.editing,'
                 '        len: window.cm ? window.cm.getValue().length : -1})'
             )
-            self.assertEqual(st['path'], '/kb/edit/KB', '编辑器里横滑被误判成切缓冲')
+            self.assertEqual(st['path'], self.base_path() + '/edit/KB',
+                             '编辑器里横滑被误判成切缓冲')
             self.assertTrue(st['editing'], '横滑把编辑态弄丢了')
             self.assertEqual(st['len'], pre_len, '横滑之后缓冲内容变了')
         finally:
@@ -2405,4 +2433,481 @@ class TestWhichKeyFitsScreen(Base):
             self.assertTrue(r['fade'], '滚起来之后没挂 fade-top')
         finally:
             ctx.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#   中文输入法 / 全角标点 / 任务优先级 / 系统剪贴板
+# ──────────────────────────────────────────────────────────────────────
+#   这一组全来自用户直接在 KB 页面里报的四条：
+#     ① 中文冒号 `：` 打不开命令行、两个中文 `【` 不触发引用补全
+#     ② 中文输入法下敲字母再回车「完全没有响应」
+#     ③ `yy` 之后去别的程序 Ctrl+V 什么都没有
+#     ④ 任务页写 `p1 标题`，建出来的还是 p2
+#   四条都是「按一次就暴露、看代码看不出来」的类型，必须真浏览器测。
+# ══════════════════════════════════════════════════════════════════════
+
+CJK_SCRATCH = 'a' + chr(10) + 'b' + chr(10) + 'c' + chr(10) + 'd'
+
+TASKPAGE_SCRATCH = (
+    'p2 2026-01-01 测试基准任务' + chr(10) +
+    'p1 2026-01-01 高优先级任务' + chr(10)
+)
+
+
+class TestChineseInput(Base):
+    """全角标点归一：`：` 开命令行、`／` 开搜索、`［［` / `【【` 触发补全。"""
+
+    PAGE = '__e2e-cjk-scratch'
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1000)
+        self.page.evaluate(self.PURGE_JS, self.PAGE)
+        # 固定 4 行 ASCII —— 下面 :2d 的断言要对着确定内容比
+        self.page.evaluate(self.CREATE_JS, [self.PAGE, CJK_SCRATCH])
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2800)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            self.assertEqual(self.page.evaluate(self.EXISTS_JS, self.PAGE), 404)
+        finally:
+            super().tearDown()
+
+    CREATE_JS = (
+        'async ([name, content]) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages", {'
+        '    method: "POST", headers: {"Content-Type": "application/json"},'
+        '    body: JSON.stringify({name: name, content: content}), });'
+        '  return r.status; }'
+    )
+
+    PURGE_JS = (
+        'async (name) => {'
+        '  const b = window.__KB_BASE__ + "/api/pages/" + name;'
+        '  await fetch(b, {method: "DELETE"});'
+        '  await fetch(b + "/versions", {method: "DELETE"});'
+        '  return true; }'
+    )
+
+    EXISTS_JS = (
+        'async (name) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages/" + name);'
+        '  return r.status; }'
+    )
+
+    FOCUS_JS = (
+        '() => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  if (!w || !w.CodeMirror) return false;'
+        '  w.CodeMirror.focus(); return true; }'
+    )
+
+    CMD_STATE_JS = (
+        '() => {'
+        '  const el = document.getElementById("cmdline");'
+        '  const open = el && el.classList.contains("open");'
+        '  const p = document.getElementById("cmdline-prompt");'
+        '  return {open: !!open, prefix: p ? p.textContent : null}; }'
+    )
+
+    # 编辑器里 `:` 走的是 CodeMirror vim 自己的 ex 对话框（ascii-colon-form），
+    # 应用层 #cmdline 根本收不到 —— 所以这里要按两种形态分别判定。
+    EX_STATE_JS = (
+        '() => {'
+        '  const cm = document.querySelector(".CodeMirror");'
+        '  const dlg = cm && cm.querySelector(".CodeMirror-dialog");'
+        '  const inp = dlg && dlg.querySelector("input");'
+        '  return {open: !!dlg, text: inp ? inp.value : null}; }'
+    )
+
+    HINT_STATE_JS = (
+        '() => {'
+        '  const h = document.querySelector(".CodeMirror-hints");'
+        '  if (!h) return {open: false, list: 0};'
+        '  const items = Array.from(h.querySelectorAll("li"));'
+        '  return {open: true, list: items.length,'
+        '          first: items.length ? (items[0].innerText || "").trim() : null}; }'
+    )
+
+    VALUE_JS = (
+        '() => document.querySelector(".CodeMirror").CodeMirror.getValue()'
+    )
+
+    def _focus(self):
+        self.page.evaluate(self.FOCUS_JS)
+        self.page.wait_for_timeout(200)
+
+    # Playwright 的 insert_text 只往输入框灌 input 事件、不派发 keydown，
+    # 而我们的归一化在 keydown 上 —— 必须显式派发一个真实的 KeyboardEvent。
+    # target 选 CodeMirror 的隐藏输入框（真实输入法打字时事件就打在这里）。
+    KEY_JS = (
+        '([k, where]) => {'
+        '  const el = where === "cm"'
+        '    ? document.querySelector(".CodeMirror").CodeMirror.getInputField()'
+        '    : document.body;'
+        '  if (!el) return false;'
+        '  el.focus();'
+        '  el.dispatchEvent(new KeyboardEvent("keydown",'
+        '    {key: k, bubbles: true, cancelable: true}));'
+        '  return true; }'
+    )
+
+    def test_fullwidth_colon_opens_ex_dialog_like_ascii(self):
+        """编辑器里全角 `：` 必须和 ASCII `:` 走同一条：打开 vim 的 ex 对话框。
+
+        这一条是实测出来的语义：ASCII `:` 在编辑器里到不了应用层 ——
+        CodeMirror 的 vim 在 textarea 上先吃掉它，打开 `.CodeMirror-dialog`，
+        `:w` / `:q!` 都在那边执行。全角冒号如果不喂给 vim，就会变成
+        「按了完全没反应」。
+        """
+        self._focus()
+        # 先验 ASCII 的行为（作为 oracle）。这里必须用真实按键：
+        # CodeMirror 的 keymap 靠 e.keyCode 查表，JS 里 new KeyboardEvent
+        # 的 keyCode 恒为 0，合成事件进不了 vim 的 keymap。
+        self.page.keyboard.press(':')
+        self.page.wait_for_timeout(700)
+        ascii_st = self.page.evaluate(self.EX_STATE_JS)
+        self.assertTrue(ascii_st['open'], 'ASCII 冒号没开 ex 对话框: %r' % (ascii_st,))
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(500)
+
+        # 全角冒号必须一模一样（Playwright 的 press 打不出全角字符，
+        # 直接派发带 key 的 KeyboardEvent —— 我们的分支只看 e.key）
+        self.page.evaluate(self.KEY_JS, [chr(0xFF1A), 'cm'])
+        self.page.wait_for_timeout(700)
+        st = self.page.evaluate(self.EX_STATE_JS)
+        self.assertTrue(st['open'], '全角冒号没开 ex 对话框: %r' % (st,))
+        self.assertEqual(st['text'], '',
+                         'ex 对话框初始内容该是空的: %r' % (st,))
+        # 打进去的字符必须真的落进这个对话框（这是全角冒号唯一的价值：
+        # 让中文用户能进入和 ASCII 一模一样的 ex 输入状态）
+        self.page.keyboard.type('2d')
+        self.page.wait_for_timeout(400)
+        typed = self.page.evaluate(self.EX_STATE_JS)
+        self.assertTrue(typed['open'], '打字过程中对话框被关掉了')
+        self.assertEqual(typed['text'], '2d',
+                         '按键没进 ex 对话框: %r' % (typed,))
+        # 而且命令真的执行了 —— `:2d` 删掉第 2 行 'b'
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_timeout(800)
+        content = self.page.evaluate(
+            '() => document.querySelector(".CodeMirror").CodeMirror.getValue()')
+        self.assertEqual(content, 'a' + chr(10) + 'c' + chr(10) + 'd',
+                         '全角冒号进的 ex 没真的执行 :2d: %r' % (content,))
+
+    def test_fullwidth_colon_opens_cmdline_reading_view(self):
+        """阅读视图（非编辑器）里全角 `：` 与全角 `／` 都应生效。"""
+        self.page.goto(URL + '/all', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2200)
+        self.blur()
+        self.page.evaluate(self.KEY_JS, [chr(0xFF1A), 'body'])
+        self.page.wait_for_timeout(500)
+        st = self.page.evaluate(self.CMD_STATE_JS)
+        self.assertTrue(st['open'], '阅读视图里全角冒号没开命令行')
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(300)
+        self.blur()
+        self.page.evaluate(self.KEY_JS, [chr(0xFF0F), 'body'])  # 全角斜杠
+        self.page.wait_for_timeout(500)
+        st = self.page.evaluate(self.CMD_STATE_JS)
+        self.assertTrue(st['open'], '阅读视图里全角斜杠没开搜索')
+        self.assertEqual(st['prefix'], '/')
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_timeout(300)
+
+    def test_fullwidth_brackets_trigger_completion(self):
+        """中文输入法打 `【【`（或 `［［`）必须弹补全，候选里有真实页面名。"""
+        self._focus()
+        # 进 insert 模式再敲全角括号（normal 模式敲括号不会插入文本）
+        self.page.keyboard.press('i')
+        self.page.wait_for_timeout(200)
+        self.page.keyboard.insert_text(chr(0x3010) * 2)   # 【【
+        self.page.wait_for_timeout(1400)
+        st = self.page.evaluate(self.HINT_STATE_JS)
+        self.assertTrue(st['open'], '全角 【【 没触发补全: %r' % (st,))
+        self.assertGreater(st['list'], 0, '补全弹了但没有候选: %r' % (st,))
+        self.assertEqual(st['list'], 40, '候选数不是 40（说明不是 show-hint 的列表）')
+        # 候选列表按页面名排序，前 40 条是日期页 —— 继续敲 KB 才筛得出目标页，
+        # 这一步同时验证「全角括号之后仍然能按半角继续输入并被过滤」。
+        self.page.keyboard.insert_text('KB')
+        self.page.wait_for_timeout(900)
+        items = self.page.evaluate(
+            '() => Array.from(document.querySelectorAll(".CodeMirror-hints li"))'
+            '.map(x => x.innerText || "").join("|")'
+        )
+        self.assertIn('KB', items,
+                      '敲了 KB 之后候选里还是没有 KB（说明取的不是真实页面名）')
+        self.page.keyboard.press('Escape')       # 关候选框
+        self.page.keyboard.press('Escape')       # 回 normal
+        self.page.wait_for_timeout(300)
+
+
+class TestImeNormalModePassthrough(Base):
+    """中文输入法开着时在 normal 模式敲字母：要当成 vim 按键，不能插进正文。"""
+
+    PAGE = '__e2e-ime-scratch'
+    SCRATCH = ('第一行' + chr(10) + '第二行' + chr(10) + '第三行')
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1000)
+        self.page.evaluate(self.PURGE_JS, self.PAGE)
+        self.page.evaluate(self.CREATE_JS, [self.PAGE, self.SCRATCH])
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2800)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            self.assertEqual(self.page.evaluate(self.EXISTS_JS, self.PAGE), 404)
+        finally:
+            super().tearDown()
+
+    CREATE_JS = TestChineseInput.CREATE_JS
+    PURGE_JS = TestChineseInput.PURGE_JS
+    EXISTS_JS = TestChineseInput.EXISTS_JS
+
+    STATE_JS = (
+        '() => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  const c = w.CodeMirror;'
+        '  return {value: c.getValue(), line: c.getCursor().line,'
+        '          insert: !!(c.state.vim && c.state.vim.insertMode)}; }'
+    )
+
+    # 用 CDP 直接派发真实的 composition 事件 —— Playwright 的 keyboard
+    # 无法模拟 IME 组字（它只发 keydown/keypress）。
+    COMPOSE_JS = (
+        '([data]) => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  const ta = w.CodeMirror.getInputField();'
+        '  if (!ta) return false;'
+        '  const ev = (type) => {'
+        '    const e = new CompositionEvent(type, {data: data, bubbles: true});'
+        '    ta.dispatchEvent(e);'
+        '  };'
+        '  ev("compositionstart");'
+        '  ev("compositionend");'
+        '  return true; }'
+    )
+
+    def _focus(self):
+        self.page.evaluate(
+            '() => { const w = document.querySelector(".CodeMirror");'
+            ' w.CodeMirror.focus(); }')
+        self.page.wait_for_timeout(200)
+
+    def test_ascii_composition_acts_as_normal_keys(self):
+        """组字结果 `j` 要当成 vim 的 j（光标下移），且不把 j 写进正文。"""
+        self._focus()
+        before = self.page.evaluate(self.STATE_JS)
+        self.assertEqual(before['value'], self.SCRATCH, '前置状态就不对')
+        self.assertFalse(before['insert'], '不该是 insert 模式')
+
+        self.page.evaluate(self.COMPOSE_JS, ['j'])
+        self.page.wait_for_timeout(700)
+        after = self.page.evaluate(self.STATE_JS)
+        self.assertEqual(after['value'], self.SCRATCH,
+                         '组字结果被写进了正文: %r' % after['value'])
+        self.assertEqual(after['line'], before['line'] + 1,
+                         'j 没被当成下移（光标 %d → %d）'
+                         % (before['line'], after['line']))
+
+    def test_cjk_composition_does_not_move_cursor(self):
+        """真中文（选字了）不能被当成按键 —— 光标不该因为 `中文` 而下移。"""
+        self._focus()
+        before = self.page.evaluate(self.STATE_JS)
+        self.page.evaluate(self.COMPOSE_JS, ['中文'])
+        self.page.wait_for_timeout(600)
+        after = self.page.evaluate(self.STATE_JS)
+        self.assertEqual(after['line'], before['line'],
+                         '真中文被当成按键，光标动了')
+        self.assertNotIn('中文', after['value'],
+                         'normal 模式下的组字不该把中文插进正文')
+
+
+class TestYySystemClipboard(Base):
+    """`yy` 必须同时写进系统剪贴板，否则跨程序粘贴完全失效。"""
+
+    PAGE = '__e2e-yyclip-scratch'
+    SCRATCH = '一 第一行' + chr(10) + '二 第二行'
+
+    def setUp(self):
+        super().setUp()
+        # 剪贴板读取需要授权
+        try:
+            self.page.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+        except Exception:
+            pass
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(1000)
+        self.page.evaluate(self.PURGE_JS, self.PAGE)
+        self.page.evaluate(self.CREATE_JS, [self.PAGE, self.SCRATCH])
+        self.page.goto(URL + '/edit/' + self.PAGE, wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2800)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            self.assertEqual(self.page.evaluate(self.EXISTS_JS, self.PAGE), 404)
+        finally:
+            super().tearDown()
+
+    CREATE_JS = TestChineseInput.CREATE_JS
+    PURGE_JS = TestChineseInput.PURGE_JS
+    EXISTS_JS = TestChineseInput.EXISTS_JS
+
+    CLIP_JS = (
+        'async () => {'
+        '  try { return await navigator.clipboard.readText(); }'
+        '  catch (e) { return "__denied__:" + e.name; } }'
+    )
+
+    def _focus(self):
+        self.page.evaluate(
+            '() => { const w = document.querySelector(".CodeMirror");'
+            ' w.CodeMirror.focus(); w.CodeMirror.setCursor({line: 0, ch: 0}); }')
+        self.page.wait_for_timeout(250)
+
+    def test_yy_writes_to_system_clipboard(self):
+        """yy 复制第一行 → navigator.clipboard.readText() 能读到那一行。"""
+        self._focus()
+        # 先写一个哨兵值，确认稍后读到的是 yy 的结果而不是原来的内容
+        self.page.evaluate(
+            'async () => { await navigator.clipboard.writeText("__sentinel__"); }')
+        self.page.wait_for_timeout(200)
+        self.page.keyboard.press('y')
+        self.page.keyboard.press('y')
+        self.page.wait_for_timeout(700)
+        got = self.page.evaluate(self.CLIP_JS)
+        self.assertNotEqual(got, '__sentinel__',
+                            'yy 没写剪贴板（还是哨兵值）')
+        self.assertIn('第一行', got,
+                      '剪贴板内容不是 yy 复制的那行: %r' % (got,))
+        # 正文没被改动（yy 不该改文本）
+        self.assertEqual(
+            self.page.evaluate('() => document.querySelector(".CodeMirror")'
+                               '.CodeMirror.getValue()'),
+            self.SCRATCH)
+
+    def test_yiw_writes_word_to_system_clipboard(self):
+        """yiw 只复制一个词，同样要进系统剪贴板。"""
+        self._focus()
+        self.page.evaluate(
+            'async () => { await navigator.clipboard.writeText("__sentinel__"); }')
+        self.page.wait_for_timeout(200)
+        # 光标放到第一行第二个词上
+        self.page.evaluate(
+            '() => { const c = document.querySelector(".CodeMirror").CodeMirror;'
+            ' c.setCursor({line: 0, ch: 3}); }')
+        self.page.wait_for_timeout(200)
+        self.page.keyboard.press('y')
+        self.page.keyboard.press('i')
+        self.page.keyboard.press('w')
+        self.page.wait_for_timeout(700)
+        got = self.page.evaluate(self.CLIP_JS)
+        self.assertNotEqual(got, '__sentinel__', 'yiw 没写剪贴板')
+        self.assertIn('第一行', got, 'yiw 复制的不是那个词: %r' % (got,))
+        self.assertLessEqual(len(got.strip()), 8,
+                             'yiw 复制了整行而不只是词: %r' % (got,))
+
+
+class TestQuickAddTaskPriority(Base):
+    """任务快捷添加：输入框里带优先级必须生效，不能永远 p2。"""
+
+    PAGE = '__e2e-taskpri-scratch'
+    BASE_CONTENT = TASKPAGE_SCRATCH
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(900)
+        self.page.evaluate(self.PURGE_JS, self.PAGE)
+        self.page.evaluate(self.CREATE_JS, [self.PAGE, self.BASE_CONTENT])
+        # 让 /todo 用我们的临时任务页
+        self.page.evaluate(
+            '(name) => { localStorage.setItem("kb-task-page", name);'
+            ' localStorage.setItem("kb-task-page-current", name); }', self.PAGE)
+        self.page.goto(URL + '/todo', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2600)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(
+                '() => { localStorage.removeItem("kb-task-page");'
+                ' localStorage.removeItem("kb-task-page-current"); }')
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            self.assertEqual(self.page.evaluate(self.EXISTS_JS, self.PAGE), 404)
+        finally:
+            super().tearDown()
+
+    CREATE_JS = TestChineseInput.CREATE_JS
+    PURGE_JS = TestChineseInput.PURGE_JS
+    EXISTS_JS = TestChineseInput.EXISTS_JS
+
+    CONTENT_JS = (
+        'async (name) => {'
+        '  const r = await fetch(window.__KB_BASE__ + "/api/pages/" + name);'
+        '  const j = await r.json(); return j.content || ""; }'
+    )
+
+    ADD_JS = (
+        'async (text) => {'
+        "  const btn = document.querySelector('[data-act=\"addtask\"]');"
+
+        '  if (!btn) return "no-button";'
+        '  btn.click();'
+        '  await new Promise(r => setTimeout(r, 450));'
+        '  const inp = document.getElementById("pick-input");'
+        '  if (!inp) return "no-input";'
+        '  inp.value = text;'
+        '  inp.dispatchEvent(new KeyboardEvent("keydown",'
+        '    {key: "Enter", bubbles: true}));'
+        '  await new Promise(r => setTimeout(r, 1200));'
+        '  return "ok"; }'
+    )
+
+    def test_explicit_p1_is_honoured(self):
+        """输入 `p1 写文档` → 落库的那一行必须以 `p1 ` 开头。"""
+        st = self.page.evaluate(self.ADD_JS, 'p1 写文档')
+        self.assertEqual(st, 'ok', '添加入口不工作: %r' % st)
+        content = self.page.evaluate(self.CONTENT_JS, self.PAGE)
+        lines = [l for l in content.split(chr(10)) if '写文档' in l]
+        self.assertTrue(lines, '新任务没写进任务页: %r' % content)
+        self.assertTrue(lines[-1].startswith('p1 '),
+                        '写了 p1 却落成其它优先级: %r' % lines[-1])
+
+    def test_lowercase_and_bare_digit_priority(self):
+        """`3 修脚本` 与 `P4 打杂` 也要归一到 p3 / p4。"""
+        for text, want in (('3 修脚本', 'p3'), ('P4 打杂', 'p4')):
+            st = self.page.evaluate(self.ADD_JS, text)
+            self.assertEqual(st, 'ok', '添加入口不工作: %r' % st)
+            content = self.page.evaluate(self.CONTENT_JS, self.PAGE)
+            title = text.split(' ', 1)[1]
+            lines = [l for l in content.split(chr(10)) if title in l]
+            self.assertTrue(lines, '任务没写进去: %r' % content)
+            self.assertTrue(lines[-1].startswith(want + ' '),
+                            '%r 应该落成 %s，实际: %r' % (text, want, lines[-1]))
+
+    def test_no_priority_still_defaults_to_p2(self):
+        """没写优先级时仍旧默认 p2（别把默认值一起改坏）。"""
+        st = self.page.evaluate(self.ADD_JS, '随手记一条')
+        self.assertEqual(st, 'ok', '添加入口不工作: %r' % st)
+        content = self.page.evaluate(self.CONTENT_JS, self.PAGE)
+        lines = [l for l in content.split(chr(10)) if '随手记一条' in l]
+        self.assertTrue(lines, '任务没写进去: %r' % content)
+        self.assertTrue(lines[-1].startswith('p2 '),
+                        '默认优先级不是 p2: %r' % lines[-1])
 

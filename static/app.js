@@ -1646,11 +1646,41 @@ function recalcRecurring(t, compDate) {
   return null;
 }
 
+/* quickAddTask 的优先级不再写死 p2。
+ *
+ * 原来第一行是 ``const line = `p2 ${todayStr()} ${text}` `` —— 输入框里写
+ * 「p1 别的活」也会变成 `p2 今天 p1 别的活`，parseTaskLine 只认行首那个
+ * 优先级，于是 p1 变成标题的一部分，任务永远建成 p2。
+ *
+ * 现在允许用户在输入框里带优先级（`p1 标题` / `1 标题` / `P3 标题`），
+ * 带了就用用户的，没带才默认 p2。due:/rec: 也一并交给 parseTaskLine，
+ * 它本来就支持行尾的这两段。 */
+const TASK_PRI_RE = /^\s*(p[1-4]|[1-4])\s*$/i;
+const TASK_PRI_LEAD_RE = /^\s*((?:p[1-4])|[1-4])(?:\s+|$)/i;
+
+function normalizeTaskPri(tok) {
+  const t = String(tok || '').toLowerCase().replace(/^p/, '');
+  const n = parseInt(t, 10);
+  return n >= 1 && n <= 4 ? 'p' + n : 'p2';
+}
+
+/* 把用户在输入框里敲的一行变成真正的任务行。
+ * 返回 { line, pri }，line 一定以 `pN yyyy-mm-dd ` 开头。 */
+function buildTaskLine(text, date) {
+  const raw = String(text || '').trim();
+  const m = TASK_PRI_LEAD_RE.exec(raw);
+  const pri = m ? normalizeTaskPri(m[1]) : 'p2';
+  const body = m ? raw.slice(m[0].length).trim() : raw;
+  return { line: `${pri} ${date} ${body}`.trim(), pri, body };
+}
+
 async function quickAddTask() {
-  const text = await promptText('新任务', '标题（可用 [[页面]] 链接）');
+  const text = await promptText('新任务', '标题，可带优先级：p1 写文档 · 可用 [[页面]] 链接');
   if (!text) return;
+  const built = buildTaskLine(text, todayStr());
+  if (!built.body) { toast('标题不能为空', 'warn'); return; }
   const src = taskPage();
-  const line = `p2 ${todayStr()} ${text}`;
+  const line = built.line;
   try {
     const page = await jfetch(`${API}/pages/${encodeURIComponent(src)}`);
     const content = (page.content.replace(/\s*$/, '') + '\n' + line).replace(/^\n/, '');
@@ -1659,7 +1689,7 @@ async function quickAddTask() {
       body: JSON.stringify({ content }),
     });
     invalidateCache('page:');
-    toast('已添加');
+    toast('已添加 ' + built.pri.toUpperCase() + '：' + built.body);
     showTodo(++navToken);
   } catch (e) { toast('添加失败：' + e.message, 'error'); }
 }
@@ -1682,6 +1712,113 @@ async function showJournal(date, token) {
 
 let cm = null;
 let editorDirty = false;
+
+/* ── 中文输入法在 normal 模式下把按键全吃掉 ─────────────────────
+ *
+ * 用户原话：「如果是中文输入法下敲的字母再回车，是完全没有响应的」。
+ *
+ * 根因：normal 模式下 vim 靠 keydown 拿字符。但中文输入法开着的时候，
+ * 敲字母先被 IME 接走当成组字 —— 浏览器只发 compositionstart /
+ * compositionend，keydown 的 key 是 `Process`、keyCode 229。
+ * CodeMirror 的 vim 插件看到 229 什么都不做，于是 j/k/dd 全失灵；
+ * 更糟的是组字结果还会被 pollContent 写进正文（敲个 dd 却插入 "dd"）。
+ *
+ * 这里做「组字透传」：normal 模式下如果组字结果是纯 ASCII，说明用户
+ * 其实想敲 vim 命令、只是输入法没切 —— 把那段组字从文档里撤掉，
+ * 再把字符原样喂回 vim。
+ *
+ * 两条边界：
+ *   · insert / visual 模式完全不干预 —— 那里组字就是在正经打中文
+ *   · 组字结果是真中文（选了候选字）也不干预 —— 那不是按键
+ * ──────────────────────────────────────────────────────────────────── */
+function installImePassthrough(instance) {
+  const ta = instance.getInputField && instance.getInputField();
+  if (!ta || ta.__kbIme) return;
+  ta.__kbIme = true;
+  let snap = null;
+
+  ta.addEventListener('compositionstart', () => {
+    const v = instance.state.vim;
+    // insert / visual 模式组字是正常输入，不接管
+    if (!v || v.insertMode || v.visualMode) { snap = null; return; }
+    snap = { cursor: instance.getCursor(), len: instance.getValue().length };
+  });
+
+  ta.addEventListener('compositionend', (e) => {
+    if (!snap) return;
+    const saved = snap;
+    snap = null;
+    const data = (e && e.data) || '';
+    const isAscii = data && /^[\x20-\x7e]+$/.test(data);
+
+    /* CodeMirror 在 compositionend 之后才走 pollContent 把组字写进文档
+     * （readFromDOMSoon 里有 80ms 的防抖），所以这一轮必须等它先跑完。
+     * 用 setTimeout(0) 不够稳，直接等两帧 + 一个 100ms 兜底。 */
+    let tries = 0;
+    const restore = () => {
+      tries++;
+      const cur = instance.getValue();
+      /* 只在「文档确实被这段组字撑长了」时回滚，而且只删中间那一段，
+       * 不用 setValue —— setValue 会把撤销历史整条清空，用户之前
+       * 的 dd/u 就全丢了。 */
+      const delta = cur.length - saved.len;
+      if (delta > 0 && delta <= data.length + 2 && cur.length > saved.len) {
+        const from = saved.cursor;
+        const to = instance.posFromIndex(
+          instance.indexFromPos(from) + delta
+        );
+        instance.replaceRange('', from, to);
+        instance.setCursor(from);
+      } else if (tries < 3) {
+        setTimeout(restore, 40);            // pollContent 还没落，再等一轮
+        return;
+      }
+      if (!isAscii) return;                 // 真中文 → 这不是按键
+      for (const ch of data) {
+        if (ch === ' ') { openWhichKey(); continue; }   // space 是 leader
+        try { CodeMirror.Vim.handleKey(instance, ch, 'normal'); } catch (err) {}
+      }
+    };
+    setTimeout(restore, 0);
+  });
+}
+
+/* 把文本写进系统剪贴板。
+ *
+ * 必须在**用户手势的同步栈**里发起：navigator.clipboard 在 keydown 里
+ * 属于 transient activation，异步（比如先 await 别的东西）就会变成
+ * NotAllowedError。所以这里同步 try 一次，失败才退回 execCommand。
+ * 两条路径都失败就什么都不做 —— 复制不进剪贴板不该让编辑器报错。 */
+function kbClipWrite(text) {
+  const s = String(text == null ? '' : text);
+  if (!s) return;
+  let launched = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      launched = true;
+      navigator.clipboard.writeText(s).catch(() => kbClipFallback(s));
+    }
+  } catch (e) { launched = false; }
+  if (!launched) kbClipFallback(s);
+}
+
+/* 老浏览器 / 权限被拒时的退路：临时 textarea + execCommand('copy')。
+ * 已经被废弃但在 http 与受限环境下仍是唯一同步可用的手段。 */
+function kbClipFallback(s) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = s;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-2000px;left:-2000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand && document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (!ok) toast('系统剪贴板写入被拒绝（浏览器权限）', 'warn');
+  } catch (e) {
+    /* 彻底失败就算了，别把 yy 本身弄挂 */
+  }
+}
 
 function initCM() {
   if (cm) return cm;
@@ -1707,6 +1844,33 @@ function initCM() {
       },
     },
   });
+
+  /* ── yy / yiw → 系统剪贴板（T-070） ─────────────────────────────
+   * CodeMirror 的 vim 插件把复制完全封闭在内存寄存器里，一次都不碰
+   * 系统剪贴板。于是 `yy` 之后去别的程序 Ctrl+V 什么都没有 —— 这就是
+   * 「编辑器里的复制传不给系统」。
+   *
+   * 做法：给 registerController.pushText 套一层，operator === 'yank'
+   * 时顺手镜像到系统剪贴板。
+   *
+   * 只镜像 yank（复制），不镜像 delete/change：浏览器里每敲一次 `dd`
+   * 都去覆盖用户的剪贴板是越权，而且 vim 默认（clipboard 未设）也不这么干。
+   *
+   * 注意**必须把原方法的返回值返回出去** —— 同 AGENT.md 陷阱 28：
+   * 包装函数吞掉返回值会让调用方拿到 undefined，静默坏掉。
+   */
+  try {
+    const rc = CodeMirror.Vim.getRegisterController();
+    if (rc && !rc.__kbClipMirror) {
+      rc.__kbClipMirror = true;
+      const orig = rc.pushText;
+      rc.pushText = function (name, operator, text, linewise, blockwise) {
+        const ret = orig.call(this, name, operator, text, linewise, blockwise);
+        if (operator === 'yank') kbClipWrite(text);
+        return ret;
+      };
+    }
+  } catch (e) { console.warn('[vim clipboard]', e); }
 
   // 插件注册的 CodeMirror 扩展（补全等）
   if (window.KB && typeof window.KB.cmExt === 'function') {
@@ -1745,6 +1909,8 @@ function initCM() {
     const c = cm.getCursor();
     STATUS.pos.textContent = 'Ln ' + (c.line + 1) + ', Col ' + (c.ch + 1);
   });
+
+  installImePassthrough(cm);
 
   // nvim-ish Ex 命令（编辑态下的 :xxx）
   /* 第三个参数 prefix 是给「短名」用的：defineEx('delete', fn, 'd') 之后
@@ -4237,6 +4403,27 @@ document.addEventListener('keydown', (e) => {
     return;                                  // 其它键交给命令行（冒泡处处理）
   }
 
+  /* 全角冒号（中文输入法 Shift+; 的产物）在编辑器里等价于 `:`。
+   *
+   * 为什么必须在 capture：CodeMirror 的 keydown 挂在隐藏 textarea 上，
+   * 事件从 document 一路 capture 到 textarea 再冒泡回来；冒泡到 document 时
+   * 会被「输入框里只处理 Esc」那条先 return 掉。ASCII `:` 之所以能用，
+   * 是因为 vim 自己在这个 textarea 上就吃掉了它（打开 .CodeMirror-dialog，
+   * `:w` / `:q!` 都在那边执行）。全角冒号 vim 不认识，所以我们在这里
+   * 补成同一个动作 —— 两种冒号必须落在同一套 ex 界面里。
+   *
+   * 只做「命令入口」这一处归一：insert 模式下全角冒号就是正文标点。 */
+  if (e.key === '\uFF1A' && cm && cm.hasFocus()) {
+    const v = cm.state.vim;
+    if (v && !v.insertMode && !v.visualMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeWhichKey();
+      try { CodeMirror.Vim.handleKey(cm, ':', 'normal'); } catch (err) {}
+      return;
+    }
+  }
+
   /* Ctrl-o / Ctrl-i —— vim 的跳转历史，编辑器里也要能用（对标 nvim 默认键位）。
    * 放在 capture 且不等 leaderOpen，因为这个组合不可能是 vim 的普通动作。 */
   if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'i') && !e.shiftKey) {
@@ -4373,6 +4560,11 @@ document.addEventListener('keydown', (e) => {
       closeAllTransient();
       return;
     }
+    /* 注：编辑器里的全角冒号不在这里处理 —— 这个 handler 是**冒泡**阶段，
+     * 而 CodeMirror 的 keydown 挂在隐藏 textarea 上，上面的
+     * 「输入框里只处理 Esc」那条已经先 return 了，根本到不了这里
+     * （ASCII 的 `:` 能开 ex 对话框，是靠 vim 自己在 textarea 上吃到它）。
+     * 全角冒号走 capture 阶段那条专用分支，见「Leader 唯一出口」上方。 */
     if (!insert && e.key === ':') {
       e.preventDefault(); closeWhichKey(); openCmdline(':'); return;
     }
@@ -4388,8 +4580,11 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') return; // 无编辑器
 
   if (e.key === 'Escape') { closeAllTransient(); return; }
-  if (e.key === ':') { e.preventDefault(); openCmdline(':'); return; }
-  if (e.key === '/') { e.preventDefault(); openCmdline('/'); return; }
+  /* 同样是中文输入法的全角标点归一（`: ` 与 `／`）。中文用户按 Shift+;
+   * 得到的是 `：`，按 `/` 在全角标点模式下得到 `／`，两个都应该能开
+   * 命令行。 */
+  if (e.key === ':' || e.key === '\uFF1A') { e.preventDefault(); openCmdline(':'); return; }
+  if (e.key === '/' || e.key === '\uFF0F') { e.preventDefault(); openCmdline('/'); return; }
 
   /* m{a-z} 打标记 / `{a-z} 跳标记 —— vim 的 mark（两个键序列，前缀状态机）。
    *
