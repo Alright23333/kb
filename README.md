@@ -253,13 +253,23 @@ PROPERTY_RE = re.compile(r"^\s*-?\s*([^\s:：]+)::\s*(.*)$")
   写成 ASCII-only 后两边一致，且 CJK 标签名（`#采购`）照常工作
 - **URL 先剥离**：`https://x.com/#grid12` 的 `#grid12` 是 URL 片段，不是标签
 - 标签字符集 `[\w-]`（含汉字 + 连字符），尾部连字符剥离；全角/半角标点终止标签
-- **跳过代码块（``` 围栏）与行内代码**——代码里的 `#注释`、`#include` 不登记
+- **三个信号都跳过代码**（`#tag` / `[[link]]` / `key:: value` 一律）——2026-11-27
+  之前只有标签过 `CODE_RE`，链接和属性是裸的，refs 表里因此躺着 21 条来自代码块的
+  假链接（`[[tool.uv.index]]` 是 pyproject 的 TOML 表头、`[[:space:]]` 是 grep 的字符类）
+- **代码的三种形态都剥**：` ``` ` / `~~~` 围栏、行内反引号、**4 空格缩进块**
+  （判据：4+ 空格 + 前一行是空行 + 缩进后不是列表子弹/引用标记；用整行置空而非删行，
+  行号不变）
+- **tab 缩进不算代码块**——真实页面是 Logseq 大纲，`\t\t- #深夜写文`、`\t- [[兵推]]`
+  是正文。以 markdown-it 为 oracle 全库比对过：tab 缩进会被它判成 `code_block`
+  （`虚拟主播` 页 L2-L23 整段），一并剥掉会误删 20 个真链接
 - `##` 标题、org 标记（`#+BEGIN_...`）不误判
 
 > 前端 `TAG_TRIGGER_RE` 必须与后端同步：
 > `/(^|[^#0-9A-Za-z_])#([\p{L}\p{N}_-]*)$/u`
 >
-> 改任何一侧都要跑 `python -m unittest discover -s tests`（32 例）。
+> 改任何一侧都要跑 `python -m unittest discover -s tests`（37 + 7 例）；
+> **parser 改了必须重建索引**：`python scripts/reindex.py --dry-run` 看差多少，
+> 再去掉 `--dry-run` 实际跑（`refs` / `properties` 是派生的，不重建就会漂移）。
 
 大小写去重：`casefold()` 字典归并，防止 `[[Foo]]` + `[[foo]]` 触发 UNIQUE 约束。
 
