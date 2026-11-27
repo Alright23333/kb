@@ -515,11 +515,6 @@ class TestOffline(Base):
         finally:
             self.page.context.set_offline(False)
 
-
-if __name__ == '__main__':
-    unittest.main(verbosity=2)
-
-
 # ══════════════════════════════════════════════════════════
 # 9. 路由表 —— 部署前缀 / 深链接 / vim text object
 #
@@ -2978,3 +2973,5 @@ class TestTodoPageJumpToEdit(Base):
                          '缓冲区不是任务页原文: %r' % (st['value'],))
 
 
+if __name__ == '__main__':
+    unittest.main(verbosity=2)
