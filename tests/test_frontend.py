@@ -2911,3 +2911,70 @@ class TestQuickAddTaskPriority(Base):
         self.assertTrue(lines[-1].startswith('p2 '),
                         '默认优先级不是 p2: %r' % lines[-1])
 
+class TestTodoPageJumpToEdit(Base):
+    """任务页上的「编辑任务页」按钮 —— KB 页 BUG 段原话：
+    「要在任务那个页面加一个跳转到编辑的按钮」。
+
+    任务页本质就是一个普通页面（每行一条任务语法），批量改（调优先级、
+    补 due/rec、删旧任务）只能进编辑器。原来要从侧边栏找到那个页面再点
+    编辑，路径太长。
+    """
+
+    PAGE = '__e2e-todoedit-scratch'
+    BODY = ('p1 2026-01-01 高优先级' + chr(10) +
+            'p2 2026-01-01 普通任务' + chr(10))
+
+    def setUp(self):
+        super().setUp()
+        self.page.goto(URL + '/', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(900)
+        self.page.evaluate(self.PURGE_JS, self.PAGE)
+        self.page.evaluate(self.CREATE_JS, [self.PAGE, self.BODY])
+        self.page.evaluate(
+            '(name) => { localStorage.setItem("kb-task-page", name);'
+            ' localStorage.setItem("kb-task-page-current", name); }', self.PAGE)
+        self.page.goto(URL + '/todo', wait_until='domcontentloaded')
+        self.page.wait_for_timeout(2600)
+
+    def tearDown(self):
+        try:
+            self.page.goto(URL + '/', wait_until='domcontentloaded')
+            self.page.wait_for_timeout(500)
+            self.page.evaluate(
+                '() => { localStorage.removeItem("kb-task-page");'
+                ' localStorage.removeItem("kb-task-page-current"); }')
+            self.page.evaluate(self.PURGE_JS, self.PAGE)
+            self.assertEqual(self.page.evaluate(self.EXISTS_JS, self.PAGE), 404)
+        finally:
+            super().tearDown()
+
+    CREATE_JS = TestChineseInput.CREATE_JS
+    PURGE_JS = TestChineseInput.PURGE_JS
+    EXISTS_JS = TestChineseInput.EXISTS_JS
+
+    STATE_JS = (
+        '() => {'
+        '  const w = document.querySelector(".CodeMirror");'
+        '  return {path: location.pathname,'
+        '          editing: !!(window.state && window.state.editing),'
+        '          name: document.getElementById("ed-name")'
+        '                  ? document.getElementById("ed-name").textContent : null,'
+        '          value: w && w.CodeMirror ? w.CodeMirror.getValue() : null}; }'
+    )
+
+    def test_button_opens_editor_with_task_page_content(self):
+        """点「编辑任务页」→ 进 /edit/<任务页>，且缓冲区就是任务页原文。"""
+        base = self.base_path()
+        btn = self.page.locator('[data-act="edit-taskpage"]')
+        self.assertEqual(btn.count(), 1, '任务页上没有「编辑任务页」按钮')
+        btn.click()
+        self.page.wait_for_timeout(2500)
+        st = self.page.evaluate(self.STATE_JS)
+        self.assertEqual(st['path'], base + '/edit/' + self.PAGE,
+                         '没进到这个任务页的编辑器: %r' % (st,))
+        self.assertTrue(st['editing'], '没进编辑态')
+        self.assertEqual(st['name'], self.PAGE, '编辑器标题不是任务页名')
+        self.assertEqual(st['value'], self.BODY,
+                         '缓冲区不是任务页原文: %r' % (st['value'],))
+
+

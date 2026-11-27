@@ -1496,6 +1496,7 @@ async function showTodo(token) {
         <span class="count" id="todo-count">…</span>
         <span class="spacer"></span>
         <button class="btn btn-sm" data-act="addtask">+ 新任务</button>
+        <button class="btn btn-sm" data-act="edit-taskpage" title="在编辑器里打开当前任务页">编辑任务页</button>
       </div>
       <div id="todo-body"><div class="empty">加载中…</div></div>
     </div>`);
@@ -1507,6 +1508,17 @@ async function showTodo(token) {
   });
   const addBtn = document.querySelector('[data-act="addtask"]');
   if (addBtn) addBtn.addEventListener('click', () => quickAddTask());
+  /* 「跳到编辑」—— 任务页本质是一个普通页面（每行一条任务语法），
+   * 想批量改（改优先级、加 due/rec、删旧任务）只能进编辑器。
+   * 原来要从侧边栏找到那个页面再点编辑，路径太长。 */
+  const edTaskBtn = document.querySelector('[data-act="edit-taskpage"]');
+  if (edTaskBtn) edTaskBtn.addEventListener('click', () => {
+    /* 必须走 navigate 而不是直接 openEditor：直接调只会切换视图，
+     * URL 还停在 /todo（前进/后退与 Ctrl-o 全乱套）。navigate 同时负责
+     * pushState + jumplist + 未保存改动的守卫（任务页本身没有编辑器，
+     * 所以这里没有脏改动，guardDirtyNav 会直接放行）。 */
+    navigate('edit', taskPage());
+  });
 
   try {
     const page = await getPage(taskPage());
