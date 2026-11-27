@@ -104,6 +104,56 @@ class TestForeignKeys(unittest.TestCase):
         )
 
 
+class TestIndentedCodeRefs(unittest.TestCase):
+    """Indented code blocks must not reach refs / properties.
+
+    The parser change (2026-11-27) blanks 4-space indented blocks before any
+    signal is extracted. This checks the *index* consequence, which is what
+    the sidebar and backlink panel read: a page whose body renders
+    `#fxdock` as <pre> must not list it as a tag.
+    """
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        _seed(self.conn)
+        self.conn.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_indented_block_not_indexed(self):
+        content = (
+            "# 正文 #真标签 和 [[真页面]]\n"
+            "\n"
+            "    #fxdock { position: absolute; }\n"
+            "    [[tool.uv.index]]\n"
+            "    collapsed:: true\n"
+        )
+        pid = _add_page(self.conn, "P", content)
+        _sync_refs(self.conn, pid, content)
+        tags = [r[0] for r in self.conn.execute(
+            "SELECT target_name FROM refs WHERE source_id=? AND kind='tag'", (pid,))]
+        links = [r[0] for r in self.conn.execute(
+            "SELECT target_name FROM refs WHERE source_id=? AND kind='link'", (pid,))]
+        self.assertEqual(sorted(tags), ["真标签"])
+        self.assertEqual(sorted(links), ["真页面"])
+        # _sync_refs only mirrors tags/links; properties are checked via parse
+        self.assertNotIn("fxdock", tags)
+        self.assertNotIn("tool.uv.index", links)
+
+    def test_tab_outline_still_indexed(self):
+        # Logseq bullets use tabs; those tags/links are real content.
+        content = "\t- #深夜写文 睡不着\n\t- [[兵推]]计划"
+        pid = _add_page(self.conn, "P", content)
+        _sync_refs(self.conn, pid, content)
+        tags = [r[0] for r in self.conn.execute(
+            "SELECT target_name FROM refs WHERE source_id=? AND kind='tag'", (pid,))]
+        links = [r[0] for r in self.conn.execute(
+            "SELECT target_name FROM refs WHERE source_id=? AND kind='link'", (pid,))]
+        self.assertEqual(sorted(tags), ["深夜写文"])
+        self.assertEqual(sorted(links), ["兵推"])
+
+
 class TestRename(unittest.TestCase):
     """Renaming a page must only rewrite link refs, never tag refs."""
 

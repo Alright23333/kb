@@ -55,11 +55,15 @@ cd /home/user/services/kb-docker
 #   - /home/user/pi-working/kb-ui/routers:ro
 #   - /home/user/pi-working/kb-ui/static:ro
 #   - /home/user/pi-working/kb-ui/templates:ro
+#   - /home/user/pi-working/kb-ui/parse.py:ro      （2026-11-27 追加，数据层）
+#   - /home/user/pi-working/kb-ui/search.py:ro
+#   - /home/user/pi-working/kb-ui/database.py:ro
+#   - /home/user/pi-working/kb-ui/timeutil.py:ro
 
 docker compose up -d --no-build kb
 ```
 
-**回退旧 UI**：把 override 的四个挂载去掉（或指回 `./main.py` 等仓库路径），
+**回退旧 UI**：把 override 的挂载去掉（或指回 `./main.py` 等仓库路径），
 `docker compose up -d --no-build kb` 即可 —— 旧模板在 `main` 分支，
 镜像里本来就有一份，不需要 `git checkout` 任何东西。
 
@@ -81,8 +85,17 @@ docker stop kb-ui-test              # 停掉
 |---|---|
 | `static/**`、`templates/**` | 刷新页面（`sw.js` 会 network-first；若外壳变了要先 bump `VERSION`）|
 | `main.py`、`routers/**` | `docker restart kb` |
+| **`parse.py`、`search.py`、`database.py`、`timeutil.py`** | `docker restart kb` + `docker restart kb-mcp`（两个容器都挂）|
 | `mcp_server.py`、`mcp_http.py` | `docker restart kb-mcp`（`:ro` 挂载，不用重建镜像）|
-| `Dockerfile`、`requirements.txt` | 真需要重建镜像（很少见）|
+| `Dockerfile`、`requirements.txt`、新增文件 | 真需要重建镜像（很少见）|
+
+> **2026-11-27 补挂 4 个数据层文件**：`parse.py` / `search.py` / `database.py` /
+> `timeutil.py` 之前走的是镜像副本。改了 `parse.py`（缩进代码块不再当标签）
+> 之后容器里跑的仍是旧解析器，保存页面会用旧规则重建 refs —— 假标签会在
+> 下一次编辑后原样回来。这四个文件与 `main` 分支是同一 blob（零差异），
+> 挂进来不会引入新行为。`kb-mcp` 也要挂，否则 MCP 写入路径的 refs 与
+> REST 不一致。改完 `docker compose up -d kb kb-mcp`（会 Recreate，因为
+> volumes 变了）。
 
 ### 容器↔代码对应关系（`git worktree list` 一眼看清）
 

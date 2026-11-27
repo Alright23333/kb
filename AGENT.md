@@ -47,10 +47,14 @@ KB 是一个**人能用、AI 也能用**的双链笔记系统。
 
 - 纯函数，无 I/O，可被 API 层和导入器共用
 - 返回 `{"links": set, "tags": set, "properties": dict}`
-- 标签提取：先剥离代码块（``` / ~~~ 围栏）与行内代码，再剥离 `[[..]]`；`TAG_RE` 要求 `#` 前是词边界，字符集限定 `[\w-]`（2026-10-24 收紧，防止全角标点/URL 锚点/代码内容混入标签）
+- **三个信号都剥代码**（2026-11-27 改）：`_strip_code()` = 缩进代码块 → 围栏/行内反引号，`extract_tags` / `extract_links` / `extract_properties` 共用。改动前只有 tags 过 `CODE_RE`，链接和属性完全不过 —— refs 表里躺着 21 条假链接（`[[tool.uv.index]]` 是 pyproject 的 TOML 表头）、2 条假属性
+- **缩进代码块判据**（`INDENT_CODE_LINE_RE`）：4+ **空格**缩进 + 前一行是空行 + 缩进后不是列表子弹/引用标记。**刻意不碰 tab**：真实页面是 Logseq 大纲，`\t\t- #深夜写文`、`\t- [[兵推]]` 是正文；以 markdown-it 为 oracle 全库比对过，tab 缩进会被它判成 code_block（`虚拟主播` 页 L2-L23 整段），一并剥掉会误删 20 个真链接
+- 缩进块用「整行置空」而非删行，**行号不变**（`find_link_lines` 等按行号回显的调用方不受影响）
+- 标签字符集：`TAG_RE` 要求 `#` 前是词边界，字符集限定 `[\w-]`（2026-10-24 收紧，防止全角标点/URL 锚点/代码内容混入标签）
 - `find_link_lines(content, target)`：反链预览取引用原文行（大小写不敏感、含别名），api.py 与 mcp_server.py 共用
 - 前端 `TAG_TRIGGER_RE`（`#` 补全触发）与后端 `TAG_RE` 规则保持一致，改一处要同步另一处
-- 正则不要动，改了要跑解析单测
+- 正则不要动，改了要跑解析单测（`python3 tests/test_parse.py`，37 例）
+- **parser 规则一变，`refs` 就是漂移的派生索引** —— 旧标签会留到页面重新保存为止。改完必须跑 `python3 scripts/reindex.py --dry-run` 看差多少，再 `--db <path>` 实际重建（生产库在 `~/services/kb-docker/data/kb.db`）
 
 ### `routers/api.py` — REST API
 
